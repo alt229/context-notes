@@ -1,12 +1,24 @@
 ---
-description: Write a film's dialogue notes with Claude Code (your subscription, no API credits), build the .ass and check it - /notes "<video>" [--film-language de --original-subs <file>] [--limit 30:00]
-argument-hint: "<video>" [--film-language LANG] [--original-subs SRT] [--title "..."] [--limit TIME]
+description: Write a film's dialogue notes with Claude Code (your subscription, no API credits), build the .ass and check it - /notes "<video or folder>" [--film-language de --original-subs <file>] [--limit 30:00]
+argument-hint: "<video or folder>" [--film-language LANG] [--original-subs SRT] [--title "..."] [--limit TIME]
 disable-model-invocation: true
 ---
 
-You coordinate writing context notes for one film on Erin's subscription. The arguments are: $ARGUMENTS
+You coordinate writing context notes for one film, or every video in a folder, on Erin's subscription. The arguments
+are: $ARGUMENTS
 
 Read `CLAUDE.md` first; its rules bind you. Keep your messages short.
+
+**A folder.** If the argument is a folder, list its videos with
+`python3 context_notes.py "<folder>" --recursive --status`, which includes subfolders.
+- Skip every video that already has a `<stem>.notes.ass` beside it.
+- Tell Erin which ones are to do, and roughly 2 Opus runs per 25-minute episode.
+- Then do steps 1 to 6 for each one, one video at a time and in order. Ask questions as they come up.
+- Leave out step 7 per video. At the end, offer the frame pass once for the whole folder with
+  `python3 context_notes.py "<folder>" --recursive --model claude-opus-5-5 --effort high`, which asks before each video.
+- If her usage limit stops the run, rerun `/notes` on the same folder. Finished videos are skipped, and finished
+  parts are kept.
+- Finish with one line per video, then the next step.
 
 1. **Work out the files.** The video comes from the arguments. Find the subtitles the notes will be placed on with
    `python3 context_notes.py "<video>" --status`. For a film not in English watched with English subtitles, also
