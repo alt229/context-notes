@@ -1,0 +1,1 @@
+python3 chat_notes.py collect "$V" "$EN" "$D/Das.Boot.1981.RESTORED.GERMAN.1080p.chat-replies.txt" --film-language de --original-subs "$DE" --title "Das Boot (1981, director's cut)"

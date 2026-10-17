@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Secrets: never commit an API key
+api-key
+*.key
+.env
+
+# Copyrighted media and things derived from it. Do not commit these.
+*.mp4
+*.m4v
+*.mkv
+*.avi
+*.mov
+*.webm
+*.srt
+*.ass
+*.vtt
+*.transcript.txt
+*.aligned.srt
+*.embedded.srt
+* analysis/
+*.partial.json
+*.bak
+*.refine-report.txt
+*.chat-upload.txt
+*.chat-replies.txt
+* chat-replies/
+*.transcribed.srt
+
+notes-*.json
+notes-*.json.*
+
+# ...except the invented example scene that ships with the project
+!examples/help-desk/
+!examples/help-desk/*
+
+# Your own test media (copyrighted; keep it out of git)
+sample-media/

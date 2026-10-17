@@ -1,0 +1,69 @@
+{
+ "title": "The Help Desk - S01E01 (example notes)",
+ "audience": "Fluent in English, didn't grow up in the UK",
+ "scope": "An invented sample scene, written for this repository. Dialogue notes attach to quoted lines; visual notes carry a video time.",
+ "notes": [
+  {
+   "at": "00:00:02,000",
+   "category": "About these notes",
+   "duration": 6,
+   "kind": "speech",
+   "text": "Sample notes for an invented scene. Each note appears just after its line. “(less sure)” means: check me."
+  },
+  {
+   "match": "taking the mickey",
+   "category": "British English",
+   "kind": "speech",
+   "text": "To “take the mickey” (or “take the mick”) is to tease or make fun of someone. Mildly cheeky, never harsh."
+  },
+  {
+   "match": "Bit of both",
+   "category": "Delivery",
+   "kind": "speech",
+   "text": "The deadpan is the joke: Pip admits the “fix” is half genuine, half a wind-up. Understatement is a staple of British comedy."
+  },
+  {
+   "match": "custard cream",
+   "category": "Cultural reference",
+   "kind": "speech",
+   "text": "A custard cream is a classic British biscuit (a cookie, to Americans): two vanilla biscuits sandwiching a sweet cream filling."
+  },
+  {
+   "match": "priority one incident",
+   "category": "IT in-joke",
+   "kind": "speech",
+   "text": "In IT support, “P1” is the highest urgency, normally reserved for outages. Treating missing biscuits as one is the gag."
+  },
+  {
+   "match": "I'm gutted",
+   "category": "British English",
+   "kind": "speech",
+   "text": "“Gutted” means bitterly disappointed. It's casual and often exaggerated for comic effect, as here."
+  },
+  {
+   "match": "a fiver",
+   "category": "British English",
+   "kind": "speech",
+   "text": "A fiver is a five-pound note; a tenner is ten pounds. Both are everyday slang."
+  },
+  {
+   "match": "bacon butty",
+   "category": "British English",
+   "kind": "speech",
+   "confidence": "medium",
+   "text": "A “butty” is a sandwich, mostly in the North of England. A bacon butty is a bread roll with bacon, often with ketchup or brown sauce."
+  },
+  {
+   "match": "Pop the kettle on",
+   "category": "Cultural reference",
+   "kind": "speech",
+   "text": "Putting the kettle on for tea is the British answer to nearly every situation, good or bad."
+  },
+  {
+   "at_video": "00:00:12,000",
+   "category": "Visual gag",
+   "kind": "visual",
+   "text": "Notes about what is on screen carry a video time instead of a quote. This is where one would describe a prop or a sight gag."
+  }
+ ]
+}

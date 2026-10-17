@@ -1,0 +1,16 @@
+# Tool configuration only. context-notes is a set of scripts you run directly (see README),
+# not an installable package.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 130
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"make_ass.py" = ["E501"]      # the ASS style header contains one very long line
