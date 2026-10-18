@@ -405,7 +405,8 @@ def overlap_report(placed):
 
 
 def plex_copy(out_path, language="English"):
-    """Copy '<video>.notes.ass' to '<video>.en.ass'. Plex labels a subtitle file by the language code before the
+    """UNFINISHED: doesn't work in Plex yet (see CLAUDE.md, Known pitfalls).
+    Copy '<video>.notes.ass' to '<video>.en.ass'. Plex labels a subtitle file by the language code before the
     extension ('English (ASS)'), and shows '.notes.ass' as 'Unknown'. VLC keeps using the .notes.ass. A file of that
     name that this script didn't write is left alone. Returns the copy's path, or None."""
     out_path = Path(out_path)
