@@ -160,6 +160,8 @@ The corrected copy is `<name>.aligned.srt`; your original is never changed, and 
 ```bash
 make_ass.py episode.srt                        # first run: creates a blank notes-<name>.json to fill in
 make_ass.py episode.srt notes.json --video episode.mp4     # -> episode.notes.ass
+                                                            #    and episode.en.ass, the same file named so Plex lists it as
+                                                            #    'English (ASS)' instead of 'Unknown' (--no-plex-copy: skip)
 make_ass.py episode.srt notes.json --layout stack          # notes in one column instead of split left/right
 make_ass.py episode.srt notes.json --report                # how crowded each layout would be
 make_ass.py episode.srt --generate [--title ... --audience ... --notes-language ...]
