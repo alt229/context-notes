@@ -6,8 +6,6 @@
       "Bash(python3 chat_notes.py prepare *)",
       "Bash(python3 chat_notes.py collect *)",
       "Bash(python3 dedupe.py *)",
-      "Bash(python3 /Users/alt229/.alt229/Claude-Agents/context-notes/dedupe.py *)",
-      "Bash(python3 /Users/alt229/.alt229/Claude-Agents/context-notes/context_notes.py * --status)",
       "Bash(python3 -m pytest*)",
       "Bash(ruff check*)"
     ],
