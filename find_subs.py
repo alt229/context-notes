@@ -73,6 +73,18 @@ def title_key(name):
     return re.sub(r"\s+", " ", make_ass.fold(s)).strip()
 
 
+def show_key(video):
+    """The title to search by. Episodes named only 'S02E03 Moss and the German.mp4' take the show's name from the
+    folders above, skipping 'Season 2' and the like."""
+    key = title_key(video.name)
+    for folder in [video.parent, *video.parent.parents][:3]:
+        if key:
+            break
+        if not re.fullmatch(r"(season|series|staffel|saison|temporada|s)\s*\d+|disc\s*\d+", folder.name.strip(), re.I):
+            key = title_key(folder.name)
+    return key
+
+
 def episode_code(name):
     m = re.search(r"(?<![0-9a-z])s?(\d{1,2})[ex](\d{2})(?![0-9])", name.lower())
     return (int(m.group(1)), int(m.group(2))) if m else None
@@ -358,7 +370,7 @@ def search_online(video, lang, cfg, api=OS_API, ask=None):
     video = Path(video)
     client = OpenSubtitles(cfg, api)
     h = movie_hash(video)
-    key = title_key(video.name)
+    key = show_key(video)
     m = re.search(r"\b(19|20)\d{2}$", key)
     year = m.group(0) if m else None
     query = key[:m.start()].strip() if m else key

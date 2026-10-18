@@ -112,6 +112,21 @@ def test_cli_builds_with_notes_and_names_output_after_video(tmp_path, home):
     assert "Dialogue: 0,0:00:02.50," in ass                                          # video_offset from the notes file
 
 
+def test_cli_writes_a_plex_copy_but_not_over_someone_elses_file(tmp_path, home):
+    srt = make_srt(tmp_path / "ep.srt", n=3)
+    notes = tmp_path / "notes.json"
+    notes.write_text(json.dumps({"notes": [{"cue": 1, "text": "hi"}]}))
+    r = run_cli("make_ass.py", srt, notes, "--video", "Ep.mp4", cwd=tmp_path, home_dir=home)
+    assert r.returncode == 0, r.stderr
+    assert (tmp_path / "Ep.en.ass").read_bytes() == (tmp_path / "Ep.notes.ass").read_bytes()
+    theirs = tmp_path / "Other.en.ass"
+    theirs.write_text("[Script Info]\nTitle: real subtitles\n")
+    r = run_cli("make_ass.py", srt, notes, "--video", "Other.mp4", cwd=tmp_path, home_dir=home)
+    assert "isn't one of ours" in r.stdout and theirs.read_text().endswith("real subtitles\n")
+    run_cli("make_ass.py", srt, notes, "--video", "Third.mp4", "--no-plex-copy", cwd=tmp_path, home_dir=home)
+    assert not (tmp_path / "Third.en.ass").exists()
+
+
 def test_cli_generate_refuses_to_overwrite_existing_notes(tmp_path, home):
     srt = make_srt(tmp_path / "ep.srt", n=3)
     notes = tmp_path / "notes.json"

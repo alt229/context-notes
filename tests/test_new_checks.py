@@ -273,6 +273,20 @@ def test_opensubtitles_prefers_the_file_made_for_this_release(tmp_path):
     api.server.shutdown()
 
 
+def test_an_episode_named_by_code_searches_by_the_show_folder(tmp_path):
+    srt_text = make_srt(tmp_path / "x.srt", n=5).read_text()
+    api = FakeOpenSubtitles(srt_text, hash_match=False)
+    folder = tmp_path / "IT Crowd" / "Season 2"
+    folder.mkdir(parents=True)
+    video = folder / "S02E03 Moss and the German.mp4"
+    video.write_bytes(b"\1" * 200000)
+    cfg = {"api_key": "K", "username": "u", "password": "p"}
+    find_subs.search_online(video, "en", cfg, api=api.url)
+    searches = [c[1] for c in api.calls if c[0] == "GET" and "/subtitles" in c[1]]
+    assert any("query=it+crowd" in s and "season_number=2" in s and "episode_number=3" in s for s in searches)
+    api.server.shutdown()
+
+
 def test_a_shared_subs_folder_only_gives_a_film_its_own_subtitles(tmp_path):
     for name in ("Amelie (2001).mkv", "Das Boot (1981).mkv"):
         (tmp_path / name).write_bytes(b"\0" * 1000)

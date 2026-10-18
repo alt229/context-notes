@@ -66,6 +66,9 @@ Read `README.md` for the full command reference. This file holds what we've lear
 - `bench/` runs store absolute paths in `cell.json`. Rewrite them if a run folder moves.
 - Pre-existing lint warnings in `bench/` and `chat_notes.py` are known. Don't mix fixes for them into unrelated
   changes.
+- **Unfinished: the Plex copy.** `make_ass.py` also writes `<video>.en.ass` (`plex_copy`) so Plex would label
+  the notes "English (ASS)" instead of "Unknown". It looked right on S02E01–02, but Erin reports it doesn't work
+  on IT Crowd Seasons 2–3 (2026-10-17). Not yet looked into: ask her what Plex shows before changing it.
 - Notes attach to lines by quoting them (`match`). Re-timing a subtitle file keeps every line, so notes stay
   attached. Never renumber or drop lines in a file that has notes anchored by `cue`.
 
