@@ -564,9 +564,10 @@ def whisper_model(film_language=None, model=None):
     return "base.en" if lang == "en" else "small"
 
 
-def transcript_cache(folder, model, film_language=None, limit=None):
+def transcript_cache(folder, model, film_language=None, limit=None, task="transcribe"):
     lang = languages.code(film_language) or "en"
-    return Path(folder) / f"transcript-{model}{'' if lang == 'en' else '-' + lang}{limit_tag(limit)}.jsonl"
+    kind = "-translated" if task == "translate" else ""
+    return Path(folder) / f"transcript-{model}{'' if lang == 'en' else '-' + lang}{kind}{limit_tag(limit)}.jsonl"
 
 
 def aligned_path(srt, limit=None):
@@ -576,7 +577,8 @@ def aligned_path(srt, limit=None):
     return srt.with_name(f"{srt.stem}.aligned{'.first' + str(int(round(limit))) + 's' if limit else ''}.srt")
 
 
-def transcribe(video, astream, model_name, cache, language="en", limit=None):
+def transcribe(video, astream, model_name, cache, language="en", limit=None, task="transcribe"):
+    """Speech to text with timings. task="translate" gives English text for speech in another language."""
     if cache.exists():
         print(f"  using cached transcript {cache.name}")
         return [json.loads(line) for line in cache.open()]
@@ -588,8 +590,8 @@ def transcribe(video, astream, model_name, cache, language="en", limit=None):
     audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768
     model = fw.WhisperModel(model_name, device="cpu", compute_type="int8")
     t0, total = time.time(), len(audio) / SR
-    segs, _ = model.transcribe(audio, language=languages.code(language) or "en", beam_size=1, word_timestamps=True,
-                               vad_filter=True, condition_on_previous_text=False)
+    segs, _ = model.transcribe(audio, language=languages.code(language) or "en", task=task, beam_size=1,
+                               word_timestamps=True, vad_filter=True, condition_on_previous_text=False)
     out = []
     with cache.open("w") as f:
         for s in segs:
@@ -809,6 +811,10 @@ def main():
                     help="contact-sheet frames: keyframes (fast, default), dense (4/s, slow), none")
     ap.add_argument("--align", action="store_true",
                     help="re-time subtitles to this video with speech recognition (needs --video)")
+    ap.add_argument("--translate-speech", action="store_true",
+                    help="with --align: have speech recognition translate the film's speech into English, and time "
+                         "the English subtitles to that. For English subtitles on a film in another language, when "
+                         "the other-language subtitles don't match the speech")
     ap.add_argument("--model", default=None,
                     help="speech model for --align: tiny.en (fastest), base.en (default), small.en (best). "
                          "For other languages: base, small (default), medium")
@@ -827,6 +833,10 @@ def main():
         sys.exit("Use --shift or --align, not both (--align already fixes the timing, including constant offsets).")
     if a.shift == "auto" and not a.video:
         sys.exit("--shift auto measures the offset against the video: add  --video <file>  (or give a number of seconds)")
+    if a.translate_speech and not a.align:
+        sys.exit("--translate-speech goes with --align (and --video): add --align --video <file>.")
+    if a.translate_speech and not languages.code(a.film_language):
+        sys.exit("--translate-speech needs the film's language: add --film-language <code>, e.g. ko.")
 
     src = Path(a.srt)
     if not src.exists():
@@ -914,10 +924,11 @@ def main():
     work_cues = cues
     if a.align:
         model = whisper_model(a.film_language, a.model)
+        task = "translate" if a.translate_speech else "transcribe"
         print(f"Aligning subtitles to this video with speech recognition ({model}, "
-              f"{languages.name(a.film_language or 'en')})...")
-        asr = transcribe(video, astream, model, transcript_cache(out, model, a.film_language, limit),
-                         language=a.film_language or "en", limit=limit)
+              f"{languages.name(a.film_language or 'en')}{', translated to English' if a.translate_speech else ''})...")
+        asr = transcribe(video, astream, model, transcript_cache(out, model, a.film_language, limit, task),
+                         language=a.film_language or "en", limit=limit, task=task)
         assigned, segments, stats = align(cues, asr)
         aligned = aligned_path(srt, limit)
         write_srt(cues, assigned, aligned)
