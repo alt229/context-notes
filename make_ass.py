@@ -606,6 +606,9 @@ def main():
     g.add_argument("--title", help="show/film and episode, e.g. 'The IT Crowd - S01E02 - Calamity Jen' "
                                    "(helps Claude get the facts right; default: the subtitle file name)")
     g.add_argument("--audience", help="who the notes are for (default: fluent in English, didn't grow up in the UK)")
+    g.add_argument("--year", help="release year, e.g. 1974 (films more than 40 years old get extra attention to "
+                                  "their words, people, places and period). Default: read from the title, the file's "
+                                  "tags, the file name or the folder name")
     g.add_argument("--notes-language", default="English", help="language to write the notes in (default: English)")
     g.add_argument("--film-language", metavar="LANG",
                    help="language spoken in the film or show, e.g. fr, de, es (default: English). Changes what Claude "
@@ -664,6 +667,7 @@ def main():
         if a.max_tokens:
             kw["max_tokens"] = a.max_tokens
         generate_notes.generate(a.srt, notes_path, audience=a.audience, title=a.title,
+                                year=generate_notes.resolve_year(a.year, a.video or a.srt, a.title),
                                 language=a.notes_language, assume_yes=a.yes, key_file=a.api_key_file,
                                 film_language=a.film_language, original_srt=a.original_subs, limit=a.limit,
                                 video_offset=a.offset, **kw)
@@ -693,7 +697,7 @@ def main():
                             frames=a.frames, ass_path=out, audience=a.audience, title=a.title, language=a.notes_language,
                             assume_yes=a.yes, key_file=a.api_key_file, assume_synced=a.assume_synced,
                             film_language=a.film_language, original_srt=a.original_subs, limit=a.limit,
-                            **rkw)
+                            year=a.year, **rkw)
     offset = a.offset
     spec = json.loads(read_text(a.notes))
     if offset is None:

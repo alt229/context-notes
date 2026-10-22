@@ -48,10 +48,11 @@ def setup(a, say=print):
 
 def prepare(a):
     cues, situation, extra, audience, limit = setup(a)
+    year = gn.resolve_year(a.year, a.video, a.title)
     foreign = situation is not None
     title = a.title or Path(a.video).stem
     system = gn.SYSTEM.format(
-        audience=audience, language=a.notes_language,
+        audience=audience, language=a.notes_language, era_section=gn.era_section(year),
         cats=", ".join(gn.FOREIGN_CATEGORIES if foreign else gn.CATEGORIES),
         language_section=(gn.language_section(a.film_language, situation).replace("{language}", a.notes_language)
                           if foreign else ""),
@@ -196,6 +197,7 @@ def collect(a):
              "text": f"Pre-alpha context notes written by Claude ({a.model_label}) for this viewer: "
                      f"{audience.rstrip('.')}. Each note appears just after its line. “(less sure)” means: check me."
                      + (f" These notes cover only the first {make_ass.fmt_limit(limit)}." if limit else "")}
+    year = gn.resolve_year(a.year, video, a.title)
     spec = {"title": f"{a.title or video.stem} (context notes)", "audience": audience,
             "scope": "Dialogue notes written from the subtitles only (no video or audio was analysed), in a claude.ai chat",
             "generated_by": a.model_label}
@@ -205,6 +207,8 @@ def collect(a):
             spec["original_subtitles"] = Path(a.original_subs).name
     if limit:
         spec["limit"] = round(limit, 1)
+    if year:
+        spec["year"] = int(year)
     spec["notes"] = [intro] + [n for _, n in notes]
     dest.write_text(json.dumps(spec, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"Wrote {len(notes)} notes -> {dest}")
@@ -215,6 +219,12 @@ def collect(a):
         print("  - " + p)
 
 
+def year_cmd(a):
+    """Print the release year for the /notes command to show Erin, or "none" so it can offer a lookup."""
+    year, where = gn.find_year(a.video, a.title)
+    print(f"year: {year} (from {where})" if year else "year: none")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -222,6 +232,9 @@ def main():
     sh.add_argument("upload")
     sh.add_argument("--part", type=int, required=True)
     sh.add_argument("--covered", metavar="DIR", help="folder of part-<k>.txt replies: list what earlier parts covered")
+    sy = sub.add_parser("year", help="print the film's release year and where it was found (or none)")
+    sy.add_argument("video")
+    sy.add_argument("--title")
     for name in ("prepare", "collect"):
         p = sub.add_parser(name)
         p.add_argument("video")
@@ -234,12 +247,14 @@ def main():
         p.add_argument("--film-language", help="language spoken in the film, e.g. de, ja (omit for English)")
         p.add_argument("--original-subs", help="with --film-language: the original-language subtitles")
         p.add_argument("--title")
+        p.add_argument("--year", help="release year, e.g. 1974: films more than 40 years old get extra attention "
+                                      "to their words, people, places and period")
         p.add_argument("--audience")
         p.add_argument("--notes-language", default="English")
         p.add_argument("--limit", help="only the first part, e.g. 30:00")
         p.add_argument("-o", "--out")
     a = ap.parse_args()
-    {"prepare": prepare, "collect": collect, "show": show}[a.cmd](a)
+    {"prepare": prepare, "collect": collect, "show": show, "year": year_cmd}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 import time
 import urllib.error
@@ -69,6 +70,89 @@ def default_audience(film_language=None, situation=None):
         return (f"Native English speaker who doesn't speak {lang} well "
                 "and didn't grow up where the film was made")
     return DEFAULT_AUDIENCE
+
+
+OLD_FILM_YEARS = 40        # the default rule: a film more than this many years old gets extra attention to its period
+OLD_FILM_RULE = ("This film was made in {year}, more than {years} years ago, so its period will be unfamiliar to the "
+                 "viewer. Pay special attention to: words, slang and phrases that have dropped out of use or changed "
+                 "meaning; people (actors, singers, politicians, public figures) who were known then and mean little "
+                 "to a viewer now or from elsewhere; places, shops, institutions and customs that have changed or "
+                 "gone; and the cultural mood of the time (manners, class, fashion, politics, attitudes) that a viewer "
+                 "today wouldn't feel. Don't note ordinary modern vocabulary.\n\n")
+
+
+def era_section(year=None, this_year=None):
+    """The default old-film rule, or "" when the release year isn't known or the film is 40 years old or less."""
+    if not year:
+        return ""
+    this_year = this_year or time.localtime().tm_year
+    if this_year - int(year) <= OLD_FILM_YEARS:
+        return ""
+    return OLD_FILM_RULE.format(year=year, years=OLD_FILM_YEARS)
+
+
+PAREN_YEAR_RE = re.compile(r"[(\[]\s*((?:18|19|20)\d{2})\s*[)\]]")   # "Amadeus (1984) Directors Cut"
+YEAR_RE = re.compile(r"(?<!\d)((?:18|19|20)\d{2})(?!\d)")          # "Das.Boot.1981.RESTORED.1080p"
+
+
+def year_in_text(text, this_year=None):
+    """A release year in a title, file name or folder name: a year in brackets if there is one, else the last
+    plausible year (so "2001.A.Space.Odyssey.1968" gives 1968). None if there isn't one."""
+    this_year = this_year or time.localtime().tm_year
+    bracketed = [int(y) for y in PAREN_YEAR_RE.findall(text) if 1888 <= int(y) <= this_year]
+    if bracketed:
+        return bracketed[0]
+    loose = [int(y) for y in YEAR_RE.findall(text) if 1888 <= int(y) <= this_year]
+    return loose[-1] if loose else None
+
+
+def year_in_tags(video, this_year=None):
+    """A year from the file's own tags (date, year, DATE_RELEASED...), or None. Creation time is ignored: for an
+    old rip it's the day someone made the file."""
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format_tags", "-of", "json", str(video)],
+                           capture_output=True, text=True, timeout=60)
+        tags = (json.loads(r.stdout or "{}").get("format") or {}).get("tags") or {}
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    for key, value in tags.items():
+        if "date" in key.lower() or "year" in key.lower():
+            found = year_in_text(str(value), this_year)
+            if found:
+                return found
+    return None
+
+
+def find_year(video=None, title=None):
+    """Where the release year is, looking in order: the title you gave, the file's tags, the file name, the folder
+    name. Returns (year, where it was found), or (None, None)."""
+    this_year = time.localtime().tm_year
+    sources = []
+    if title:
+        sources.append(("the title", lambda: year_in_text(title, this_year)))
+    if video:
+        video = Path(video)
+        sources += [("the file's tags", lambda: year_in_tags(video, this_year)),
+                    ("the file name", lambda: year_in_text(video.stem, this_year)),
+                    ("the folder name", lambda: year_in_text(video.parent.name, this_year))]
+    for where, look in sources:
+        year = look()
+        if year:
+            return year, where
+    return None, None
+
+
+def resolve_year(explicit=None, video=None, title=None, say=print):
+    """The year to use: --year if given, else found from the title, tags, file or folder. Says which one it used."""
+    if explicit:
+        return int(explicit)
+    year, where = find_year(video, title)
+    if year:
+        say(f"Release year {year}, from {where}.")
+    else:
+        say("No release year found in the title, the file or its folder. The old-film rule is off; "
+            "add --year 1974 (for example) to turn it on.")
+    return year
 
 
 # ---------------------------------------------------------------- API key
@@ -186,7 +270,7 @@ reference actually lands (the punchline), not to the setup before it.
 - Notes are about the lines marked for annotation; lines marked [context] are only for orientation.
 - Don't repeat a topic already covered by the earlier notes you're told about.
 
-{language_section}Tone and length to aim for (examples from another episode):
+{era_section}{language_section}Tone and length to aim for (examples from another episode):
 {examples}
 
 Reply with ONLY a JSON array, no prose and no code fences. Each element:
@@ -425,7 +509,7 @@ def subtitle_setup(cues, film_language=None, original_srt=None, say=print):
 
 def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=None, language="English",
              assume_yes=False, key_file=None, api_url=API_URL, film_language=None, original_srt=None,
-             limit=None, video_offset=None, effort=None, max_tokens=MAX_TOKENS):
+             limit=None, video_offset=None, effort=None, max_tokens=MAX_TOKENS, year=None):
     all_cues = make_ass.parse_srt(srt_path)
     if not all_cues:
         sys.exit(f"No subtitle cues found in {srt_path}")
@@ -448,7 +532,7 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
         if input("Send the subtitle text to the Claude API now? [y/N] ").strip().lower() not in ("y", "yes"):
             sys.exit("Cancelled; nothing was sent.")
     foreign = situation is not None
-    system = SYSTEM.format(audience=audience, language=language,
+    system = SYSTEM.format(audience=audience, language=language, era_section=era_section(year),
                            cats=", ".join(FOREIGN_CATEGORIES if foreign else CATEGORIES),
                            language_section=(language_section(film_language, situation).replace("{language}", language)
                                              if foreign else ""),
@@ -513,6 +597,8 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
             spec["original_subtitles"] = Path(original_srt).name
     if limit:
         spec["limit"] = round(limit, 1)
+    if year:
+        spec["year"] = int(year)
     spec["notes"] = [intro] + notes
     Path(notes_path).write_text(json.dumps(spec, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 

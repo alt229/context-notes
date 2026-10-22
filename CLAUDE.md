@@ -27,6 +27,12 @@ Read `README.md` for the full command reference. This file holds what we've lear
 
 ## Decisions already made (with the evidence: project doc "benchmark-results.md")
 
+- **Old-film rule (default, for every route).** A film more than 40 years old gets extra attention to words, people,
+  phrases, places and the cultural mood of its period, where a generic viewer wouldn't get them. The year comes from
+  `--year`, else the title, the file's tags, the file name, then the folder name (`generate_notes.find_year`). Without
+  a year the rule is off. The notes file stores the year, so `--refine` uses the same one. The text is
+  `generate_notes.OLD_FILM_RULE`, and it is in the dialogue prompt and the refine prompt. In `/notes`, when no year is
+  found, Claude offers to look it up on the web (default yes) before it writes the notes.
 - **Model choice.** Opus high on both steps is the safe default. Over six films it had the most valuable notes,
   0 to 2 wrong per film, and by far the most history and culture notes (99 valuable, 33 of them illuminating,
   against Sonnet high's 68 and 8).

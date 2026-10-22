@@ -20,6 +20,15 @@ Read `CLAUDE.md` first; its rules bind you. Keep your messages short.
   parts are kept.
 - Finish with one line per video, then the next step.
 
+0. **Find the release year.** Run `python3 chat_notes.py year "<video>" [--title "..."]` (the title only if Erin gave one).
+   - If it prints `year: 1981 (from ...)`, use it. Say the year and where it came from, in one line.
+   - If it prints `year: none`, ask Erin with AskUserQuestion: "No release year is in the file, its folder or the title.
+     Look it up online?" Options: "Yes, look it up (Recommended)" (first, so it is the default) and "No, skip it".
+   - On yes, use WebSearch for the film's title and "release year". Take the year of the original release, not a remake
+     or a re-release. Tell Erin the year you found and the source. Then pass `--year <year>` to every later step.
+   - On no, carry on without `--year`. The old-film rule stays off.
+   - Pass the same `--year` to every later `chat_notes.py` step (`prepare` and `collect`).
+
 1. **Work out the files.** The video comes from the arguments. Find the subtitles the notes will be placed on with
    `python3 context_notes.py "<video>" --status`. For a film not in English watched with English subtitles, also
    pass the original-language file with `--original-subs` and `--film-language`. If there are no subtitles, delegate

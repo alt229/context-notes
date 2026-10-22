@@ -3,6 +3,7 @@
     "allow": [
       "Bash(python3 context_notes.py * --status)",
       "Bash(python3 chat_notes.py show *)",
+      "Bash(python3 chat_notes.py year *)",
       "Bash(python3 chat_notes.py prepare *)",
       "Bash(python3 chat_notes.py collect *)",
       "Bash(python3 dedupe.py *)",

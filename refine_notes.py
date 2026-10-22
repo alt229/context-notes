@@ -46,7 +46,7 @@ information you're given.
 Viewer: {audience}.
 Write every note in {language}.
 {foreign_note}
-You get, for one stretch of the video:
+{era_section}You get, for one stretch of the video:
 - contact sheets (images): grids of frames, 3 columns by 4 rows. Under each frame, in yellow, is its time in the \
 video (h:mm:ss.s); in grey, the subtitle line being spoken then (may be empty). Frames are SAMPLED, not continuous: \
 you cannot see what happens between them, so never claim to have seen it.
@@ -337,7 +337,7 @@ def apply_reply(reply, win, cues, offset, notes, times, listed, log, dropped, vi
 def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframes", audience=None, title=None,
            language="English", assume_yes=False, key_file=None, api_url=gn.API_URL, ass_path=None,
            assume_synced=False, film_language=None, original_srt=None, limit=None, effort=None,
-           max_tokens=REFINE_MAX_TOKENS):
+           max_tokens=REFINE_MAX_TOKENS, year=None):
     check_same_episode(video, srt_path, notes_path)
     cues = make_ass.parse_srt(srt_path)
     if not cues:
@@ -357,6 +357,7 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
     title = title or re.sub(r"\s*\(context notes\)\s*$", "", str(spec.get("title") or Path(srt_path).stem))
     situation, extra = gn.subtitle_setup(cues, film_language, original_srt)
     audience = audience or spec.get("audience") or gn.default_audience(film_language, situation)
+    year = year or spec.get("year") or gn.resolve_year(None, video, title)
 
     import analyze
     print("Analysing the video (the slow part, all on this computer)...")
@@ -388,7 +389,7 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
                  "subtitle text under frames. ONLY ADD notes with kind \"visual\"; leave the revise, retime and drop "
                  "lists empty.\n\n") if visual_only else ""
     sys_prompt = SYSTEM.format(audience=audience, language=language, maxnew=MAX_NEW_PER_WINDOW, mode_note=mode_note,
-                               foreign_note=foreign_note(film_language, situation))
+                               foreign_note=foreign_note(film_language, situation), era_section=gn.era_section(year))
     times = note_times(cues, notes, offset)
     est_in = sum(image_tokens(p) for w in wins for p, _, _ in w["sheets"])
     est_in += sum((len(sys_prompt) + len(window_text(w, cues, offset, an["moments"], notes, times, title, 1, 1,
