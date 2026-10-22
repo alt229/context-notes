@@ -20,7 +20,6 @@ import hashlib
 import json
 import pickle
 import random
-import re
 import sys
 import time
 from pathlib import Path
@@ -240,8 +239,9 @@ def run_judge(a):
                     "category": n.get("category", ""), "kind": w["kind"]}
             per[n["cell"]][w["kind"]].append(item)
             if item["acc"] in ("accurate", "minor") and item["use"] >= 2 and not item["ko"]:
-                clusters.setdefault((w["key"], r.get("cluster")), {}).setdefault(n["cell"], 0)
-                clusters[(w["key"], r.get("cluster"))][n["cell"]] = max(item["use"], clusters[(w["key"], r.get("cluster"))][n["cell"]])
+                key = (w["key"], r.get("cluster"))
+                clusters.setdefault(key, {}).setdefault(n["cell"], 0)
+                clusters[key][n["cell"]] = max(item["use"], clusters[key][n["cell"]])
     summary = {}
     for c, kinds in per.items():
         s = {}
@@ -255,7 +255,6 @@ def run_judge(a):
                        "use3": sum(i["use"] == 3 for i in items), "valuable": len(valuable),
                        "ko": sum(i["ko"] for i in items),
                        "wrong_not_ko": sum(i["acc"] == "wrong" and not i["ko"] for i in items)}
-        mine = [k for k, v in clusters.items() if c in v]
         for kind in ("speech", "visual", "all"):
             tot = [k for k in clusters if kind == "all" or k[0].startswith(kind)]
             s[kind]["clusters_covered"] = sum(1 for k in tot if c in clusters[k])

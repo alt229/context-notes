@@ -20,7 +20,6 @@ import contextlib
 import hashlib
 import io
 import json
-import os
 import pickle
 import re
 import shutil
@@ -132,7 +131,7 @@ def unit(cell_dir, budget, min_remaining=MIN_REMAINING):
         (cell_dir / f"{name}.log").write_text(out, encoding="utf-8")
         u = re.search(r"Used ([\d,]+) input and ([\d,]+) output tokens", out)
         tin, tout = (int(u.group(1).replace(",", "")), int(u.group(2).replace(",", ""))) if u else (0, 0)
-        problems = [l.strip()[2:] for l in out.splitlines() if l.startswith("  ! ")]
+        problems = [ln.strip()[2:] for ln in out.splitlines() if ln.startswith("  ! ")]
         m = {"in": tin, "out": tout, "cost": gn.cost(model or cfg["model"], tin, tout), "api_seconds": round(tally["secs"], 1),
              "calls": tally["calls"], "problems": problems,
              "truncated": sum("cut off" in p for p in problems)}
@@ -203,7 +202,7 @@ def unit(cell_dir, budget, min_remaining=MIN_REMAINING):
 def progress(cell_dir):
     cfg = load(Path(cell_dir) / "cell.json")
     n = len(list((Path(cell_dir) / "api-cache").glob("*.json"))) if (Path(cell_dir) / "api-cache").exists() else 0
-    gen, ref = cfg.get("generate"), cfg.get("refine")
+    gen = cfg.get("generate")
     state = cfg["status"]
     if state != "done" and state != "error":
         state = "refining" if gen else "generating"
@@ -232,7 +231,7 @@ def prep_reuse(analysis_dir, video, subs, limit, tail_dir):
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", f"%+{int(limit) + 60}",
                         "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", str(video)],
                        capture_output=True, text=True)
-    keys = sorted(float(a) for a, _, b in (l.partition(",") for l in r.stdout.splitlines())
+    keys = sorted(float(a) for a, _, b in (ln.partition(",") for ln in r.stdout.splitlines())
                   if a not in ("", "N/A") and "K" in b)
     picked, last = [], -1e9
     for t in (t for t in keys if t < limit):

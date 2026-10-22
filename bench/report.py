@@ -122,7 +122,8 @@ def render(rows, judge, max_wrong, limit=None):
         L.append("")
         L.append("acc% = notes the judge rated fully accurate; wrong = notes with a significant false claim; "
                  "use = mean usefulness (1-3);")
-        L.append("valuable = accurate-or-minor and use>=2, not just explaining another language's wording; val/$ = valuable per dollar.")
+        L.append("valuable = accurate-or-minor and use>=2, not just explaining another language's wording; "
+                 "val/$ = valuable per dollar.")
         vmax = max(r.get("valuable", 0) for r in rows)
         L.append("\n## Valuable notes (more is better)\n")
         for r in rows:
@@ -142,8 +143,9 @@ def render(rows, judge, max_wrong, limit=None):
             for r in rows:
                 d = bt.get(r["cell"])
                 if d:
-                    L.append(f"{r['cell']:22} " + " ".join(f"{str(d[b][0]) + ' (' + str(d[b][1]) + ')':>{w}}" for b, w in
-                                                         (("history/culture", 16), ("language", 10), ("other", 13), ("visual", 8))))
+                    L.append(f"{r['cell']:22} " + " ".join(
+                        f"{str(d[b][0]) + ' (' + str(d[b][1]) + ')':>{w}}"
+                        for b, w in (("history/culture", 16), ("language", 10), ("other", 13), ("visual", 8))))
             L.append("history/culture = cultural references, historical context, period detail, trivia and background; "
                      "language = idiom, slang, wordplay, archaic words, dialect, register (the writer's own category labels).")
         fr = frontier(rows, max_wrong)
