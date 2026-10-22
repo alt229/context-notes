@@ -48,7 +48,8 @@ Read `README.md` for the full command reference. This file holds what we've lear
 - **Routing by the model's own confidence** isn't worth building. It would have to flag about 65% of notes to catch
   most errors.
 - **Refine cost** is driven by frames (about 155k input tokens per 45 min). Denser frames cost proportionally more.
-- **Note timing.** 2 s settle + 150 wpm (0.4 s a word), 6 s floor, 24 s ceiling. The old 12 s ceiling cut 62 of
+- **Note timing.** 2 s settle + 150 wpm (0.4 s a word), 6 s floor, 24 s ceiling. A note that appears while earlier
+  notes are up gets half of each one's own time added, up to a 45 s total (`make_ass.linger`). The old 12 s ceiling cut 62 of
   Amélie's 100 notes short. Raising it added only 1.5 s of three notes on screen at once over the whole film. The
   settle, floor, ceiling and speed were changed on 2026-10-21 after friends found the notes too brief.
 - **Alignment check.** Speech recognition only, with a tolerance of 0.7 s and at least 2 recognised lines per window.

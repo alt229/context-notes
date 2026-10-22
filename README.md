@@ -211,7 +211,7 @@ as repeats.
 
 ### How long notes stay up
 
-Each note gets 2 s to be noticed plus its words at 0.4 s a word (150 a minute), between 6 and 24 s. `make_ass.py ... --timing-report`
+Each note gets 2 s to be noticed plus its words at 0.4 s a word (150 a minute), between 6 and 24 s. A note that appears while earlier notes are still up stays longer, by half of each earlier note's time (never more than 45 s). `make_ass.py ... --timing-report`
 shows how many seconds a word each note gets, which ones the 24 s ceiling cuts short, and how fast the film's own
 subtitles go for comparison. Change it per film with `--reading-speed 180`, `--note-max 30`, `--note-min`,
 `--note-settle`; the values are remembered in the notes file, so later rebuilds keep them.

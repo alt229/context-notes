@@ -28,6 +28,7 @@ All notable changes to this project are recorded here. The format follows
   (`/notes`, `/check`).
 
 ### Changed
+- A note that appears while earlier notes are still on screen stays up longer: half of each earlier note's own time is added. A note's own time is still capped at 24 s, and the total is capped at 45 s (`LINGER_CEILING`).
 - Notes stay up longer: 2 s to notice, then 150 words a minute (0.4 s a word), kept between 6 and 24 s
   (was 180 a minute, 5 to 18 s). Change it per film with `--reading-speed`, `--note-min` and `--note-max`.
 - One install step: `pip install -r requirements.txt` now covers everything, including faster-whisper for speech recognition. The separate `requirements-align.txt` and `requirements-dev.txt` are being removed.

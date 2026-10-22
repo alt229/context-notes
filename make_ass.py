@@ -328,13 +328,30 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Dialogue,Arial,58,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,3,1.5,2,120,120,55,1
+Style: Dialogue,Arial,{{dfs}},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,3,1.5,2,120,120,55,1
 Style: NoteL,Arial,{{fs}},&H00F0F0F0,&H000000FF,&H38101010,&H38101010,0,0,0,0,100,100,0,0,3,14,0,7,44,{{inner}},36,1
 Style: NoteR,Arial,{{fs}},&H00F0F0F0,&H000000FF,&H38281810,&H38281810,0,0,0,0,100,100,0,0,3,14,0,9,{{inner}},44,36,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+
+
+# A note that appears while earlier notes are still on screen can stay up longer, but never past this many seconds
+# from its start (an edge case: a burst of notes should not fill the screen).
+LINGER_CEILING = 45.0
+
+
+def linger(placed):
+    """Half of each earlier note's own time on screen is added to a note that appears while that earlier note is
+    still up. Each earlier note counts once. Notes with their own \"duration\" are left alone."""
+    base_end = {id(p): p["end"] for p in placed}
+    timed = sorted(placed, key=lambda p: p["start"])
+    for j, p in enumerate(timed):
+        if p["fixed_duration"]:
+            continue
+        extra = sum(0.5 * (base_end[id(q)] - q["start"]) for q in timed[:j] if base_end[id(q)] > p["start"])
+        p["end"] = min(base_end[id(p)] + extra, p["start"] + LINGER_CEILING)
 
 
 def place_notes(cues, notes, offset, timing=None, skip=()):
@@ -378,6 +395,7 @@ def place_notes(cues, notes, offset, timing=None, skip=()):
             "confidence": note.get("confidence", "high").lower(),
             "text": text,
         })
+    linger(placed)
     return placed, missing
 
 
@@ -424,7 +442,7 @@ def plex_copy(out_path, language="English"):
 
 
 def build(srt_path, notes_path, out_path, offset=0.0, layout="split", display_srt=None, display_offset=0.0,
-          timing=None, keep_duplicates=False, say=print):
+          timing=None, keep_duplicates=False, font_scale=1.0, say=print):
     """display_srt: subtitles to show at the bottom instead of srt_path (e.g. English, when the notes were written
     from the French). Notes are still placed using srt_path; display_offset is for display_srt's own timing.
     timing: see timing_settings() (default: the notes file's own, else DEFAULT_TIMING). Repeated explanations
@@ -451,6 +469,11 @@ def build(srt_path, notes_path, out_path, offset=0.0, layout="split", display_sr
     lay = LAYOUTS[layout]
     # split layout uses two narrower columns and a slightly smaller font
     fs, inner = (35, 1040) if layout == "split" else (38, 760)
+    dfs = 58                                     # dialogue size
+    if font_scale != 1.0:
+        # Same box shape, just bigger: the text column grows with the type (capped at the screen width).
+        text_w = min(PLAY_X - 88, round((PLAY_X - 44 - inner) * font_scale))
+        fs, inner, dfs = round(fs * font_scale), PLAY_X - 44 - text_w, round(dfs * font_scale)
 
     events = []
     for c in shown:
@@ -470,7 +493,8 @@ def build(srt_path, notes_path, out_path, offset=0.0, layout="split", display_sr
         events.append((p["start"], p["end"], 1, style, tag, body))
 
     events.sort(key=lambda e: (e[0], e[2]))
-    out = [HEADER.replace("{title}", title).replace("{fs}", str(fs)).replace("{inner}", str(inner))]
+    out = [HEADER.replace("{title}", title).replace("{fs}", str(fs)).replace("{inner}", str(inner))
+           .replace("{dfs}", str(dfs))]
     for s, e, layer, style, name, text in events:
         out.append(f"Dialogue: {layer},{fmt_ass_time(s)},{fmt_ass_time(e)},{style},{name},0,0,0,,{text}\n")
     Path(out_path).write_text("".join(out), encoding="utf-8-sig")
@@ -571,6 +595,9 @@ def main():
                                     "video is analysed. Other video analysis lives in analyze.py")
     ap.add_argument("--offset", type=float, default=None,
                     help="shift subtitles by N seconds (default: notes file's video_offset, else 0)")
+    ap.add_argument("--font-scale", type=float, default=1.0, metavar="X",
+                    help="make notes and dialogue X times bigger, to find a good size. Writes a separate "
+                         "<video>.notes-xX.ass and no Plex copy, so your normal .ass is left alone")
     ap.add_argument("--layout", choices=sorted(LAYOUTS), default="split",
                     help="split: dialogue notes left, visual notes right; stack: one column")
     ap.add_argument("--report", action="store_true", help="print how crowded each layout would be")
@@ -683,7 +710,7 @@ def main():
     if a.out:
         out = a.out
     elif a.video:
-        out = str(Path(a.video).with_suffix("")) + ".notes.ass"
+        out = str(Path(a.video).with_suffix("")) + (f".notes-x{a.font_scale:g}.ass" if a.font_scale != 1.0 else ".notes.ass")
     else:
         out = str(Path(a.srt).with_suffix(".ass"))
     if a.refine:
@@ -706,8 +733,8 @@ def main():
     display, display_offset = display_choice(a, spec, notes_path)
     timing = remember_timing(a, spec, notes_path)
     placed, _ = build(a.srt, a.notes, out, offset, a.layout, display, display_offset, timing=timing,
-                      keep_duplicates=a.keep_duplicates)
-    if not a.no_plex_copy:
+                      keep_duplicates=a.keep_duplicates, font_scale=a.font_scale)
+    if not a.no_plex_copy and a.font_scale == 1.0:
         plex_copy(out, a.notes_language)
     if a.report:
         print(json.dumps(overlap_report(placed), indent=1))
