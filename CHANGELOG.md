@@ -28,9 +28,8 @@ All notable changes to this project are recorded here. The format follows
   (`/notes`, `/check`).
 
 ### Changed
-- At most three notes on screen. A fourth note waits (up to 4 s, `MAX_WAIT`) for the earliest note to leave; each
-  second it waits takes half a second off that note's timer, and that note keeps the 6 s floor. If no wait fits, it
-  shows at its own time. The build reports how many notes waited.
+- At most three notes on screen (the one hard limit). A fourth note waits until the earliest note leaves; while it waits,
+  every note still on screen gives up half a second of timer per second of wait. The build reports how many notes waited.
 - A note that appears while earlier notes are still on screen stays up longer: half of each earlier note's own time is added. A note's own time is still capped at 24 s, and the total is capped at 45 s (`LINGER_CEILING`).
 - Notes stay up longer: 2 s to notice, then 150 words a minute (0.4 s a word), kept between 6 and 24 s
   (was 180 a minute, 5 to 18 s). Change it per film with `--reading-speed`, `--note-min` and `--note-max`.

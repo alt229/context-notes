@@ -354,19 +354,17 @@ def linger(placed):
         p["end"] = min(base_end[id(p)] + extra, p["start"] + LINGER_CEILING)
 
 
-# At most this many notes on screen at once. A note that would be the fourth waits for room (make_room).
+# At most this many notes on screen at once. This is the one hard limit: a note that would be the fourth waits for room.
 MAX_ON_SCREEN = 3
-# The longest a note waits for room, in seconds. Past this it shows at its own time.
-MAX_WAIT = 4.0
-# Each second the waiting note waits takes this much off the earliest note still on screen (its timer).
+# Each second the waiting note waits takes this much off every note still on screen (its timer).
 CUT_PER_WAIT = 0.5
 
 
-def make_room(placed, floor):
-    """When a note would be the fourth on screen, it waits for the earliest-ending note to leave. Each second it
-    waits, that note's timer loses CUT_PER_WAIT seconds, so the wait w ends the earlier note at its start + w. The wait
-    must stay within MAX_WAIT, the earlier note must keep `floor` seconds on screen, and it can't be a note with its
-    own duration. Otherwise the note shows at its own time. Sets each note's final start and end (linger included)."""
+def make_room(placed):
+    """When a note would be the fourth on screen, it waits until there's room. The earliest note to leave frees the
+    slot. Each second the note waits, every note still on screen loses CUT_PER_WAIT seconds of its timer, so the
+    earliest one ends at its start + wait. Notes with their own duration aren't shortened; if the earliest of those
+    is the one leaving, the wait is just until it ends. Sets each note's final start and end (linger included)."""
     origin = {id(p): p["start"] for p in placed}
     base = {id(p): p["end"] - p["start"] for p in placed}
     waits, cuts = {}, {}
@@ -378,7 +376,7 @@ def make_room(placed, floor):
         # Earlier notes' final ends don't depend on later notes, so the first note that needs room can be decided
         # now. Each decision is kept, so this loop runs at most once per note.
         order = sorted(placed, key=lambda p: p["start"])
-        if not _decide_one_wait(order, waits, cuts, floor):
+        if not _decide_one_wait(order, base, waits, cuts):
             break
     for p in placed:
         if id(p) in waits:
@@ -387,9 +385,9 @@ def make_room(placed, floor):
             p["cut"] = cuts[id(p)]
 
 
-def _decide_one_wait(order, waits, cuts, floor):
-    """Find the first note that would be the fourth on screen and can wait for room. Records its wait and the cut to
-    the earliest note on screen. Returns False when no note needs (or can get) room."""
+def _decide_one_wait(order, base, waits, cuts):
+    """Find the first note that would be the fourth on screen and make it wait. Records its wait and the cut to
+    each note still on screen. Returns False when no note needs room."""
     for j, p in enumerate(order):
         if id(p) in waits:
             continue
@@ -397,12 +395,16 @@ def _decide_one_wait(order, waits, cuts, floor):
         if len(on) < MAX_ON_SCREEN:
             continue
         first = min(on, key=lambda q: q["end"])
-        wait = (first["end"] - p["start"]) / (1 + CUT_PER_WAIT)
-        cut = CUT_PER_WAIT * wait
-        if first["fixed_duration"] or wait > MAX_WAIT or first["end"] - cut - first["start"] < floor:
-            continue
+        if first["fixed_duration"]:
+            wait, cut = first["end"] - p["start"], 0.0
+        else:
+            wait = (first["end"] - p["start"]) / (1 + CUT_PER_WAIT)
+            cut = CUT_PER_WAIT * wait
         waits[id(p)] = wait
-        cuts[id(first)] = cuts.get(id(first), 0.0) + cut
+        for q in on:
+            if not q["fixed_duration"]:
+                left = max(base[id(q)] - cuts.get(id(q), 0.0), 0.0)     # a timer can't go below zero
+                cuts[id(q)] = cuts.get(id(q), 0.0) + min(cut, left)
         return True
     return False
 
@@ -448,7 +450,7 @@ def place_notes(cues, notes, offset, timing=None, skip=()):
             "confidence": note.get("confidence", "high").lower(),
             "text": text,
         })
-    make_room(placed, (timing or DEFAULT_TIMING)["min"])
+    make_room(placed)
     return placed, missing
 
 
@@ -521,9 +523,8 @@ def build(srt_path, notes_path, out_path, offset=0.0, layout="split", display_sr
     placed, missing = place_notes(cues, notes, offset, timing, skip={j for j, _, _ in dups})
     held = [p["waited"] for p in placed if p.get("waited")]
     if held:
-        print(f"Made room for {len(held)} note(s) (up to {MAX_WAIT:g} s wait, at most {MAX_ON_SCREEN} on screen): "
-              f"{len(held)} waited, longest {max(held):.1f} s; "
-              f"{sum(1 for p in placed if p.get('cut'))} earlier note(s) shortened.")
+        print(f"Made room for {len(held)} note(s) so no more than {MAX_ON_SCREEN} show at once: longest wait "
+              f"{max(held):.1f} s; {sum(1 for p in placed if p.get('cut'))} note(s) shortened.")
     lay = LAYOUTS[layout]
     # split layout uses two narrower columns and a slightly smaller font
     fs, inner = (35, 1040) if layout == "split" else (38, 760)
