@@ -242,9 +242,10 @@ def escape_note(t):
 
 # How long a note stays up: time to notice it, plus time to read it at a set pace, within a floor and a ceiling.
 # The ceiling used to be 12 s, which cut 62 of Amélie's 100 notes short (a 40-word note got 0.30 s a word, with
-# the film's own subtitles competing for the same eyes). 18 s lets those finish at 180 words a minute; on Amélie it
-# added 1.5 s of three notes on screen at once over the whole film. Change per film with --reading-speed etc.
-DEFAULT_TIMING = {"wpm": 180, "settle": 2.0, "min": 5.0, "max": 18.0}
+# the film's own subtitles competing for the same eyes). Later defaults (150 words a minute, 6 s floor, 24 s
+# ceiling, 0.4 s a word) were set for Erin's films, after friends found the notes went by too fast.
+# Change per film with --reading-speed etc.
+DEFAULT_TIMING = {"wpm": 150, "settle": 2.0, "min": 6.0, "max": 24.0}
 
 
 def timing_settings(spec=None, **overrides):

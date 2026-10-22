@@ -28,6 +28,8 @@ All notable changes to this project are recorded here. The format follows
   (`/notes`, `/check`).
 
 ### Changed
+- Notes stay up longer: 2 s to notice, then 150 words a minute (0.4 s a word), kept between 6 and 24 s
+  (was 180 a minute, 5 to 18 s). Change it per film with `--reading-speed`, `--note-min` and `--note-max`.
 - One install step: `pip install -r requirements.txt` now covers everything, including faster-whisper for speech recognition. The separate `requirements-align.txt` and `requirements-dev.txt` are being removed.
 - Notes stay up longer when they're long: the ceiling went from 12 s to 18 s (it cut 62 of Amélie's 100 notes
   short). Same 180 words a minute and 5 s floor.

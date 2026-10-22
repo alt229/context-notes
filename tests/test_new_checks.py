@@ -67,9 +67,9 @@ def test_build_leaves_repeats_out_and_says_so(tmp_path):
 # ---------------------------------------------------------------- timing
 def test_note_duration_reads_at_the_set_speed_within_limits():
     t = make_ass.timing_settings()
-    assert make_ass.note_duration("word " * 3, timing=t) == 5.0                     # floor
-    assert abs(make_ass.note_duration("word " * 30, timing=t) - 12.0) < 1e-9          # 2 + 30 * 60/180
-    assert make_ass.note_duration("word " * 80, timing=t) == 18.0                    # ceiling
+    assert make_ass.note_duration("word " * 3, timing=t) == 6.0                     # floor
+    assert abs(make_ass.note_duration("word " * 30, timing=t) - 14.0) < 1e-9          # 2 + 30 * 60/150
+    assert make_ass.note_duration("word " * 80, timing=t) == 24.0                    # ceiling
     slow = make_ass.timing_settings({"timing": {"wpm": 120}})
     assert abs(make_ass.note_duration("word " * 30, timing=slow) - 17.0) < 1e-9
     assert make_ass.note_duration("word " * 30, override=4, timing=t) == 4.0
@@ -78,14 +78,14 @@ def test_note_duration_reads_at_the_set_speed_within_limits():
 def test_timing_given_on_the_command_line_is_remembered(tmp_path):
     srt = make_srt(tmp_path / "ep.srt", n=6)
     notes = tmp_path / "notes.json"
-    long = " ".join(["word"] * 60)          # 2 s + 60 words at 180 a minute = 22 s
+    long = " ".join(["word"] * 60)          # 2 s + 60 words at 150 a minute = 26 s
     notes.write_text(json.dumps({"notes": [{"cue": 2, "category": "Idiom", "text": long}]}))
-    r = run_cli("make_ass.py", srt, notes, "--note-max", "25", "--timing-report", cwd=tmp_path)
+    r = run_cli("make_ass.py", srt, notes, "--note-max", "30", "--timing-report", cwd=tmp_path)
     assert r.returncode == 0, r.stderr
-    assert json.loads(notes.read_text())["timing"] == {"max": 25.0}
+    assert json.loads(notes.read_text())["timing"] == {"max": 30.0}
     assert "0 note(s) cut short" in r.stdout
     r = run_cli("make_ass.py", srt, notes, "--timing-report", cwd=tmp_path)          # remembered
-    assert "kept between 5 and 25 s" in r.stdout
+    assert "kept between 6 and 30 s" in r.stdout
     r = run_cli("make_ass.py", srt, notes, "--note-max", "10", "--timing-report", cwd=tmp_path)
     assert "1 note(s) cut short by the 10 s ceiling" in r.stdout
 
