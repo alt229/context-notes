@@ -459,7 +459,7 @@ def check_sync(video, srt, film, display_lang, embedded, opts):
         say(f"  (Re-timing needs subtitles in the language being spoken; these are {languages.name(display_lang)} "
             f"and the film is in {languages.name(film)}. Look for subtitles made for this exact release.)")
     elif not have_whisper():
-        say("  (Re-timing needs faster-whisper:  pip3 install -r requirements-align.txt)")
+        say("  (Re-timing needs faster-whisper:  pip3 install -r requirements.txt)")
         del choices["a"]
     default = "a" if "a" in choices else "c"
     pick = ask("The subtitle timing doesn't match this video all the way through. What now?", choices, default, opts.yes)

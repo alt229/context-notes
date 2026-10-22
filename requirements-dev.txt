@@ -1,4 +1,0 @@
-# For working on the project itself: tests and linting
--r requirements.txt
-pytest>=7.0
-ruff>=0.4

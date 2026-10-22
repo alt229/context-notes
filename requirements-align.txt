@@ -1,3 +1,0 @@
-# Optional: speech recognition for `analyze.py --align` (re-timing subtitles from a different release or cut)
--r requirements.txt
-faster-whisper>=1.0

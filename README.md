@@ -51,8 +51,7 @@ Notes appear as small boxed overlays while you watch, in VLC (or any player that
 
 - Python 3.9 or newer
 - `ffmpeg` and `ffprobe` for anything that touches a video (`brew install ffmpeg`, `apt install ffmpeg`, or [ffmpeg.org](https://ffmpeg.org/download.html))
-- `pip install -r requirements.txt` (numpy and Pillow, for the video checks only)
-- `pip install -r requirements-align.txt` (faster-whisper, only for `analyze.py --align`)
+- `pip install -r requirements.txt` (one step: numpy and Pillow for the video checks, faster-whisper for speech recognition, and pytest and ruff for development. faster-whisper is a large download; skip it with `pip install numpy Pillow` if you won't use speech recognition)
 - An Anthropic API key, only if you want Claude to write or refine notes
 
 Writing notes by hand and building the `.ass` needs nothing beyond Python.
@@ -297,7 +296,7 @@ Do not add video files, full subtitle files, or generated `.ass`/transcripts of 
 ## Development
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
 pytest          # no network, no API key, no real video needed (a fake API server and synthetic ffmpeg clips are used)
 ruff check .
 ```

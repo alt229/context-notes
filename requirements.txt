@@ -1,4 +1,6 @@
-# Needed for the video checks (analyze.py --video, make_ass.py --refine).
-# Subtitle-only use (analyze.py episode.srt, make_ass.py, --generate) needs nothing here.
-numpy>=1.21
-Pillow>=9.0
+# One command sets up everything the scripts use:  pip install -r requirements.txt
+numpy>=1.21                # the video checks (analyze.py --video, make_ass.py --refine)
+Pillow>=9.0                # the video checks
+faster-whisper>=1.0        # speech recognition (analyze.py --align, find_subs.py); a large download
+pytest>=7.0                # the tests (for working on the project)
+ruff>=0.4                  # linting (for working on the project)

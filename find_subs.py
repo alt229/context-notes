@@ -503,7 +503,7 @@ def find(video, lang, online=None, transcribe=None, ask=None, model=None, limit=
         return None
     if not have_whisper():
         say("  Speech recognition could write subtitles from the soundtrack, but it needs faster-whisper:  "
-            "pip3 install -r requirements-align.txt")
+            "pip3 install -r requirements.txt")
         return None
     if transcribe or (ask and ask(f"No {name} subtitles found. Write them from the soundtrack with speech recognition "
                                   f"(local, free, slow)?") == "y"):

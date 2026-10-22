@@ -6,7 +6,7 @@ Thanks for looking. This is a small pre-alpha project; issues and pull requests 
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
 pytest
 ruff check .
 ```
@@ -15,7 +15,7 @@ The tests need no network, API key or real video: the Claude API is replaced by 
 
 ## Guidelines
 
-- Python 3.9+ and standard library first. The networking code deliberately uses only `urllib`; new dependencies need a good reason and belong in the right `requirements*.txt`.
+- Python 3.9+ and standard library first. The networking code deliberately uses only `urllib`; new dependencies need a good reason and belong in `requirements.txt`.
 - Run `ruff check .` and `pytest` before opening a PR. Add a test for any bug you fix.
 - Anything that sends data to an API must show what is being sent (size, estimated cost) and ask first.
 - Anything that overwrites a user's file must keep a backup.
