@@ -35,6 +35,8 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- `chat_notes.py collect` no longer drops the first or last note of a pasted reply block (the part-header pattern
+  matched into the JSON braces). `collect` also prints how many repeated explanations the build will leave out.
 - On-screen notes (Prop, Costume, Staging, On-screen text...) could be timed far too early, more so the later in the
   film: ffmpeg's `vfr` mode dropped frames after their times had been listed, so every frame after a drop carried an
   earlier frame's time. On Das Boot (3:28) the end credits were labelled 2:08. Frames are now extracted with

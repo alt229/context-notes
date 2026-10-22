@@ -29,6 +29,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import dedupe  # noqa: E402
 import generate_notes as gn  # noqa: E402
 import make_ass  # noqa: E402
 
@@ -124,6 +125,11 @@ def show(a):
     print("\n".join(out))
 
 
+# A "PART k OF N" line that starts a reply block. Only spaces and simple markers may surround it: a looser
+# pattern (\W*) also eats the JSON braces around the first and last note of a block.
+PART_HEAD_RE = re.compile(r"^[ \t=*#_-]*PART (\d+) OF (\d+)[ \t=*#_-]*$", re.M | re.I)
+
+
 def objects(text):
     """Every JSON object with a cue and a text in the pasted replies (code fences and prose are ignored)."""
     dec, i, found = json.JSONDecoder(), 0, []
@@ -155,7 +161,7 @@ def collect(a):
     # Notes outside any "PART k OF N" block are sorted into parts by line number. A "PART k" block (e.g. from
     # "redo k") replaces everything earlier for that part; the last block for a part wins.
     by_part = {}
-    heads = list(re.finditer(r"^\W*PART (\d+) OF (\d+)\W*$", text, re.M | re.I))
+    heads = list(PART_HEAD_RE.finditer(text))
     for h, nxt in zip([None] + heads, heads + [None]):
         seg = text[(h.end() if h else 0):(nxt.start() if nxt else len(text))]
         if h is None:
@@ -212,6 +218,11 @@ def collect(a):
     spec["notes"] = [intro] + [n for _, n in notes]
     dest.write_text(json.dumps(spec, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"Wrote {len(notes)} notes -> {dest}")
+    dups, similar = dedupe.find_duplicates(spec["notes"])
+    print(f"  {len(dups)} repeated explanation(s) will be left out of the .ass, {len(similar)} near-miss(es) kept "
+          f"(python3 dedupe.py {dest.name} lists them)")
+    for j, i, why in dups[:8]:
+        print(f"    #{j + 1} {why} (first in #{i + 1})")
     if empty:
         print(f"  ! no notes for part(s) {', '.join(map(str, empty))} of {len(parts)}: a reply may be missing from "
               f"{Path(a.replies).name}")
