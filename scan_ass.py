@@ -10,7 +10,10 @@ For each file it reports:
   - the same numbers if today's rules (linger, then the three-note limit) were applied to the file's note start times;
   - notes on screen for less than the 6 s floor (less 0.25 s tolerance) and shorter than today's timing gives;
   - repeats (dedupe.py rules, on the text in the file);
-  - whether the Plex copy (<stem>.en.ass) is there and matches the notes file.
+  - whether the Plex copy (<stem>.en.ass) is there and matches the notes file;
+  - the notes file (notes-<stem>.json) beside it: missing, or newer than the .ass (so a rebuild is due);
+  - notes whose own timer would change under today's timing, notes read faster than a word a third of a second, and
+    notes that appear within half a second of another (a cluster).
 
 It reads only the .ass files (and the Plex copy's size). It never changes a file and uses no API credits.
 
@@ -104,8 +107,40 @@ def scan(path):
         plex_state = "same size" if plex.stat().st_size == path.stat().st_size else "DIFFERENT size (rebuild it)"
     else:
         plex_state = "no Plex copy"
-    return {"notes": len(notes), "stored": stored, "current": current, "before": before, "after": after, "held": held,
+    return {"extra": extra_checks(path, notes), "notes": len(notes), "stored": stored, "current": current,
+            "before": before, "after": after, "held": held,
             "short": short, "dups": dups, "similar": similar, "plex": plex_state}
+
+
+def notes_file(path):
+    """The notes file this .ass was built from (notes-<stem>.json, or a variant such as .aligned.json), newest first."""
+    stem = path.name[:-len(".notes.ass")]
+    names = {stem, stem.split()[0]}                       # "S01E01 Yesterdays Jam" also matches "notes-S01E01.json"
+    found = [p for name in names for p in path.parent.glob(f"notes-{name}*.json") if not p.name.endswith(".bak")]
+    return max(found, key=lambda p: p.stat().st_mtime) if found else None
+
+
+def extra_checks(path, notes):
+    """Checks that need no speech recognition: is the notes file missing or newer, do the timers match today's
+    timing, are notes read too fast, do notes bunch up, and is the Plex copy byte-for-byte the same."""
+    out = {}
+    src = notes_file(path)
+    out["notes_file"] = "missing" if src is None else (
+        "newer than the .ass, rebuild" if src.stat().st_mtime > path.stat().st_mtime else "older or same age")
+    retimed = [n for n in notes if abs((n["end"] - n["start"]) - make_ass.note_duration(
+        n["text"], None, make_ass.DEFAULT_TIMING)) > 0.5]
+    out["retimed"] = len(retimed)
+    out["fast"] = [n for n in notes if n["text"] and (n["end"] - n["start"]) / len(n["text"].split()) < 0.33]
+    ordered = sorted(notes, key=lambda n: n["start"])
+    out["bunched"] = sum(1 for a, b in zip(ordered, ordered[1:]) if b["start"] - a["start"] < 0.5)
+    seen, out["exact_repeats"] = set(), 0
+    for n in ordered:
+        out["exact_repeats"] += n["text"] in seen
+        seen.add(n["text"])
+    plex = path.with_name(path.name[:-len(".notes.ass")] + ".en.ass")
+    out["plex_identical"] = plex.exists() and plex.read_bytes() == path.read_bytes()
+    out["categories"] = sorted({n["category"].lower() for n in notes})
+    return out
 
 
 def files_under(target):
@@ -142,6 +177,12 @@ def main(argv=None):
         if r["dups"]:
             print(f"  {len(r['dups'])} repeated note(s) would be left out (dedupe.py).")
         print(f"  Plex copy: {r['plex']}.")
+        x = r["extra"]
+        print(f"  Notes file: {x['notes_file']}. {x['retimed']} note(s) would get a different on-screen time "
+              f"under today's timing. {len(x['fast'])} note(s) read faster than a third of a second a word. "
+              f"{x['bunched']} pair(s) start within half a second. {x['exact_repeats']} exact repeat(s).")
+        if x["plex_identical"]:
+            print("  Plex copy is byte-for-byte the notes file.")
     return 0
 
 

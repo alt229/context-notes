@@ -38,3 +38,24 @@ def test_projection_applies_the_three_note_limit(tmp_path):
     assert before[1] >= 4
     assert after[1] <= 3
     assert held
+
+
+def test_notes_file_is_found_by_stem(tmp_path):
+    (tmp_path / "Film.notes.ass").write_text("x", encoding="utf-8")
+    (tmp_path / "notes-Film.json").write_text("{}", encoding="utf-8")
+    assert scan_ass.notes_file(tmp_path / "Film.notes.ass").name == "notes-Film.json"
+    assert scan_ass.notes_file(tmp_path / "Other.notes.ass") is None
+
+
+def test_extra_checks_count_fast_bunched_and_repeats(tmp_path):
+    f = tmp_path / "Film.notes.ass"
+    f.write_text("x", encoding="utf-8")
+    notes = [
+        {"start": 0.0, "end": 1.0, "text": "one two three four five six", "category": "idiom"},
+        {"start": 0.2, "end": 9.0, "text": "one two three four five six", "category": "idiom"},
+    ]
+    x = scan_ass.extra_checks(f, notes)
+    assert len(x["fast"]) == 1                             # 1 s for six words
+    assert x["bunched"] == 1
+    assert x["exact_repeats"] == 1
+    assert x["notes_file"] == "missing"
