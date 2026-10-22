@@ -19,7 +19,7 @@ A notes file is plain JSON. `make_ass.py` merges it with an SRT to produce the `
 | `film_language` | Two-letter code of the language spoken (`fr`, `de`, `es`...), when it isn't English. Written by `--generate --film-language`; `--refine` reuses it. |
 | `original_subtitles` | File name of the original-language subtitles used with `--original-subs`; `--refine` reuses the file if it's beside the subtitles. |
 | `limit` | Seconds: the notes were written for the first part of the video only (`--limit`). `refined.limit` is the same for `--refine`. |
-| `timing` | How long notes stay up: `{"wpm": 180, "settle": 2, "min": 5, "max": 18}` (any of the four; the rest default). Written when you give `--reading-speed`, `--note-settle`, `--note-min` or `--note-max` to `make_ass.py`. |
+| `timing` | How long notes stay up: `{"wpm": 150, "settle": 2, "min": 6, "max": 24}` (any of the four; the rest default). Written when you give `--reading-speed`, `--note-settle`, `--note-min` or `--note-max` to `make_ass.py`. |
 | `display_subtitles`, `display_offset` | Subtitles shown at the bottom instead of the ones the notes are placed on (`--display-subs`). |
 | `notes` | The list of notes. |
 
@@ -58,7 +58,7 @@ Notes are placed in order, and `match` searches forward from the previous match,
 |---|---|
 | `when` | `"start"` shows the note as the line begins. Default is just after the line ends, so the joke lands before the explanation. |
 | `delay` | Extra seconds to wait before showing the note. |
-| `duration` | Seconds on screen. Default: 2 s to notice the note plus its words at 180 a minute, kept between 5 and 18 s (change for a whole film with the top-level `timing`). `make_ass.py --timing-report` shows how many seconds a word each note gets and which ones the ceiling cuts short. |
+| `duration` | Seconds on screen. Default: 2 s to notice the note plus its words at 150 a minute, kept between 6 and 24 s (change for a whole film with the top-level `timing`). `make_ass.py --timing-report` shows how many seconds a word each note gets and which ones the ceiling cuts short. |
 
 ## Repeats
 
