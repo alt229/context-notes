@@ -46,6 +46,7 @@ Notes appear as small boxed overlays while you watch, in VLC (or any player that
 | `dedupe.py` | Lists notes that explain something an earlier note already did (the build leaves those out). |
 | `chat_notes.py` | Write the dialogue notes in a claude.ai chat or with Claude Code (your subscription) instead of the API. |
 | `languages.py` | Language codes and names shared by the scripts (`fr`, `fre`, `French` are all French). |
+| `prompts.py` | How the scripts ask questions: in Terminal as usual, or answered by another program such as a GUI ([docs/gui-protocol.md](docs/gui-protocol.md)). |
 
 ## Requirements
 
@@ -167,13 +168,14 @@ make_ass.py episode.srt notes.json --report                # how crowded each la
 make_ass.py episode.srt --generate [--title ... --audience ... --notes-language ...]
 make_ass.py episode.srt --refine --video episode.mp4 [--frames dense] [--assume-synced]
 make_ass.py episode.srt --generate --limit 5:00                # first 5 minutes only
+make_ass.py episode.srt --generate --estimate-only             # size and cost only: nothing sent, nothing written
 make_ass.py film.en.srt --generate --film-language fr --original-subs film.fr.srt
 make_ass.py --set-api-key
 ```
 
 `--generate --offset 0.88` also records the offset in the notes file, so later rebuilds line up without it.
 
-`--generate` and `--refine` print a size and cost estimate and ask before anything is sent (`--yes` skips the question). Both keep backups: the old notes file as `.bak`, and `--refine` also keeps the previous `.ass` and writes a plain-text report of every change.
+`--generate` and `--refine` print a size and cost estimate and ask before anything is sent (`--yes` skips the question). `--estimate-only` prints the estimate and stops. Nothing is sent, no API key is needed, and no notes or `.ass` are written (`--refine` still analyses the video and keeps that for the real run). Both keep backups: the old notes file as `.bak`, and `--refine` also keeps the previous `.ass` and writes a plain-text report of every change.
 
 `--refine` checks the subtitle sync first. If it cannot measure one constant offset (subtitles from a different cut, say), it falls back to *visual-only* notes rather than guessing. Fix the subtitles with `analyze.py --align` and pass the aligned SRT, or use `--assume-synced` if you know they are right. It also refuses to run if the file names suggest the video is a different episode from the notes.
 
@@ -259,6 +261,17 @@ This folder is also a Claude Code project. Run `claude` in it and:
 
 `CLAUDE.md` holds what the project has learned so far (benchmark results, defaults, pitfalls). The agents are in
 `.claude/agents/`; edit the `model:` line to change which Claude each one uses.
+
+## Running it from another program
+
+The groundwork for a GUI is in place, though there is no GUI yet. A program that starts the scripts with the
+environment variable `CONTEXT_NOTES_UI=json` gets every question, hidden prompt, cost estimate and progress report as
+a line of JSON on stdout, and answers on stdin. It cancels a run the way Ctrl-C does. Without that variable, nothing
+changes. Details and the list of questions are in [docs/gui-protocol.md](docs/gui-protocol.md).
+
+Stopping part-way, with Ctrl-C, a GUI's Cancel or an API error, is safe. The notes Claude has already written, and
+a refine's changes so far, are kept. The next run asks whether to pick up where it left off; that's the default, so
+nothing you've paid for is sent twice. No file is ever left half-written.
 
 ## VLC extension
 

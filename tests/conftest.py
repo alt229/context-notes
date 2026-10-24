@@ -41,6 +41,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(h))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CONTEXT_NOTES_UI", raising=False)     # tests choose the GUI mode themselves
     return h
 
 
@@ -49,12 +50,15 @@ def run_cli(script, *args, cwd=None, home_dir=None, stdin=None, env_extra=None):
     import os
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     env.pop("ANTHROPIC_API_KEY", None)
+    env.pop("CONTEXT_NOTES_UI", None)                         # tests choose the GUI mode themselves (env_extra)
     if home_dir:
         env["HOME"] = str(home_dir)
         env.pop("XDG_CONFIG_HOME", None)
     env.update(env_extra or {})
+    # start_new_session: no terminal attached. Otherwise a hidden prompt (getpass) reads the real terminal you ran
+    # pytest in, not `stdin`, and the test waits for you to type.
     return subprocess.run([sys.executable, str(ROOT / script), *map(str, args)], cwd=cwd, env=env,
-                          input=stdin, capture_output=True, text=True, timeout=300)
+                          input=stdin, capture_output=True, text=True, timeout=300, start_new_session=True)
 
 
 def message(text, stop_reason="end_turn", usage=(1000, 200)):

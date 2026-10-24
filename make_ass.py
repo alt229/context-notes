@@ -45,9 +45,12 @@ Optional per-note keys: "duration" (seconds), "occurrence" (match the Nth hit),
 the joke lands before the explanation), "delay" (extra seconds).
 """
 import argparse
+import contextlib
 import json
+import os
 import re
 import shutil
+import stat
 import sys
 import unicodedata
 from pathlib import Path
@@ -92,6 +95,43 @@ DEFAULT_LABEL_COLOUR = "&HE6E6E6&"
 
 
 # ---------------------------------------------------------------- SRT parsing
+@contextlib.contextmanager
+def replacing(path):
+    """Write a file all at once. Yields a temporary name beside `path` to write to; when the block ends, that file
+    takes the place of `path`, with the old file's permissions. If the block is interrupted (an error, Ctrl-C, a
+    GUI's Cancel), `path` is left as it was and the temporary file is removed, so no later run finds half a file."""
+    path = Path(path)
+    if path.is_symlink():                                  # write the file the link points to; keep the link
+        path = path.resolve()
+    tmp = path.with_name(f".{path.name}.part{os.getpid()}")
+    try:
+        yield tmp
+        try:
+            os.chmod(tmp, stat.S_IMODE(path.stat().st_mode))
+        except OSError:                                    # no old file: the new one keeps the usual permissions
+            pass
+        try:
+            os.replace(tmp, path)
+        except PermissionError:                            # Windows, when another program has the old file open:
+            shutil.copyfile(tmp, path)                     # write into it, as before
+            tmp.unlink()
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def write_text_safely(path, text, encoding="utf-8"):
+    """Path(path).write_text(text), but all at once (see replacing())."""
+    try:
+        with replacing(path) as tmp:
+            tmp.write_text(text, encoding=encoding)
+    except PermissionError:          # the folder won't take a new file, though the file itself may be writable:
+        Path(path).write_text(text, encoding=encoding)          # write it in place, as before
+
+
 def read_text(path):
     raw = Path(path).read_bytes()
     if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):          # UTF-16 with BOM
@@ -556,7 +596,7 @@ def build(srt_path, notes_path, out_path, offset=0.0, layout="split", display_sr
            .replace("{dfs}", str(dfs))]
     for s, e, layer, style, name, text in events:
         out.append(f"Dialogue: {layer},{fmt_ass_time(s)},{fmt_ass_time(e)},{style},{name},0,0,0,,{text}\n")
-    Path(out_path).write_text("".join(out), encoding="utf-8-sig")
+    write_text_safely(out_path, "".join(out), encoding="utf-8-sig")
 
     n_sp = sum(1 for p in placed if p["kind"] == "speech")
     say(f"{len(shown)} dialogue cues" + (f" from {Path(display_srt).name}" if display_srt else "")
@@ -583,7 +623,7 @@ def create_blank_notes(path, srt):
         "scope": "Dialogue notes come from the subtitles; visual notes (kind: visual) come from frames of the video",
         "notes": [],
     }
-    path.write_text(json.dumps(skeleton, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    write_text_safely(path, json.dumps(skeleton, indent=1, ensure_ascii=False) + "\n")
     print(f"There was no notes file yet, so I created a blank one: {path.resolve()}")
     print("It has no notes in it. This script only merges notes into the subtitles; it doesn't write them.")
     print("To have Claude write them for you (uses API credits; first run  make_ass.py --set-api-key):")
@@ -616,7 +656,7 @@ def display_choice(a, spec, notes_path):
         changed = changed or spec.get("display_offset") != a.display_offset
         spec["display_offset"] = a.display_offset
     if changed:
-        notes_path.write_text(json.dumps(spec, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
     name = spec.get("display_subtitles")
     if not name:
         return None, 0.0
@@ -638,7 +678,7 @@ def remember_timing(a, spec, notes_path):
         if any(saved.get(k) != v for k, v in given.items()):
             saved.update(given)
             spec["timing"] = saved
-            notes_path.write_text(json.dumps(spec, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+            write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
     return timing_settings(spec if isinstance(spec, dict) else None, **given)
 
 
@@ -718,10 +758,18 @@ def main():
     g.add_argument("--max-tokens", type=int, default=None, metavar="N",
                    help="with --generate/--refine: reply limit per request (higher efforts may need more room)")
     g.add_argument("--yes", action="store_true", help="don't ask before sending the subtitles to the API")
+    g.add_argument("--estimate-only", action="store_true",
+                   help="with --generate or --refine: show the size and cost estimate, then stop. Nothing is sent, "
+                        "no API key is needed, and no notes or .ass are written (--refine still analyses the video, "
+                        "and keeps that for the real run)")
     g.add_argument("--force", action="store_true", help="with --generate: replace an existing notes file (a .bak copy is kept)")
     g.add_argument("--api-key-file", help="read the API key from this file instead of the default location")
     g.add_argument("--api-url", help=argparse.SUPPRESS)
     a = ap.parse_args()
+    if a.estimate_only and not (a.generate or a.refine):
+        ap.error("--estimate-only goes with --generate or --refine")
+    if a.estimate_only and a.generate and a.refine:
+        ap.error("--estimate-only works on one step at a time: --generate or --refine")
     if a.set_api_key:
         import generate_notes
         generate_notes.set_key()
@@ -736,7 +784,7 @@ def main():
     if a.original_subs and not Path(a.original_subs).exists():
         sys.exit(f"Can't find the original-language subtitles {a.original_subs}")
     if a.generate:
-        if notes_path.exists():
+        if notes_path.exists() and not a.estimate_only:      # an estimate replaces nothing, so needs no --force
             spec = json.loads(read_text(a.notes))
             have = len(spec["notes"] if isinstance(spec, dict) else spec)
             if have and not a.force:
@@ -757,8 +805,12 @@ def main():
                                 year=generate_notes.resolve_year(a.year, a.video or a.srt, a.title),
                                 language=a.notes_language, assume_yes=a.yes, key_file=a.api_key_file,
                                 film_language=a.film_language, original_srt=a.original_subs, limit=a.limit,
-                                video_offset=a.offset, **kw)
+                                video_offset=a.offset, estimate_only=a.estimate_only, **kw)
+        if a.estimate_only:
+            return
     elif not notes_path.exists():
+        if a.estimate_only:
+            sys.exit(f"There is no {a.notes} yet, so --refine has nothing to estimate. Write the notes first (--generate).")
         create_blank_notes(notes_path, a.srt)
         return
     else:
@@ -784,7 +836,9 @@ def main():
                             frames=a.frames, ass_path=out, audience=a.audience, title=a.title, language=a.notes_language,
                             assume_yes=a.yes, key_file=a.api_key_file, assume_synced=a.assume_synced,
                             film_language=a.film_language, original_srt=a.original_subs, limit=a.limit,
-                            year=a.year, **rkw)
+                            year=a.year, estimate_only=a.estimate_only, **rkw)
+        if a.estimate_only:
+            return
     offset = a.offset
     spec = json.loads(read_text(a.notes))
     if offset is None:

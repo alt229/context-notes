@@ -1,3 +1,4 @@
+import getpass
 import json
 import os
 import re
@@ -80,7 +81,7 @@ def test_cost_uses_the_price_table():
 
 # ---------------------------------------------------------------- API key storage
 def test_set_key_writes_a_private_file(home, monkeypatch):
-    monkeypatch.setattr(gn.getpass, "getpass", lambda prompt: "  sk-ant-abc123456  ")
+    monkeypatch.setattr(getpass, "getpass", lambda prompt: "  sk-ant-abc123456  ")
     gn.set_key()
     path = home / ".config" / "context-notes" / "api-key"
     assert path.read_text() == "sk-ant-abc123456\n"
@@ -90,7 +91,7 @@ def test_set_key_writes_a_private_file(home, monkeypatch):
 
 
 def test_set_key_rejects_things_that_are_not_keys(home, monkeypatch):
-    monkeypatch.setattr(gn.getpass, "getpass", lambda prompt: "hunter2")
+    monkeypatch.setattr(getpass, "getpass", lambda prompt: "hunter2")
     with pytest.raises(SystemExit):
         gn.set_key()
     assert not (home / ".config" / "context-notes" / "api-key").exists()

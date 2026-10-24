@@ -24,7 +24,6 @@ Whatever it finds is COPIED beside the video as <video name>.<lang>.srt (downloa
 there directly), so every other script picks it up. Nothing is moved or changed where it was found.
 """
 import argparse
-import getpass
 import json
 import os
 import re
@@ -42,6 +41,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import languages  # noqa: E402
 import make_ass  # noqa: E402
+import prompts  # noqa: E402
 
 SUB_DIRS = re.compile(r"^(subs?|subtitles?|untertitel|sous[- ]titres|subtitulos)$", re.I)
 JUNK = re.compile(r"\b(2160p|1080p|720p|576p|480p|bluray|blu-ray|brrip|bdrip|web-?dl|webrip|web|hdtv|dvdrip|remux|x264|"
@@ -185,7 +185,8 @@ def place_beside(video, src, lang):
     dest = video.with_name(f"{video.stem}.{lang}.srt")
     if dest.exists():
         return dest
-    shutil.copy2(src, dest)
+    with make_ass.replacing(dest) as tmp:            # all at once: a half-copied file would be used next time
+        shutil.copy2(src, tmp)
     return dest
 
 
@@ -199,9 +200,9 @@ def os_set_login():
     """Prompt for the OpenSubtitles.com API key and login; store them readable only by this user."""
     say("You need a free account at https://www.opensubtitles.com and an API key from "
         "https://www.opensubtitles.com/consumers (\"New consumer\").")
-    api_key = getpass.getpass("API key (hidden): ").strip()
-    user = input("Username: ").strip()
-    pw = getpass.getpass("Password (hidden): ")
+    api_key = prompts.secret("API key (hidden): ", id="opensubtitles.api-key").strip()
+    user = prompts.text_input("Username: ", id="opensubtitles.username").strip()
+    pw = prompts.secret("Password (hidden): ", id="opensubtitles.password")
     if not (api_key and user and pw):
         sys.exit("Something was left empty; nothing saved.")
     path = os_config_path()
@@ -546,9 +547,9 @@ def main(argv=None):
         return 0
 
     def ask(q):
-        if not sys.stdin.isatty():
+        if not prompts.interactive():
             return "n"
-        return "y" if input(f"{q} [y/N] ").strip().lower() in ("y", "yes") else "n"
+        return "y" if prompts.confirm(q, id="subs.transcribe" if "speech recognition" in q else "subs.download") else "n"
     got = find(video, lang, online=False if a.offline else (True if a.online else None),
                transcribe=True if a.transcribe else None, ask=ask, model=a.model, limit=a.limit)
     if not got:

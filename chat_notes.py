@@ -216,7 +216,7 @@ def collect(a):
     if year:
         spec["year"] = int(year)
     spec["notes"] = [intro] + [n for _, n in notes]
-    dest.write_text(json.dumps(spec, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    make_ass.write_text_safely(dest, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
     print(f"Wrote {len(notes)} notes -> {dest}")
     dups, similar = dedupe.find_duplicates(spec["notes"])
     print(f"  {len(dups)} repeated explanation(s) will be left out of the .ass, {len(similar)} near-miss(es) kept "

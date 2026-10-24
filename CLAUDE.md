@@ -61,6 +61,14 @@ Read `README.md` for the full command reference. This file holds what we've lear
   - Tested on Amélie: a 3-minute stretch moved by 1.2 s was found (measured as 1.3 s), on both the French subtitles
     and the English ones measured through the French. After `--fix`, the re-check was clean.
 
+- **Stopped runs pick up where they left off** (Erin, 2026-10-24). This covers an API error, Ctrl-C and Cancel.
+  - The next run asks "Pick up where it left off?" (`generate.resume`, `refine.resume`). The default is yes, and
+    `--yes` takes it.
+  - Note-writing keeps its notes in `<notes>.partial.json`, with the last subtitle line covered. The file is used
+    only for the same subtitle file, `--limit` and film language, and it's removed once the notes file is written.
+  - Refine writes `refined.stopped_after` (time, part, parts, backup) into the notes file. `context_notes.py` treats
+    that as unfinished. "Start again" restores the backup made before the stopped refine.
+
 ## Known pitfalls
 
 - Frame timestamps: before 0.2.0, `analyze.run_ffmpeg_frames` paired showinfo times with written frames, and Homebrew
@@ -99,7 +107,13 @@ Read `README.md` for the full command reference. This file holds what we've lear
    - Separate what you ran from what you inferred.
 6. **Keep scripts runnable on their own.** Use the Python 3.9+ stdlib, plus numpy, Pillow and faster-whisper only
    where already used. Every step prints the command it runs.
-7. **Write for Erin.** Plain English in messages and docs, and say what to do next. She runs macOS (Apple
+7. **Ask through `prompts.py`.** New questions use `prompts.confirm`, `secret` or `text_input`, or
+   `context_notes.ask(..., id=...)`. Never call `input()` or `getpass` directly, so a GUI can answer them. Give each
+   question a stable id and add it to the table in `docs/gui-protocol.md`. Events go through `prompts.py` too, and
+   never while a printed line is still open (`end=" "`).
+8. **Write files all at once.** Anything a later run reads (caches, subtitles, notes, `.ass`) is written with
+   `make_ass.write_text_safely()` or `make_ass.replacing()`, so Ctrl-C or a GUI's Cancel can't leave half a file.
+9. **Write for Erin.** Plain English in messages and docs, and say what to do next. She runs macOS (Apple
    Silicon, Homebrew, Python 3.14) and works in Terminal.
 
 ## Agents in this project

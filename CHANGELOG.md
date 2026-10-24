@@ -7,6 +7,18 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- `prompts.py`, the groundwork for a GUI. With `CONTEXT_NOTES_UI=json` set, every question, hidden prompt (API key,
+  OpenSubtitles login) and cost estimate is written as one JSON line on stdout and answered on stdin, through every
+  script a run starts. Without it, the scripts ask exactly as before. See `docs/gui-protocol.md`.
+- Progress for a GUI (with `CONTEXT_NOTES_UI=json`): `progress` events from the soundtrack check, frame pulling,
+  speech recognition and each API request, plus `video`, `step` and `video-result` events from `context_notes.py`.
+  A GUI cancels a run by sending SIGINT to its process group, as Ctrl-C does. See `docs/gui-protocol.md`.
+- Picking up where a stopped run left off. When writing notes or refining stops part-way (an API error, Ctrl-C or a
+  GUI's Cancel), the next run asks "Pick up where it left off?". The default is yes, and only the rest is sent. You
+  can also start again; for a refine, that starts from the notes as they were before it. `--yes` and unattended
+  runs pick up.
+- `make_ass.py --generate --estimate-only` and `--refine --estimate-only`: show the size and cost estimate, then
+  stop. Nothing is sent, no API key is needed, and no notes, `.bak` or `.ass` are written.
 - `dedupe.py`, and on every build: notes that explain something an earlier note already explained are left out of
   the `.ass` (the notes file is untouched). `--keep-duplicates`, or `"keep": true` on a note, keeps them.
 - Note timing settings: `--reading-speed`, `--note-settle`, `--note-min`, `--note-max` (remembered in the notes file
@@ -38,6 +50,18 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- Stopping speech recognition part-way (Ctrl-C) left half a transcript in the `<video> analysis` folder, and the
+  next run used it as if it were the whole film. The transcript is now saved only once it's complete. If you ever
+  stopped `--align` or the alignment check part-way, delete that video's `transcript-*.jsonl` file.
+- Ctrl-C while Claude was writing notes threw away the notes already written (and paid for). They're now kept in
+  `notes-<name>.partial.json`, as they already were after an API error, and the next run offers to pick up there.
+- A refine that an API error stopped part-way was marked as finished, so `context_notes.py` reported the film as
+  done and never finished the refine. It's now marked as stopped (`--status` says "refine stopped part-way"), and
+  the next run offers to pick up. Ctrl-C and Cancel now keep a refine's changes so far too.
+- Caches, subtitle files, notes and the `.ass` are written all at once, so a stop at the wrong moment can't leave
+  half a file for the next run to trust. The old file's permissions are kept.
+- `context_notes.py` gives the running step time to tidy up after Ctrl-C (up to 10 s instead of Python's 0.25 s).
+- The tests no longer stop at a hidden "Paste your Anthropic API key" prompt when run in Terminal.
 - `chat_notes.py collect` no longer drops the first or last note of a pasted reply block (the part-header pattern
   matched into the JSON braces). `collect` also prints how many repeated explanations the build will leave out.
 - On-screen notes (Prop, Costume, Staging, On-screen text...) could be timed far too early, more so the later in the

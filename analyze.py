@@ -62,6 +62,7 @@ sys.dont_write_bytecode = True        # keep the project folder free of __pycach
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import languages  # noqa: E402
 import make_ass  # noqa: E402  (SRT parsing and time formatting)
+import prompts  # noqa: E402
 
 SR = 16000          # audio sample rate used for analysis
 FPS_A = 50          # audio analysis frames per second (20 ms)
@@ -177,10 +178,11 @@ def strip_sdh(text):
 
 def extract_subtitles(video, track, out, sdh=False):
     """Write one embedded text subtitle track to an SRT file."""
-    r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-map", f"0:s:{track['n']}",
-                        "-c:s", "srt", "-f", "srt", str(out)], capture_output=True, text=True)
-    if r.returncode:
-        sys.exit(f"ffmpeg couldn't extract subtitle track {track['n']}:\n{r.stderr[-600:]}")
+    with make_ass.replacing(out) as tmp:             # all at once: a stopped extraction leaves no half file
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-map", f"0:s:{track['n']}",
+                            "-c:s", "srt", "-f", "srt", str(tmp)], capture_output=True, text=True)
+        if r.returncode:
+            sys.exit(f"ffmpeg couldn't extract subtitle track {track['n']}:\n{r.stderr[-600:]}")
     cues = make_ass.parse_srt(out)
     if sdh:
         keep = []
@@ -189,12 +191,12 @@ def extract_subtitles(video, track, out, sdh=False):
             if body:
                 keep.append({**c, "text": body})
         cues = keep
-        with open(out, "w", encoding="utf-8") as f:
-            def ts(t):
-                ms = int(round(t * 1000))
-                return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
-            for n, c in enumerate(cues, 1):
-                f.write(f"{n}\n{ts(c['start'])} --> {ts(c['end'])}\n{c['text']}\n\n")
+
+        def ts(t):
+            ms = int(round(t * 1000))
+            return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
+        make_ass.write_text_safely(out, "".join(f"{n}\n{ts(c['start'])} --> {ts(c['end'])}\n{c['text']}\n\n"
+                                                for n, c in enumerate(cues, 1)))
         cues = make_ass.parse_srt(out)
     return cues
 
@@ -229,7 +231,7 @@ def limit_tag(limit):
     return f"-first{int(round(limit))}s" if limit else ""
 
 
-def soundtrack_db(video, astream, folder, limit=None):
+def soundtrack_db(video, astream, folder, limit=None, duration=None):
     """speech_band_db, cached in the analysis folder so a second pass (e.g. --refine after the sync check) is instant.
     The cache is reused only for the same file (size and modification time) and the same --limit."""
     np = need("numpy", "pip3 install numpy")
@@ -241,18 +243,19 @@ def soundtrack_db(video, astream, folder, limit=None):
     try:
         if cache.exists() and json.loads(meta.read_text()) == key:
             return np.load(cache)
-    except (OSError, ValueError):
+    except (OSError, ValueError, EOFError):
         pass
-    db = speech_band_db(video, astream, limit)
+    db = speech_band_db(video, astream, limit, duration)
     try:
-        np.save(cache, db)
-        meta.write_text(json.dumps(key))
+        with make_ass.replacing(cache) as tmp, open(tmp, "wb") as f:      # all at once, then the key that vouches for it
+            np.save(f, db)
+        make_ass.write_text_safely(meta, json.dumps(key), encoding=None)
     except OSError:
         pass
     return db
 
 
-def speech_band_db(video, astream, limit=None):
+def speech_band_db(video, astream, limit=None, duration=None):
     """Loudness of the speech band, one value per 20 ms, streamed to keep memory low."""
     np = need("numpy", "pip3 install numpy")
     hop = SR // FPS_A
@@ -262,10 +265,13 @@ def speech_band_db(video, astream, limit=None):
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     out, carry = [], b""
     chunk = hop * 2 * FPS_A * 60                       # one minute of audio per read
+    read = 0
     while True:
         data = p.stdout.read(chunk)
         if not data:
             break
+        read += len(data)
+        prompts.progress("soundtrack", read / (2 * SR), duration, "seconds", every=0.5)
         data = carry + data
         usable = len(data) - len(data) % (hop * 2)
         carry = data[usable:]
@@ -273,6 +279,8 @@ def speech_band_db(video, astream, limit=None):
         frames = x.reshape(-1, hop)
         out.append(20 * np.log10(np.sqrt((frames ** 2).mean(1) + 1e-12)))
     p.wait()
+    if duration:
+        prompts.progress("soundtrack", duration, duration, "seconds")
     return np.concatenate(out) if out else np.zeros(0)
 
 
@@ -586,22 +594,34 @@ def transcribe(video, astream, model_name, cache, language="en", limit=None, tas
     fw = need("faster_whisper", "pip3 install faster-whisper")
     cmd = ["ffmpeg", "-v", "error", *limit_args(limit), "-i", str(video), "-vn", "-af", audio_filter(astream),
            "-ac", "1", "-ar", str(SR), "-f", "s16le", "-"]
+    prompts.progress("transcribe", 0, None, "seconds", text="reading the soundtrack")
     raw = subprocess.run(cmd, capture_output=True).stdout
     audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768
+    total = len(audio) / SR
+    prompts.progress("transcribe", 0, total, "seconds", text="loading the speech model")
     model = fw.WhisperModel(model_name, device="cpu", compute_type="int8")
-    t0, total = time.time(), len(audio) / SR
+    t0 = time.time()
     segs, _ = model.transcribe(audio, language=languages.code(language) or "en", task=task, beam_size=1,
                                word_timestamps=True, vad_filter=True, condition_on_previous_text=False)
     out = []
-    with cache.open("w") as f:
+    # Written to a temporary file that becomes the cache only once every segment is in. A cache file is reused
+    # whenever it exists, so a stopped run must never leave a partial one behind.
+    with make_ass.replacing(cache) as tmp, open(tmp, "w") as f:
         for s in segs:
             row = {"s": s.start, "e": s.end, "t": s.text,
                    "w": [[w.start, w.end, w.word] for w in (s.words or [])]}
             f.write(json.dumps(row) + "\n")
             out.append(row)
-            print(f"\r  transcribing: {hms(s.end)} of {hms(total)}  ({time.time() - t0:.0f} s)",
-                  end="", flush=True)
-    print()
+            if prompts.machine():
+                prompts.progress("transcribe", s.end, total, "seconds", every=0.5)
+            else:
+                print(f"\r  transcribing: {hms(s.end)} of {hms(total)}  ({time.time() - t0:.0f} s)",
+                      end="", flush=True)
+    if prompts.machine():
+        prompts.progress("transcribe", total, total, "seconds")
+        print(f"  transcribed {hms(total)} ({time.time() - t0:.0f} s)", flush=True)
+    else:
+        print()
     return out
 
 
@@ -748,14 +768,14 @@ def dropped_msg(dropped):
 
 
 def write_srt(cues, assigned, out):
-    with open(out, "w", encoding="utf-8") as f:
-        n = 0
-        for i, c in enumerate(cues):
-            if i not in assigned:
-                continue
-            n += 1
-            s, e = c["start"] + assigned[i], c["end"] + assigned[i]
-            f.write(f"{n}\n{_srt_ts(s)} --> {_srt_ts(e)}\n{c['text']}\n\n")
+    blocks, n = [], 0
+    for i, c in enumerate(cues):
+        if i not in assigned:
+            continue
+        n += 1
+        s, e = c["start"] + assigned[i], c["end"] + assigned[i]
+        blocks.append(f"{n}\n{_srt_ts(s)} --> {_srt_ts(e)}\n{c['text']}\n\n")
+    make_ass.write_text_safely(out, "".join(blocks))             # all at once: never half a subtitle file
 
 
 # ---------------------------------------------------------------- video analysis as data
@@ -777,7 +797,7 @@ def analyze_video(cues, video, frames_mode="keyframes", fallback_offset=0.0, say
         duration = limit
         cues = make_ass.limit_cues(cues, limit)
     say("  measuring the soundtrack...")
-    db = soundtrack_db(video, astream, out, limit)
+    db = soundtrack_db(video, astream, out, limit, duration=duration)
     sync = sync_check(db, cues, duration)
     say("  " + sync["verdict"])
     constant = sync["offset"] is not None and "--align" not in sync["verdict"]
@@ -788,8 +808,10 @@ def analyze_video(cues, video, frames_mode="keyframes", fallback_offset=0.0, say
     moments = loud_moments(db, cues, offset)
     say(f"  {len(moments)} loud moments with no dialogue")
     say(f"  pulling frames ({frames_mode})...")
+    prompts.progress("frames", 0, None)
     frames = run_ffmpeg_frames(video, out / "frames", dense=(frames_mode == "dense"), limit=limit)
     sheets = contact_sheets(frames, cues, offset, out / "sheets", min_gap=0.9 if frames_mode == "dense" else 1.5)
+    prompts.progress("frames", len(frames), len(frames), "frames")
     say(f"  {len(frames)} frames -> {len(sheets)} contact sheets in {out / 'sheets'}")
     return {"duration": duration, "sync": sync, "offset_measured": measured, "offset": offset,
             "moments": moments, "sheets": sheets}
@@ -938,7 +960,7 @@ def main():
         work_cues = make_ass.parse_srt(aligned)
 
     print("Measuring the soundtrack...")
-    db = soundtrack_db(video, astream, out, limit)
+    db = soundtrack_db(video, astream, out, limit, duration=duration)
     sync = sync_check(db, work_cues, duration)
     report["sync"] = sync
     print("  " + sync["verdict"])
@@ -962,13 +984,15 @@ def main():
 
     if a.frames != "none":
         print(f"Pulling frames ({a.frames})...")
+        prompts.progress("frames", 0, None)
         frames = run_ffmpeg_frames(video, out / "frames", dense=(a.frames == "dense"), limit=limit)
         sheets = contact_sheets(frames, work_cues, offset, out / "sheets",
                                 min_gap=0.9 if a.frames == "dense" else 1.5)
+        prompts.progress("frames", len(frames), len(frames), "frames")
         report["contact_sheets"] = len(sheets)
         print(f"  {len(frames)} frames -> {len(sheets)} contact sheets in {out / 'sheets'}")
 
-    (out / "analysis.json").write_text(json.dumps(report, indent=1))
+    make_ass.write_text_safely(out / "analysis.json", json.dumps(report, indent=1), encoding=None)
     with open(out / "report.txt", "w", encoding="utf-8") as f:
         f.write(f"{video.name}  ({hms(duration)})\nsubtitles: {srt.name}\n\n")
         f.write(f"SYNC: {sync['verdict']}\n  overall offset: {sync['offset']} s; by thirds: {sync['thirds']}\n\n")

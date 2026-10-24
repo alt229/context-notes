@@ -37,6 +37,7 @@ sys.path.insert(0, str(HERE))
 import analyze  # noqa: E402
 import languages  # noqa: E402
 import make_ass  # noqa: E402
+import prompts  # noqa: E402
 
 SEASON_DIR = re.compile(r"^(season|series|saison|staffel|temporada|stagione|seizoen)\s*\d+$|^s\d{1,2}$", re.I)
 DERIVED_SUFFIX = re.compile(r"(\.embedded(\.[a-z]{2})?)?(\.aligned(\.first\d+s)?)?$")
@@ -61,23 +62,11 @@ def show_cmd(cmd, cwd=None):
     return "$ " + " ".join(["python3"] + [short(c) for c in cmd[1:]])
 
 
-def ask(question, choices, default, auto=False):
+def ask(question, choices, default, auto=False, id=None):
     """Ask a one-letter question. `choices` is like {'a': 'align', 's': 'skip'}; returns the chosen key.
-    With auto (--yes) or no terminal, takes the default and says so."""
-    keys = "/".join(k.upper() if k == default else k for k in choices)
-    if auto or not sys.stdin.isatty():
-        say(f"{question} -> {choices[default]} (automatic)")
-        return default
-    while True:
-        try:
-            got = input(f"{question} [{keys}] ").strip().lower()
-        except EOFError:
-            return default
-        if not got:
-            return default
-        if got[0] in choices:
-            return got[0]
-        say("  Please answer " + " or ".join(f"'{k}' ({v})" for k, v in choices.items()))
+    With auto (--yes) or no terminal, takes the default and says so. When a program is answering
+    (CONTEXT_NOTES_UI=json, see prompts.py), the question goes to it, tagged with `id`."""
+    return prompts.ask(question, choices, default, auto, id)
 
 
 def covers(have, want):
@@ -231,7 +220,8 @@ def inspect(video, opts):
     st = {"video": video, "subs": subs, "srt": srt, "aligned": aligned, "notes": notes, "spec": spec, "have": have,
           "film_language": film, "film_language_from": how, "ass": ass, "display_lang": display}
     st["notes_ok"] = have > 0 and covers((spec or {}).get("limit"), opts.limit) and not opts.redo
-    st["refined_ok"] = bool(refined) and covers((refined or {}).get("limit"), opts.limit) and st["notes_ok"]
+    st["refined_ok"] = (bool(refined) and not refined.get("stopped_after")       # a refine that stopped part-way
+                        and covers((refined or {}).get("limit"), opts.limit) and st["notes_ok"])   # isn't finished
     st["ass_ok"] = ass.exists() and notes.exists() and ass.stat().st_mtime >= notes.stat().st_mtime
     st["done"] = st["notes_ok"] and st["ass_ok"] and (st["refined_ok"] or opts.no_refine)
     return st
@@ -263,7 +253,9 @@ def status_line(st):
     if st["have"]:
         lim = (st["spec"] or {}).get("limit")
         notes = f"{st['have']} notes" + (f" (first {make_ass.fmt_limit(lim)})" if lim else "")
-        notes += ", refined" if (st["spec"] or {}).get("refined") else ", not refined"
+        refined = (st["spec"] or {}).get("refined")
+        notes += ((", refine stopped part-way" if refined.get("stopped_after") else ", refined") if refined
+                  else ", not refined")
     else:
         notes = "no notes yet"
     state = "done" if st["done"] else "to do"
@@ -277,7 +269,17 @@ class Stop(Exception):
 
 def run(cmd, cwd):
     say(show_cmd(cmd, cwd))
-    return subprocess.run(cmd, cwd=cwd).returncode
+    with subprocess.Popen(cmd, cwd=cwd) as p:
+        try:
+            return p.wait()
+        except KeyboardInterrupt:
+            # Ctrl-C (or a GUI's Cancel) reaches the running step too. Give it time to keep what it can (notes
+            # already paid for) and tidy up, rather than the quarter of a second Python allows by default.
+            try:
+                p.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                p.kill()
+            raise
 
 
 def script(name, *args):
@@ -340,10 +342,10 @@ def _look_further(video, lang, opts, find_subs, film=None):
     can_transcribe = film is None or languages.same(lang, film)
 
     def ask_yes(q):
-        return ask(q, {"y": "yes", "n": "no"}, "y", opts.yes)
+        return ask(q, {"y": "yes", "n": "no"}, "y", opts.yes, id="subs.download")
 
     def ask_no(q):                    # transcribing a whole film is slow: only when asked for, never by --yes
-        return ask(q, {"y": "yes", "n": "no"}, "n", opts.yes)
+        return ask(q, {"y": "yes", "n": "no"}, "n", opts.yes, id="subs.transcribe")
     got = find_subs.find(video, lang, online=False if opts.offline else None,
                          transcribe=None if can_transcribe else False,
                          ask=lambda q: (ask_no if "speech recognition" in q else ask_yes)(q),
@@ -445,7 +447,8 @@ def check_sync(video, srt, film, display_lang, embedded, opts):
             say("Couldn't measure the sync, but these subtitles came from inside the video, so they should be in step.")
             return srt, True, None
         yes = ask("Couldn't measure the sync (not enough clear dialogue). Treat the subtitles as in sync?",
-                  {"y": "yes, treat as in sync", "n": "no, refine will only add on-screen notes"}, "y", opts.yes)
+                  {"y": "yes, treat as in sync", "n": "no, refine will only add on-screen notes"}, "y", opts.yes,
+                  id="sync.unmeasured")
         return srt, yes == "y", None
 
     # The timing drifts, or the subtitles are from a different cut.
@@ -462,7 +465,8 @@ def check_sync(video, srt, film, display_lang, embedded, opts):
         say("  (Re-timing needs faster-whisper:  pip3 install -r requirements.txt)")
         del choices["a"]
     default = "a" if "a" in choices else "c"
-    pick = ask("The subtitle timing doesn't match this video all the way through. What now?", choices, default, opts.yes)
+    pick = ask("The subtitle timing doesn't match this video all the way through. What now?", choices, default, opts.yes,
+               id="sync.drift")
     if pick == "s":
         raise Stop("Skipped at your request.")
     if pick == "c":
@@ -498,12 +502,12 @@ def alignment_step(video, srt, notes, film, display_lang, original, opts):
     folder = video.parent / f"{video.stem} analysis"
     cached = align_check.find_transcript(folder, film, opts.limit) if folder.exists() else None
     if not (opts.check_alignment or cached):
-        if opts.yes or not sys.stdin.isatty():
+        if opts.yes or not prompts.interactive():
             say("(Every note's timing can be checked against the speech: --check-alignment. It transcribes the "
                 "soundtrack once, which is slow.)")
             return srt
         if ask("Check every note's timing against the speech? (speech recognition: local, free, slow the first time)",
-               {"y": "yes", "n": "no"}, "y") == "n":
+               {"y": "yes", "n": "no"}, "y", id="alignment.check") == "n":
             return srt
     if not languages.same(display_lang, film) and original is None:
         say(f"(Skipping the alignment check: the {languages.name(display_lang)} subtitles can only be measured through "
@@ -515,6 +519,7 @@ def alignment_step(video, srt, notes, film, display_lang, original, opts):
     if opts.align_model:
         args += ["--model", opts.align_model]
     say("Checking every note against the speech before it...")
+    prompts.event("step", step="alignment")
     if run(script("align_check.py", *args), video.parent):
         say("  (The alignment check couldn't finish; the notes are built as they are.)")
         return srt
@@ -525,7 +530,8 @@ def alignment_step(video, srt, notes, film, display_lang, original, opts):
     if not runs:
         return srt
     if ask(f"Move the {len(runs)} stretch(es) of subtitles that are out to match the speech, and rebuild the notes? "
-           "(writes a corrected copy; the original stays)", {"y": "yes", "n": "no"}, "y", opts.yes) == "n":
+           "(writes a corrected copy; the original stays)", {"y": "yes", "n": "no"}, "y", opts.yes,
+           id="alignment.fix") == "n":
         return srt
     if run(script("align_check.py", *args, "--fix"), video.parent):
         return srt
@@ -559,6 +565,7 @@ def process(video, opts):
                            original_for(video, st["film_language"], st["display_lang"], opts), opts)
         return "done"
     say(f"$ cd {shlex.quote(str(video.absolute().parent))}")
+    prompts.event("step", step="subtitles")
 
     film = st["film_language"]
     foreign = film != "en"
@@ -606,14 +613,16 @@ def process(video, opts):
         lim = make_ass.fmt_limit(spec["limit"])
         want = "the whole video" if not opts.limit else f"the first {make_ass.fmt_limit(opts.limit)}"
         pick = ask(f"{notes.name} only covers the first {lim}. Write new notes for {want}? (the old file is kept as .bak)",
-                   {"y": "yes, write new notes", "n": "no, keep these"}, "y", opts.yes)
+                   {"y": "yes, write new notes", "n": "no, keep these"}, "y", opts.yes, id="notes.limited")
         need_generate = pick == "y"
     refined = (spec or {}).get("refined")
-    need_refine = not opts.no_refine and (need_generate or not refined or not covers(refined.get("limit"), opts.limit))
+    need_refine = not opts.no_refine and (need_generate or not refined or not covers(refined.get("limit"), opts.limit)
+                                          or bool(refined.get("stopped_after")))     # refine_notes asks to pick up
 
     # 2. sync (only before writing notes: re-timing afterwards could break notes anchored by line number)
     assume_synced, offset = aligned or embedded, None
     if need_generate and not aligned:
+        prompts.event("step", step="sync")
         srt, assume_synced, offset = check_sync(video, srt, film, display_lang, embedded, opts)
         notes = notes_path_for(video, srt) if not have else notes
 
@@ -638,6 +647,7 @@ def process(video, opts):
     # 3. Claude writes the notes
     if need_generate:
         say(f"Writing the notes for “{title}”...")
+        prompts.event("step", step="generate")
         cmd = script("make_ass.py", srt, notes, "--generate", "--video", video, "--title", title,
                      *limit_args(opts), *lang_args, *common_api_args(opts))
         if offset:
@@ -650,6 +660,7 @@ def process(video, opts):
     # 4. Claude refines them with the video
     if need_refine:
         say("Improving the notes using the video's frames...")
+        prompts.event("step", step="refine")
         cmd = script("make_ass.py", srt, notes, "--refine", "--video", video, "--frames", opts.frames,
                      *limit_args(opts), *lang_args, *common_api_args(opts))
         if assume_synced:
@@ -661,6 +672,7 @@ def process(video, opts):
     ass = ass_path_for(video)
     stale = not (ass.exists() and ass.stat().st_mtime >= notes.stat().st_mtime)
     if not need_generate and not need_refine and (stale or display_args):
+        prompts.event("step", step="build")
         if run(script("make_ass.py", srt, notes, "--video", video, *display_args), video.parent):
             raise Stop("Building the .ass failed.")
     alignment_step(video, srt, notes, film, display_lang, original, opts)
@@ -740,14 +752,18 @@ def main(argv=None):
     try:
         for k, v in enumerate(videos, 1):
             say(f"\n=== {v.name}" + (f"  ({k} of {len(videos)})" if len(videos) > 1 else "") + " ===")
+            prompts.event("video", path=str(v), index=k, total=len(videos))
             try:
                 results[v] = process(v, opts)
             except Stop as e:
                 say(f"! {e}")
                 results[v] = "stopped"
+                prompts.event("video-result", path=str(v), result="stopped", reason=str(e))
                 if k < len(videos) and ask("Go on to the next video?", {"y": "yes", "n": "no, stop here"}, "y",
-                                           opts.yes) == "n":
+                                           opts.yes, id="folder.next") == "n":
                     break
+            else:
+                prompts.event("video-result", path=str(v), result=results[v])
     except KeyboardInterrupt:
         say("\nStopped. Rerun the same command to pick up where this left off.")
         return 130
