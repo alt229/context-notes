@@ -1,6 +1,6 @@
 # Running the scripts from another program (a GUI)
 
-Status: groundwork for a GUI. There is no GUI yet. This is protocol version 1.
+This is protocol version 1. `app.py` (the page in your browser) uses it, and is a working example of everything here.
 
 A GUI runs the same scripts you run in Terminal. It reads what they print, and answers their questions for them.
 This page is what that program needs to know. The code is in `prompts.py`.

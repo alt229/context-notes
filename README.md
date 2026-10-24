@@ -35,7 +35,8 @@ Notes appear as small boxed overlays while you watch, in VLC (or any player that
 
 | File | What it does |
 |---|---|
-| `context_notes.py` | **Start here.** Runs the whole workflow for one video or a folder: finds the subtitles, checks sync (offers `--align` if needed), `--generate`, `--refine`, builds the `.ass`. Skips steps already done. |
+| `app.py` | The same workflow in your web browser, for anyone who'd rather not use Terminal: `python3 app.py`. The page is in `gui/`. |
+| `context_notes.py` | **Start here** in Terminal. Runs the whole workflow for one video or a folder: finds the subtitles, checks sync (offers `--align` if needed), `--generate`, `--refine`, builds the `.ass`. Skips steps already done. |
 | `analyze.py` | Prepares an episode: numbered transcript, pulls embedded subtitles out of an MP4/MKV, checks whether an SRT matches the video, finds loud moments with no dialogue, builds contact sheets, optionally re-aligns subtitles. |
 | `make_ass.py` | Merges an SRT and a notes file into one `.ass`. Also the front door for `--generate` and `--refine`. |
 | `generate_notes.py` | Calls the Claude API to write a first notes file from the dialogue. (Used through `make_ass.py`.) |
@@ -100,6 +101,30 @@ python3 make_ass.py episode.srt --refine --video episode.mp4
 ```
 
 Your video has subtitles inside it? Skip the SRT: `python3 analyze.py episode.mp4` extracts them (`--list-tracks`, `--sub-track N`, `--strip-sdh` are there if you need them).
+
+## The app, in your browser
+
+Prefer buttons to Terminal? Start the app, and it opens a page in your browser:
+
+```bash
+python3 app.py
+```
+
+- **Choose** a film or a folder of episodes. The list shows what's already done for each video.
+- **Pick how the notes are written:** best (Claude Opus) or cheaper (Claude Sonnet), whether Claude also looks at the
+  frames, and how much of the film. More options has the rest, such as subtitles in another language.
+- **Write the notes.** The cost appears on screen before anything is sent, along with any other question (picking up
+  a stopped run, for example). Progress is shown as it goes, and Cancel stops it the way Ctrl-C does.
+- **Watch:** open a finished video in VLC from the list.
+- **Settings** has your Anthropic API key (saved in the usual place), the OpenSubtitles login, and a button that
+  installs the VLC extension.
+
+Keep the Terminal window open while you use it; Ctrl-C there stops it. It runs the same scripts described below, so
+anything it does you can also do by hand. Only your computer can reach it: it listens on 127.0.0.1, and the page's
+address (printed when it starts) carries a random key.
+
+On Windows, run it inside WSL; the page opens in your Windows browser. You can paste Windows paths (`D:\Films\...`)
+as they are. Network drives (`Z:`) have to be mounted in WSL first: `sudo mkdir -p /mnt/z && sudo mount -t drvfs Z: /mnt/z`.
 
 ## Using it
 
@@ -264,7 +289,7 @@ This folder is also a Claude Code project. Run `claude` in it and:
 
 ## Running it from another program
 
-The groundwork for a GUI is in place, though there is no GUI yet. A program that starts the scripts with the
+`app.py` is one such program. A program that starts the scripts with the
 environment variable `CONTEXT_NOTES_UI=json` gets every question, hidden prompt, cost estimate and progress report as
 a line of JSON on stdout, and answers on stdin. It cancels a run the way Ctrl-C does. Without that variable, nothing
 changes. Details and the list of questions are in [docs/gui-protocol.md](docs/gui-protocol.md).

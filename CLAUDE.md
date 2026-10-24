@@ -116,6 +116,19 @@ Read `README.md` for the full command reference. This file holds what we've lear
 9. **Write for Erin.** Plain English in messages and docs, and say what to do next. She runs macOS (Apple
    Silicon, Homebrew, Python 3.14) and works in Terminal.
 
+## The app (`app.py` and `gui/index.html`)
+
+- A local web page for friends who don't use Terminal. It runs `context_notes.py` with `CONTEXT_NOTES_UI=json`
+  (`docs/gui-protocol.md`) and shows the questions, the cost, progress and Cancel.
+- Standard library only. One HTML file, with no external scripts, fonts or images.
+- Security: it listens on 127.0.0.1 only, every request needs the random key, and `Host` and `Origin` are checked.
+  The API key never goes to the page; it only shows the last 4 characters. Keep all of this when changing it.
+- New options friends should reach go in the page's form, and in `common_args` / `App.run` in `app.py`.
+- WSL is supported through a small layer: Windows paths, `explorer.exe`, `vlc.exe`, and PowerShell file dialogs.
+  Native Windows is not.
+- Tests: `tests/test_app.py` (HTTP, whole runs, cancel). To look at the page, run it with `--api-url` pointing at the
+  fake API from `tests/conftest.py` and open it in a headless browser.
+
 ## Agents in this project
 
 | Agent | Model | Job |

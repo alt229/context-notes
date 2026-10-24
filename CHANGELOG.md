@@ -10,6 +10,11 @@ All notable changes to this project are recorded here. The format follows
 - `prompts.py`, the groundwork for a GUI. With `CONTEXT_NOTES_UI=json` set, every question, hidden prompt (API key,
   OpenSubtitles login) and cost estimate is written as one JSON line on stdout and answered on stdin, through every
   script a run starts. Without it, the scripts ask exactly as before. See `docs/gui-protocol.md`.
+- `app.py`: the whole workflow in your web browser, on your computer only: `python3 app.py`. Choose a film or folder,
+  pick the quality, see the cost and answer questions on screen, follow the progress, cancel, and open finished videos
+  in VLC. Settings saves the API key and OpenSubtitles login and installs the VLC extension. It works on macOS and
+  Linux, and on Windows through WSL. Standard library only; it listens on 127.0.0.1 and needs the random key in its
+  address. `context_notes.py --status` also sends a `status` event per video for it.
 - Progress for a GUI (with `CONTEXT_NOTES_UI=json`): `progress` events from the soundtrack check, frame pulling,
   speech recognition and each API request, plus `video`, `step` and `video-result` events from `context_notes.py`.
   A GUI cancels a run by sending SIGINT to its process group, as Ctrl-C does. See `docs/gui-protocol.md`.

@@ -246,6 +246,18 @@ def no_subtitles_message(video, lang):
     return msg
 
 
+def status_fields(st):
+    """What --status shows about one video, as data for a GUI (the `status` event)."""
+    spec = st["spec"] or {}
+    refined = spec.get("refined") or {}
+    return {"path": str(st["video"]), "name": st["video"].name, "done": st["done"],
+            "subtitles": st["srt"].name if st["srt"] else None, "film_language": st["film_language"],
+            "notes": st["have"], "limit": spec.get("limit"),
+            "notes_stopped": st["notes"].with_suffix(".partial.json").exists(),
+            "refined": "stopped" if refined.get("stopped_after") else ("yes" if refined else "no"),
+            "ass": st["ass"].name if st["ass"].exists() else None}
+
+
 def status_line(st):
     subs = st["srt"].name if st["srt"] else "no .srt (will look inside the video)"
     if not st["srt"] and found_elsewhere(st["subs"]):
@@ -737,7 +749,9 @@ def main(argv=None):
 
     say(f"{len(videos)} video(s)" + (f", first {make_ass.fmt_limit(opts.limit)} of each" if opts.limit else "") + ":")
     for v in videos:
-        say(status_line(inspect(v, opts)))
+        st = inspect(v, opts)
+        say(status_line(st))
+        prompts.event("status", **status_fields(st))
     if opts.status:
         return 0
     if not all(inspect(v, opts)["done"] for v in videos):
