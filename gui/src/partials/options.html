@@ -1,0 +1,40 @@
+    <section>
+      <h2>How to write the notes</h2>
+      <fieldset id="optionsSet">
+        <fieldset>
+          <legend>Quality</legend>
+          <label class="choice"><input type="radio" name="quality" value="best" checked>
+            <span>Best notes<small>Claude Opus. Most accurate, especially on history and culture.</small></span></label>
+          <label class="choice"><input type="radio" name="quality" value="cheaper">
+            <span>Cheaper<small>Claude Sonnet. Good for series; a few more mistakes.</small></span></label>
+        </fieldset>
+        <label class="field"><span>The film's language</span>
+          <select id="film_language"><option value="">Work it out from the video</option></select></label>
+        <label class="check spaced"><input type="checkbox" id="refine" checked>
+          <span>Also look at the video's frames<small>Adds notes about what's on screen. Costs more.</small></span></label>
+        <div class="field">
+          <span>How much of it</span>
+          <div class="inline"><label for="limit">Only the first</label><input id="limit" type="text" inputmode="decimal"
+            placeholder="all"><span>minutes</span></div>
+          <small>Leave it empty for the whole thing. Try 5 to test cheaply.</small>
+        </div>
+        <details class="more">
+          <summary>More options</summary>
+          <label class="field"><span>Subtitles the notes are written from</span>
+            <select id="subs_language"><option value="">The film's own language</option></select></label>
+          <label class="field"><span>Subtitles shown at the bottom</span>
+            <select id="show_subs"><option value="">The same ones</option></select></label>
+          <label class="field"><span>Write the notes in</span>
+            <input id="notes_language" type="text" placeholder="English"></label>
+          <label class="field"><span>Name of the show</span>
+            <input id="show" type="text" placeholder="Worked out from the folders"></label>
+          <label class="field" id="titleField"><span>Full title (one film only)</span>
+            <input id="titleInput" type="text" placeholder="Worked out from the file name"></label>
+          <label class="check"><input type="checkbox" id="check_alignment">
+            <span>Check every note's timing against the speech<small id="speechHint">Slow the first time; free.</small></span></label>
+          <label class="check"><input type="checkbox" id="dense">
+            <span>Look at more frames<small>Catches more sight gags; costs several times more.</small></span></label>
+          <label class="check"><input type="checkbox" id="redo">
+            <span>Write the notes again<small>Starts over. The old notes are kept as a backup.</small></span></label>
+        </details>
+      </fieldset>

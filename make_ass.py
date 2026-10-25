@@ -15,6 +15,8 @@ Usage:
     python3 make_ass.py episode.srt --refine --video episode.mp4         # Claude improves the notes using the video's
                                                                          # frames and soundtrack; backs up notes + old .ass
     python3 make_ass.py --set-api-key                                    # once: save your API key
+    python3 make_ass.py --set-backend claude-code                        # once: run Claude through Claude Code instead,
+                                                                         # on your Claude subscription (no API key)
     python3 make_ass.py episode.srt notes.json --video episode.mp4      # -> episode.notes.ass
     python3 make_ass.py episode.srt notes.json [-o out.ass] [--offset 0.0] [--layout split|stack]
     python3 make_ass.py film.srt --generate --limit 5:00          # try it on the first 5 minutes only
@@ -45,17 +47,24 @@ Optional per-note keys: "duration" (seconds), "occurrence" (match the Nth hit),
 the joke lands before the explanation), "delay" (extra seconds).
 """
 import argparse
-import contextlib
 import json
-import os
 import re
 import shutil
-import stat
 import sys
-import unicodedata
 from pathlib import Path
 
+import cli_common
+import fileio
 import languages
+import subtitles
+import timecode
+
+# Moved out of this file (SRT reading and matching -> subtitles.py, safe file writes -> fileio.py, times ->
+# timecode.py). Kept here so older callers, README and CLAUDE.md references such as make_ass.parse_srt and
+# make_ass.write_text_safely() still work. New code imports the new modules directly.
+from fileio import read_text, replacing, write_text_safely  # noqa: F401  (moved to fileio.py)
+from subtitles import find_cue, fold, limit_cues, norm, parse_srt  # noqa: F401  (moved to subtitles.py)
+from timecode import TS, duration_arg, fmt_ass_time, fmt_limit, parse_duration, parse_ts, ts_to_s  # noqa: F401  (moved to timecode.py)
 
 PLAY_X, PLAY_Y = 1920, 1080
 
@@ -94,177 +103,7 @@ CATEGORY_COLOURS = {
 DEFAULT_LABEL_COLOUR = "&HE6E6E6&"
 
 
-# ---------------------------------------------------------------- SRT parsing
-@contextlib.contextmanager
-def replacing(path):
-    """Write a file all at once. Yields a temporary name beside `path` to write to; when the block ends, that file
-    takes the place of `path`, with the old file's permissions. If the block is interrupted (an error, Ctrl-C, a
-    GUI's Cancel), `path` is left as it was and the temporary file is removed, so no later run finds half a file."""
-    path = Path(path)
-    if path.is_symlink():                                  # write the file the link points to; keep the link
-        path = path.resolve()
-    tmp = path.with_name(f".{path.name}.part{os.getpid()}")
-    try:
-        yield tmp
-        try:
-            os.chmod(tmp, stat.S_IMODE(path.stat().st_mode))
-        except OSError:                                    # no old file: the new one keeps the usual permissions
-            pass
-        try:
-            os.replace(tmp, path)
-        except PermissionError:                            # Windows, when another program has the old file open:
-            shutil.copyfile(tmp, path)                     # write into it, as before
-            tmp.unlink()
-    except BaseException:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise
-
-
-def write_text_safely(path, text, encoding="utf-8"):
-    """Path(path).write_text(text), but all at once (see replacing())."""
-    try:
-        with replacing(path) as tmp:
-            tmp.write_text(text, encoding=encoding)
-    except PermissionError:          # the folder won't take a new file, though the file itself may be writable:
-        Path(path).write_text(text, encoding=encoding)          # write it in place, as before
-
-
-def read_text(path):
-    raw = Path(path).read_bytes()
-    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):          # UTF-16 with BOM
-        return raw.decode("utf-16")
-    for enc in ("utf-8-sig", "cp1252", "latin-1"):
-        try:
-            return raw.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    return raw.decode("utf-8", errors="replace")
-
-
-TS = r"(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})"
-
-
-def ts_to_s(h, m, s, ms):
-    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms.ljust(3, "0")) / 1000
-
-
-def parse_duration(text):
-    """'300', '300s', '5m', '5:00', '1:02:03', '1h30m' -> seconds (for --limit)."""
-    s = str(text).strip().lower().replace(" ", "")
-    try:
-        if ":" in s:
-            secs = 0.0
-            for p in s.split(":"):
-                secs = secs * 60 + float(p)
-        elif re.fullmatch(r"(\d+(\.\d+)?[hms])+", s):
-            secs = sum(float(n) * {"h": 3600, "m": 60, "s": 1}[u] for n, _, u in re.findall(r"(\d+(\.\d+)?)([hms])", s))
-        else:
-            secs = float(s)
-    except ValueError:
-        secs = -1
-    if secs <= 0:
-        raise ValueError(f"can't read {text!r} as a length of time; try 300, 5m, 5:00 or 1:30:00")
-    return secs
-
-
-def duration_arg(text):
-    """argparse type for --limit."""
-    try:
-        return parse_duration(text)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(str(e))
-
-
-def limit_cues(cues, limit):
-    """Only the subtitle lines that start before `limit` seconds (all of them if limit is None)."""
-    return cues if not limit else [c for c in cues if c["start"] < limit]
-
-
-def fmt_limit(limit):
-    """300 -> '5:00' (for messages)."""
-    t = int(round(limit))
-    return f"{t // 3600}:{t // 60 % 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
-
-
-def parse_ts(text):
-    m = re.fullmatch(TS, text.strip())
-    if not m:
-        raise ValueError(f"bad timestamp: {text!r}")
-    return ts_to_s(*m.groups())
-
-
-def parse_srt(path):
-    text = read_text(path).replace("\r\n", "\n").replace("\r", "\n")
-    cues = []
-    for block in re.split(r"\n\s*\n", text.strip()):
-        lines = block.split("\n")
-        # find the timing line (index line is optional / sometimes missing)
-        for i, line in enumerate(lines):
-            m = re.match(TS + r"\s*-->\s*" + TS, line.strip())
-            if m:
-                g = m.groups()
-                start, end = ts_to_s(*g[:4]), ts_to_s(*g[4:])
-                body = "\n".join(lines[i + 1:]).strip()
-                if body:
-                    cues.append({"start": start, "end": end, "text": body})
-                break
-    for n, c in enumerate(cues, 1):
-        c["n"] = n
-    return cues
-
-
-# ---------------------------------------------------------------- matching
-def fold(s):
-    """Lower-case and drop accents: 'Été, Straße, cœur' -> 'ete, strasse, coeur'. Curly apostrophes become '."""
-    s = unicodedata.normalize("NFKD", s.lower())
-    s = "".join(ch for ch in s if not unicodedata.combining(ch))
-    for a, b in (("ß", "ss"), ("œ", "oe"), ("æ", "ae"), ("ø", "o"), ("ł", "l"), ("’", "'"), ("‘", "'")):
-        s = s.replace(a, b)
-    return s
-
-
-def norm(s):
-    s = re.sub(r"<[^>]+>|\{[^}]*\}", " ", s)          # strip tags
-    s = re.sub(r"[^a-z0-9' ]+", " ", fold(s))
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def find_cue(cues, needle, after_idx, occurrence=1):
-    """Find the cue containing `needle`, preferring hits after the previous
-    note's cue so repeated phrases resolve in order. Lines that span two cues
-    are handled by also testing each cue joined with the next one."""
-    n = norm(needle)
-    if not n:
-        return None
-    normed = [norm(c["text"]) for c in cues]
-    hits = []
-    for i, here in enumerate(normed):
-        if n in here:
-            hits.append(i)
-        elif i + 1 < len(normed) and n in here + " " + normed[i + 1] and n not in normed[i + 1]:
-            hits.append(i)   # quote spans this cue and the next
-    if not hits:
-        return None
-    ordered = [h for h in hits if h >= after_idx] + [h for h in hits if h < after_idx]
-    if occurrence > 1:
-        ordered = sorted(hits)
-        return ordered[occurrence - 1] if occurrence <= len(ordered) else None
-    return ordered[0]
-
-
 # ---------------------------------------------------------------- ASS output
-def fmt_ass_time(t):
-    t = max(0.0, t)
-    cs = int(round(t * 100))
-    h, cs = divmod(cs, 360000)
-    m, cs = divmod(cs, 6000)
-    s, cs = divmod(cs, 100)
-    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
-
-
 def srt_to_ass_text(t):
     t = t.replace("{", "(").replace("}", ")") if not re.search(r"\{\\", t) else t
     t = re.sub(r"<\s*i\s*>", r"{\\i1}", t, flags=re.I)
@@ -339,7 +178,7 @@ def timing_report(placed, cues, timing):
            f"  {len(rushed)} note(s) cut short by the {timing['max']:g} s ceiling"
            + (f"; the worst get {rushed[0][0]:.2f} s a word to read:" if rushed else ".")]
     for r, p, w in rushed[:5]:
-        out.append(f"    {fmt_ass_time(p['start']).split('.')[0]}  {w} words, {p['end'] - p['start']:.1f} s  "
+        out.append(f"    {timecode.fmt_ass_time(p['start']).split('.')[0]}  {w} words, {p['end'] - p['start']:.1f} s  "
                    f"{p['text'][:70]}...")
     if dlg:
         out.append(f"  For comparison, the dialogue subtitles stay up {statistics.median(dlg):.2f} s a word (median).")
@@ -456,16 +295,16 @@ def place_notes(cues, notes, offset, timing=None, skip=()):
     for k, note in enumerate(notes, 1):
         idx = None
         if "at_video" in note:            # already on the video's clock
-            start = parse_ts(note["at_video"])
+            start = timecode.parse_ts(note["at_video"])
         elif "at" in note:                # on the subtitle file's clock
-            start = parse_ts(note["at"]) + offset
+            start = timecode.parse_ts(note["at"]) + offset
         else:
             if "cue" in note:
                 idx = int(note["cue"]) - 1
                 if not 0 <= idx < len(cues):
                     idx = None
             elif "match" in note:
-                idx = find_cue(cues, note["match"], last_idx, int(note.get("occurrence", 1)))
+                idx = subtitles.find_cue(cues, note["match"], last_idx, int(note.get("occurrence", 1)))
             if idx is None:
                 missing.append((k, note.get("match") or note.get("cue")))
                 continue
@@ -528,7 +367,7 @@ def plex_copy(out_path, language="English"):
         return None
     lang = languages.code(language) or "en"
     target = out_path.with_name(out_path.name[:-len(".notes.ass")] + f".{lang}.ass")
-    if target.exists() and "Generated by make_ass.py" not in read_text(target)[:300]:
+    if target.exists() and "Generated by make_ass.py" not in fileio.read_text(target)[:300]:
         print(f"Not writing the Plex copy: {target.name} already exists and isn't one of ours.")
         return None
     shutil.copyfile(out_path, target)
@@ -542,15 +381,15 @@ def build(srt_path, notes_path, out_path, offset=0.0, layout="split", display_sr
     from the French). Notes are still placed using srt_path; display_offset is for display_srt's own timing.
     timing: see timing_settings() (default: the notes file's own, else DEFAULT_TIMING). Repeated explanations
     (dedupe.py) are left out unless keep_duplicates."""
-    cues = parse_srt(srt_path)
+    cues = subtitles.parse_srt(srt_path)
     if not cues:
         sys.exit(f"No subtitle cues found in {srt_path}")
     shown, shown_offset = cues, offset
     if display_srt:
-        shown, shown_offset = parse_srt(display_srt), display_offset
+        shown, shown_offset = subtitles.parse_srt(display_srt), display_offset
         if not shown:
             sys.exit(f"No subtitle cues found in {display_srt}")
-    spec = json.loads(read_text(notes_path))
+    spec = json.loads(fileio.read_text(notes_path))
     notes = spec["notes"] if isinstance(spec, dict) else spec
     title = spec.get("title", Path(srt_path).stem) if isinstance(spec, dict) else Path(srt_path).stem
 
@@ -595,8 +434,8 @@ def build(srt_path, notes_path, out_path, offset=0.0, layout="split", display_sr
     out = [HEADER.replace("{title}", title).replace("{fs}", str(fs)).replace("{inner}", str(inner))
            .replace("{dfs}", str(dfs))]
     for s, e, layer, style, name, text in events:
-        out.append(f"Dialogue: {layer},{fmt_ass_time(s)},{fmt_ass_time(e)},{style},{name},0,0,0,,{text}\n")
-    write_text_safely(out_path, "".join(out), encoding="utf-8-sig")
+        out.append(f"Dialogue: {layer},{timecode.fmt_ass_time(s)},{timecode.fmt_ass_time(e)},{style},{name},0,0,0,,{text}\n")
+    fileio.write_text_safely(out_path, "".join(out), encoding="utf-8-sig")
 
     n_sp = sum(1 for p in placed if p["kind"] == "speech")
     say(f"{len(shown)} dialogue cues" + (f" from {Path(display_srt).name}" if display_srt else "")
@@ -623,10 +462,11 @@ def create_blank_notes(path, srt):
         "scope": "Dialogue notes come from the subtitles; visual notes (kind: visual) come from frames of the video",
         "notes": [],
     }
-    write_text_safely(path, json.dumps(skeleton, indent=1, ensure_ascii=False) + "\n")
+    fileio.write_text_safely(path, json.dumps(skeleton, indent=1, ensure_ascii=False) + "\n")
     print(f"There was no notes file yet, so I created a blank one: {path.resolve()}")
     print("It has no notes in it. This script only merges notes into the subtitles; it doesn't write them.")
-    print("To have Claude write them for you (uses API credits; first run  make_ass.py --set-api-key):")
+    print("To have Claude write them for you (uses API credits, or your Claude subscription with --backend claude-code; "
+          "first run  make_ass.py --set-api-key  or  make_ass.py --set-backend claude-code):")
     print(f"  python3 make_ass.py \"{srt}\" --generate")
     print("Or to fill it in by hand / with a chat:")
     print(f"  1. python3 analyze.py \"{srt}\"     (makes a numbered transcript to write notes from)")
@@ -656,7 +496,7 @@ def display_choice(a, spec, notes_path):
         changed = changed or spec.get("display_offset") != a.display_offset
         spec["display_offset"] = a.display_offset
     if changed:
-        write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
+        fileio.write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
     name = spec.get("display_subtitles")
     if not name:
         return None, 0.0
@@ -678,7 +518,7 @@ def remember_timing(a, spec, notes_path):
         if any(saved.get(k) != v for k, v in given.items()):
             saved.update(given)
             spec["timing"] = saved
-            write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
+            fileio.write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
     return timing_settings(spec if isinstance(spec, dict) else None, **given)
 
 
@@ -715,64 +555,53 @@ def main():
     ap.add_argument("--keep-duplicates", action="store_true",
                     help="keep notes that explain something an earlier note already explained (left out by default; "
                          "see dedupe.py)")
-    g = ap.add_argument_group("writing the notes with Claude (uses API credits)")
+    g = ap.add_argument_group("writing the notes with Claude (uses API credits, or your Claude subscription through "
+                              "Claude Code: see --backend)")
     g.add_argument("--generate", action="store_true",
                    help="have Claude write the notes file from the subtitles, then build the .ass")
     g.add_argument("--refine", action="store_true",
                    help="improve the existing notes using the video (needs --video): sets the sync offset, adds "
                         "notes about what's on screen, fixes or retimes notes; backs up the notes and the old .ass "
                         "first, then rebuilds the .ass")
-    g.add_argument("--frames", choices=("keyframes", "dense"), default="keyframes",
-                   help="with --refine: keyframes (default, cheaper) or dense (4 a second: far more images, costs more)")
+    cli_common.add_frames_arg(g)
     g.add_argument("--assume-synced", action="store_true",
                    help="with --refine: trust that the subtitles are in step with the video (use with an "
                         ".aligned.srt from analyze.py --align). Without it, if the sync can't be confirmed, "
                         "--refine only adds on-screen notes and leaves your existing notes alone")
     g.add_argument("--set-api-key", action="store_true",
                    help="save your Anthropic API key to ~/.config/context-notes/api-key (hidden prompt) and exit")
-    g.add_argument("--title", help="show/film and episode, e.g. 'The IT Crowd - S01E02 - Calamity Jen' "
-                                   "(helps Claude get the facts right; default: the subtitle file name)")
-    g.add_argument("--audience", help="who the notes are for (default: fluent in English, didn't grow up in the UK)")
-    g.add_argument("--year", help="release year, e.g. 1974 (films more than 40 years old get extra attention to "
-                                  "their words, people, places and period). Default: read from the title, the file's "
-                                  "tags, the file name or the folder name")
-    g.add_argument("--notes-language", default="English", help="language to write the notes in (default: English)")
-    g.add_argument("--film-language", metavar="LANG",
-                   help="language spoken in the film or show, e.g. fr, de, es (default: English). Changes what Claude "
-                        "looks for: register (tu/vous), slang, regional speech, and what the subtitles lose in translation")
-    g.add_argument("--original-subs", metavar="SRT",
-                   help="with --film-language: subtitles in the ORIGINAL language, timed to the same video, so Claude can "
-                        "compare them with the subtitles you watch with (e.g. film.fr.srt beside film.en.srt)")
+    g.add_argument("--set-backend", choices=("api", "claude-code"), metavar="{api,claude-code}",
+                   help="save where Claude runs from now on and exit: api (your key, API credits) or claude-code (the "
+                        "installed Claude Code command, on your Claude subscription). --backend overrides it per run")
+    cli_common.add_film_args(g)          # --film-language, --original-subs, --title, --year, --audience, --notes-language
     ap.add_argument("--display-subs", metavar="SRT",
                     help="show these subtitles at the bottom instead (e.g. film.en.srt when the notes were written from "
                          "film.fr.srt). Notes are still placed using the main subtitle file. Remembered in the notes "
                          "file; give the main subtitle file again to switch back")
     ap.add_argument("--display-offset", type=float, default=None,
                     help="shift the --display-subs subtitles by N seconds (default: remembered value, else 0)")
-    g.add_argument("--limit", type=duration_arg, metavar="TIME",
-                   help="with --generate/--refine: only the first part of the video, e.g. 5:00, 300 or 5m (for testing)")
-    g.add_argument("--model", default=None, help="Claude model to use (default: claude-sonnet-5-5)")
-    g.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"), default=None,
-                   help="with --generate/--refine: the model's effort setting (default: the model's own default; "
-                        "Haiku 4.5 doesn't support it)")
+    cli_common.add_limit_arg(g, help=f"with --generate/--refine: {cli_common.LIMIT_HELP}")
+    cli_common.add_claude_args(g)        # --model, --effort, --backend, --api-url, --api-key-file
     g.add_argument("--max-tokens", type=int, default=None, metavar="N",
                    help="with --generate/--refine: reply limit per request (higher efforts may need more room)")
-    g.add_argument("--yes", action="store_true", help="don't ask before sending the subtitles to the API")
+    cli_common.add_yes_arg(g)
     g.add_argument("--estimate-only", action="store_true",
                    help="with --generate or --refine: show the size and cost estimate, then stop. Nothing is sent, "
                         "no API key is needed, and no notes or .ass are written (--refine still analyses the video, "
                         "and keeps that for the real run)")
     g.add_argument("--force", action="store_true", help="with --generate: replace an existing notes file (a .bak copy is kept)")
-    g.add_argument("--api-key-file", help="read the API key from this file instead of the default location")
-    g.add_argument("--api-url", help=argparse.SUPPRESS)
     a = ap.parse_args()
     if a.estimate_only and not (a.generate or a.refine):
         ap.error("--estimate-only goes with --generate or --refine")
     if a.estimate_only and a.generate and a.refine:
         ap.error("--estimate-only works on one step at a time: --generate or --refine")
     if a.set_api_key:
-        import generate_notes
-        generate_notes.set_key()
+        import claude_api
+        claude_api.set_key()
+        return
+    if a.set_backend:
+        import claude_api
+        claude_api.set_backend(a.set_backend)
         return
     if not a.srt:
         ap.error("the subtitle file is required")
@@ -785,7 +614,7 @@ def main():
         sys.exit(f"Can't find the original-language subtitles {a.original_subs}")
     if a.generate:
         if notes_path.exists() and not a.estimate_only:      # an estimate replaces nothing, so needs no --force
-            spec = json.loads(read_text(a.notes))
+            spec = json.loads(fileio.read_text(a.notes))
             have = len(spec["notes"] if isinstance(spec, dict) else spec)
             if have and not a.force:
                 sys.exit(f"{a.notes} already has {have} notes. Use --force to have Claude replace them "
@@ -793,8 +622,9 @@ def main():
             if have:
                 shutil.copy2(notes_path, str(notes_path) + ".bak")
                 print(f"Kept a backup: {notes_path}.bak")
+        import claude_api
         import generate_notes
-        kw = {"model": a.model or generate_notes.DEFAULT_MODEL}
+        kw = {"model": a.model or claude_api.DEFAULT_MODEL, "backend": a.backend}
         if a.api_url:
             kw["api_url"] = a.api_url
         if a.effort:
@@ -814,7 +644,7 @@ def main():
         create_blank_notes(notes_path, a.srt)
         return
     else:
-        spec = json.loads(read_text(a.notes))
+        spec = json.loads(fileio.read_text(a.notes))
         if not (spec["notes"] if isinstance(spec, dict) else spec):
             sys.exit(f"{a.notes} has no notes in it yet, so there is nothing to merge. "
                      f"Add notes to it, or run again with --generate to have Claude write them.")
@@ -829,18 +659,18 @@ def main():
             sys.exit("--refine needs the video: add  --video \"<the video file>\"")
         if not Path(a.video).exists():
             sys.exit(f"Can't find the video {a.video}")
-        import generate_notes
+        import claude_api
         import refine_notes
         rkw = {k: v for k, v in (("api_url", a.api_url), ("effort", a.effort), ("max_tokens", a.max_tokens)) if v}
-        refine_notes.refine(a.srt, notes_path, a.video, model=a.model or generate_notes.DEFAULT_MODEL,
+        refine_notes.refine(a.srt, notes_path, a.video, model=a.model or claude_api.DEFAULT_MODEL,
                             frames=a.frames, ass_path=out, audience=a.audience, title=a.title, language=a.notes_language,
                             assume_yes=a.yes, key_file=a.api_key_file, assume_synced=a.assume_synced,
                             film_language=a.film_language, original_srt=a.original_subs, limit=a.limit,
-                            year=a.year, estimate_only=a.estimate_only, **rkw)
+                            year=a.year, estimate_only=a.estimate_only, backend=a.backend, **rkw)
         if a.estimate_only:
             return
     offset = a.offset
-    spec = json.loads(read_text(a.notes))
+    spec = json.loads(fileio.read_text(a.notes))
     if offset is None:
         offset = float(spec.get("video_offset", 0)) if isinstance(spec, dict) else 0.0
     display, display_offset = display_choice(a, spec, notes_path)
@@ -852,7 +682,7 @@ def main():
     if a.report:
         print(json.dumps(overlap_report(placed), indent=1))
     if a.timing_report:
-        print("\n".join(timing_report(placed, parse_srt(a.srt), timing)))
+        print("\n".join(timing_report(placed, subtitles.parse_srt(a.srt), timing)))
 
 
 if __name__ == "__main__":

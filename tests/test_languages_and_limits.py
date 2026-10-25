@@ -8,27 +8,28 @@ from test_generate_notes import notes_for_each_part
 import analyze
 import generate_notes as gn
 import languages
-import make_ass
+import subtitles
+import timecode
 
 
 # ---------------------------------------------------------------- --limit
 @pytest.mark.parametrize("text, seconds", [("300", 300), ("5:00", 300), ("1:02:03", 3723), ("5m", 300),
                                            ("90s", 90), ("1h30m", 5400), ("2.5m", 150)])
 def test_parse_duration(text, seconds):
-    assert make_ass.parse_duration(text) == pytest.approx(seconds)
+    assert timecode.parse_duration(text) == pytest.approx(seconds)
 
 
 @pytest.mark.parametrize("bad", ["", "0", "-5", "soon", "5x"])
 def test_parse_duration_rejects_nonsense(bad):
     with pytest.raises(ValueError):
-        make_ass.parse_duration(bad)
+        timecode.parse_duration(bad)
 
 
 def test_limit_cues_and_fmt_limit():
     cues = [{"n": i + 1, "start": 10.0 * i, "end": 10.0 * i + 3, "text": "x"} for i in range(10)]
-    assert [c["n"] for c in make_ass.limit_cues(cues, 30)] == [1, 2, 3]
-    assert make_ass.limit_cues(cues, None) is cues
-    assert make_ass.fmt_limit(300) == "5:00" and make_ass.fmt_limit(3723) == "1:02:03"
+    assert [c["n"] for c in subtitles.limit_cues(cues, 30)] == [1, 2, 3]
+    assert subtitles.limit_cues(cues, None) is cues
+    assert timecode.fmt_limit(300) == "5:00" and timecode.fmt_limit(3723) == "1:02:03"
 
 
 def test_limited_alignment_and_transcripts_get_their_own_names(tmp_path):
@@ -63,11 +64,11 @@ def test_cli_analyze_limit_only_checks_the_first_part(tmp_path, sample_srt):
 
 # ---------------------------------------------------------------- accents and other languages
 def test_fold_and_norm_handle_accents():
-    assert make_ass.fold("Été, Straße, cœur, L’homme") == "ete, strasse, coeur, l'homme"
-    assert make_ass.norm("¿Qué pasó? «Très bien», ÇA VA") == "que paso tres bien ca va"
+    assert subtitles.fold("Été, Straße, cœur, L’homme") == "ete, strasse, coeur, l'homme"
+    assert subtitles.norm("¿Qué pasó? «Très bien», ÇA VA") == "que paso tres bien ca va"
     cues = [{"n": 1, "start": 0.0, "end": 1.0, "text": "Ça, c'est le côté obscur."}]
-    assert make_ass.find_cue(cues, "ca c'est le cote", 0) == 0                 # model quotes without accents
-    assert make_ass.find_cue(cues, "le côté obscur", 0) == 0
+    assert subtitles.find_cue(cues, "ca c'est le cote", 0) == 0                 # model quotes without accents
+    assert subtitles.find_cue(cues, "le côté obscur", 0) == 0
 
 
 def test_align_matches_accented_words():
@@ -175,10 +176,10 @@ def test_shift_by_a_known_amount(tmp_path):
     r = run_cli("analyze.py", srt, "--shift", "-6", cwd=tmp_path)
     assert r.returncode == 0, r.stderr
     assert "6.00 s earlier" in r.stdout and "1 line(s) before 0:00" in r.stdout
-    fixed = make_ass.parse_srt(tmp_path / "film.fr.aligned.srt")
+    fixed = subtitles.parse_srt(tmp_path / "film.fr.aligned.srt")
     assert [c["start"] for c in fixed] == [3.0, 9.0, 15.0] and fixed[0]["text"] == "Line 2 of the original test script"
     r = run_cli("analyze.py", srt, "--shift", "+1.5", cwd=tmp_path)
-    assert make_ass.parse_srt(tmp_path / "film.fr.aligned.srt")[0]["start"] == 4.5
+    assert subtitles.parse_srt(tmp_path / "film.fr.aligned.srt")[0]["start"] == 4.5
     assert srt.read_text() == make_srt(tmp_path / "again.srt", n=4).read_text()          # the original is untouched
 
 
@@ -251,7 +252,7 @@ def test_shift_leaves_out_adverts(tmp_path):
                    "2\n00:00:16,095 --> 00:00:20,057\n- Le 3 septembre 1973\n\n", encoding="utf-8")
     r = run_cli("analyze.py", srt, "--shift", "21.3", cwd=tmp_path)
     assert r.returncode == 0 and "1 subtitle-site advert(s)" in r.stdout
-    fixed = make_ass.parse_srt(tmp_path / "film.fr.aligned.srt")
+    fixed = subtitles.parse_srt(tmp_path / "film.fr.aligned.srt")
     assert [c["text"] for c in fixed] == ["- Le 3 septembre 1973"] and fixed[0]["start"] == pytest.approx(37.395)
     assert "00:00:37,395 --> 00:00:41,357" in (tmp_path / "film.fr.aligned.srt").read_text()
 

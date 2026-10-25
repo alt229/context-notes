@@ -13,7 +13,7 @@ from conftest import ROOT, make_srt, needs_ffmpeg, run_cli
 from test_prompts import GUI, drive, events
 
 import analyze
-import make_ass
+import fileio
 import prompts
 
 LONG = "Line {i} of the original test script, " + "and then it goes on and on " * 32     # several requests' worth
@@ -48,11 +48,11 @@ def test_write_text_safely_writes_and_keeps_permissions(tmp_path):
     plain = tmp_path / "plain.txt"
     plain.write_text("x")
     new = tmp_path / "new.txt"
-    make_ass.write_text_safely(new, "héllo\n")
+    fileio.write_text_safely(new, "héllo\n")
     assert new.read_text(encoding="utf-8") == "héllo\n"
     assert stat.S_IMODE(new.stat().st_mode) == stat.S_IMODE(plain.stat().st_mode)     # a new file: the usual mode
     plain.chmod(0o640)
-    make_ass.write_text_safely(plain, "y")
+    fileio.write_text_safely(plain, "y")
     assert plain.read_text() == "y" and stat.S_IMODE(plain.stat().st_mode) == 0o640   # an old file keeps its own
     assert not leftovers(tmp_path)
 
@@ -62,7 +62,7 @@ def test_write_text_safely_writes_through_a_symlink(tmp_path):
     real.write_text("old")
     link = tmp_path / "link.json"
     link.symlink_to(real)
-    make_ass.write_text_safely(link, "new")
+    fileio.write_text_safely(link, "new")
     assert link.is_symlink() and real.read_text() == "new"
 
 
@@ -70,7 +70,7 @@ def test_an_interrupted_write_leaves_the_old_file_and_no_temporary_one(tmp_path)
     path = tmp_path / "notes.json"
     path.write_text("the old notes")
     with pytest.raises(KeyboardInterrupt):
-        with make_ass.replacing(path) as tmp:
+        with fileio.replacing(path) as tmp:
             tmp.write_text("half of the new no")
             raise KeyboardInterrupt
     assert path.read_text() == "the old notes"
@@ -85,7 +85,7 @@ def test_a_folder_that_takes_no_new_files_is_written_in_place_as_before(tmp_path
     path.write_text("old")
     folder.chmod(0o500)                     # no new files allowed, but the existing one is still writable
     try:
-        make_ass.write_text_safely(path, "new")
+        fileio.write_text_safely(path, "new")
         assert path.read_text() == "new"
     finally:
         folder.chmod(0o700)

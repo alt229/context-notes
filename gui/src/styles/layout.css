@@ -1,0 +1,9 @@
+/* Page-level layout: the centred column, the two-column body, and generic rows. */
+.wrap { max-width: 1080px; margin: 0 auto; padding: 18px var(--gutter) 56px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; }
+.inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.columns { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 36px; margin-top: 26px; }
+
+@media (max-width: 820px) {
+  .columns { grid-template-columns: 1fr; gap: 26px; }
+}

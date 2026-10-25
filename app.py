@@ -36,13 +36,14 @@ HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 import analyze  # noqa: E402  (the video file types)
+from gui import assemble  # noqa: E402  (the page, built from gui/src)
+import claude_api  # noqa: E402  (where the API key lives)
+import fileio  # noqa: E402  (writing files all at once)
 import find_subs  # noqa: E402  (where the OpenSubtitles login lives)
-import generate_notes  # noqa: E402  (where the API key lives)
 import languages  # noqa: E402
-import make_ass  # noqa: E402
 import prompts  # noqa: E402
 
-PAGE = HERE / "gui" / "index.html"
+PAGE_SOURCES = HERE / "gui" / "src" / "manifest.json"       # the page is assembled from gui/src on every request
 QUALITY = {"best": ["--model", "claude-opus-5-5", "--effort", "high"],
            "cheaper": ["--model", "claude-sonnet-5-5", "--effort", "high"]}
 TEXT_OPTIONS = (("film_language", "--film-language"), ("subs_language", "--subs-language"),
@@ -224,7 +225,7 @@ def pick(kind):
 # ---------------------------------------------------------------- settings
 def key_info():
     """Whether there's an API key, and its last four characters. The key itself never leaves this process."""
-    path = generate_notes.key_path()
+    path = claude_api.key_path()
     info = {"file": str(path), "found": False, "ends": None, "source": None, "problem": None}
     if path.exists():
         try:
@@ -241,6 +242,16 @@ def key_info():
     elif os.environ.get("ANTHROPIC_API_KEY", "").strip():
         info.update(found=True, ends=os.environ["ANTHROPIC_API_KEY"].strip()[-4:], source="environment")
     return info
+
+
+def backend_info():
+    """Where Claude runs (the saved setting, or "api"), and whether Claude Code is installed on this computer."""
+    found = claude_api.claude_bin()
+    try:
+        backend = claude_api.load_backend()
+    except SystemExit:                                   # a hand-edited file with a wrong value: the page shows api
+        backend = "api"
+    return backend, {"installed": bool(found), "path": found}
 
 
 def opensubtitles_info():
@@ -288,7 +299,7 @@ def install_vlc_extension():
     for d in dirs:
         try:
             d.mkdir(parents=True, exist_ok=True)
-            with make_ass.replacing(d / src.name) as tmp:
+            with fileio.replacing(d / src.name) as tmp:
                 shutil.copyfile(src, tmp)
             done.append(str(d / src.name))
         except OSError as e:
@@ -513,7 +524,9 @@ class App:
         self.lock = threading.Lock()
 
     def info(self):
-        return {"system": system(), "home": str(Path.home()), "key": key_info(), "opensubtitles": opensubtitles_info(),
+        backend, claude_code = backend_info()
+        return {"system": system(), "home": str(Path.home()), "key": key_info(), "backend": backend,
+                "claude_code": claude_code, "opensubtitles": opensubtitles_info(),
                 "vlc": vlc_info(), "dialogs": dialog_command("file") is not None,
                 "speech": find_subs.have_whisper(),
                 "languages": [{"code": c, "name": n} for c, (n, _) in languages.LANGUAGES.items()],
@@ -528,6 +541,10 @@ class App:
             except BadRequest as e:
                 return 400, {"error": str(e)}
             args += QUALITY.get(o.get("quality"), QUALITY["best"])
+            backend = o.get("backend") or backend_info()[0]
+            if backend not in claude_api.BACKENDS:
+                return 400, {"error": f"Unknown backend: {backend}"}
+            args += ["--backend", backend]
             if o.get("frames") == "dense":
                 args += ["--frames", "dense"]
             if o.get("check_alignment"):
@@ -536,6 +553,22 @@ class App:
                 args += ["--api-url", self.api_url]
             self.job = Job(script("context_notes.py", *args))
             return 200, {"ok": True}
+
+    def set_backend(self, backend):
+        """Save where Claude runs (the same file make_ass.py --set-backend writes)."""
+        backend = str(backend or "").strip()
+        if backend not in claude_api.BACKENDS:
+            return {"ok": False, "message": "Choose the API key or Claude Code."}
+        code, lines, _ = run_quietly(script("make_ass.py", "--set-backend", backend), timeout=30)
+        saved, claude_code = backend_info()
+        message = next((ln for ln in lines if ln.strip()), "")
+        if code == 0 and backend == "claude-code" and not claude_code["installed"]:
+            message = ("Saved. Claude Code isn't installed on this computer yet, so notes can't be written until it is: "
+                       "install it from claude.com/claude-code and run `claude` once to sign in.")
+        elif code == 0:
+            message = ("Saved. Notes are written through Claude Code, on your Claude subscription." if backend == "claude-code"
+                       else "Saved. Notes are written through the Anthropic API, with your key.")
+        return {"ok": code == 0, "message": message, "backend": saved, "claude_code": claude_code}
 
     def set_key(self, key):
         key = str(key or "").strip()
@@ -547,11 +580,11 @@ class App:
 
     def test_key(self):
         try:
-            key = generate_notes.load_key()
+            key = claude_api.load_key()
         except SystemExit as e:
             return {"ok": False, "message": str(e)}
-        url = re.sub(r"/messages$", "/models", self.api_url or generate_notes.API_URL)
-        req = urllib.request.Request(url, headers={"x-api-key": key, "anthropic-version": generate_notes.API_VERSION})
+        url = re.sub(r"/messages$", "/models", self.api_url or claude_api.API_URL)
+        req = urllib.request.Request(url, headers={"x-api-key": key, "anthropic-version": claude_api.API_VERSION})
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
                 r.read()
@@ -617,7 +650,7 @@ class Handler(BaseHTTPRequestHandler):
     def _page(self):
         csp = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; "
                "img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-        self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8", {"Content-Security-Policy": csp})
+        self._send(200, assemble.page().encode("utf-8"), "text/html; charset=utf-8", {"Content-Security-Policy": csp})
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -674,6 +707,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, pick("folder" if o.get("kind") == "folder" else "file"))
         if path == "/api/key":
             return self._send(200, app.set_key(o.get("key")))
+        if path == "/api/backend":
+            return self._send(200, app.set_backend(o.get("backend")))
         if path == "/api/key/test":
             return self._send(200, app.test_key())
         if path == "/api/opensubtitles":
@@ -713,8 +748,8 @@ def main(argv=None):
     ap.add_argument("--no-browser", action="store_true", help="don't open the page; just print its address")
     ap.add_argument("--api-url", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
-    if not PAGE.exists():
-        sys.exit(f"Can't find the page {PAGE}. Is the gui folder next to app.py?")
+    if not PAGE_SOURCES.exists():
+        sys.exit(f"Can't find the page sources {PAGE_SOURCES}. Is the gui folder next to app.py?")
     try:
         server = make_server(a.port, a.api_url)
     except OSError as e:

@@ -1,0 +1,35 @@
+/* Atoms: buttons, inputs, the progress bar, state badges, hints and messages. */
+.btn { font-weight: 600; font-size: 15px; padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--muted); }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.btn.quiet { background: transparent; border-color: transparent; padding-left: 6px; padding-right: 6px;
+  text-decoration: underline; text-underline-offset: 3px; }
+.btn:disabled { opacity: .5; cursor: default; }
+input[type=text], input[type=password], input:not([type]), select {
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+
+/* The progress bar inside the right-hand note. */
+.bar { height: 3px; margin-top: 6px; background: rgba(255, 255, 255, .18); overflow: hidden; }
+.bar span { display: block; height: 100%; width: 0; background: var(--screen-gold); transition: width .3s ease-out; }
+.bar.unknown span { width: 35%; animation: slide 1.4s ease-in-out infinite alternate; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+
+/* A video's state, coloured. */
+.state.ready { color: var(--ready); }
+.state.todo { color: var(--muted); }
+.state.stopped, .state.working { color: var(--stopped); }
+.state.problem { color: var(--problem); }
+
+/* Hints, messages and the empty-list text. */
+.hint { color: var(--muted); font-size: var(--text-small); margin: 6px 0 0; }
+.hint.bad { color: var(--problem); }
+.msg { font-size: var(--text-small); margin: 8px 0 0; white-space: pre-line; }
+.msg.ok { color: var(--ready); }
+.msg.bad { color: var(--problem); }
+.empty { color: var(--muted); margin: 10px 0 0; max-width: 46ch; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bar span { transition: none; }
+  .bar.unknown span { animation: none; width: 100%; opacity: .45; }
+}

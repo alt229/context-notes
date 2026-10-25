@@ -45,9 +45,14 @@ Notes appear as small boxed overlays while you watch, in VLC (or any player that
 | `align_check.py` | Checks every note against the speech in the seconds before it; reports stretches that are out and can fix them. |
 | `find_subs.py` | Finds subtitles for a video that has none beside it: `Subs/` folders, OpenSubtitles.com, or speech recognition. |
 | `dedupe.py` | Lists notes that explain something an earlier note already did (the build leaves those out). |
-| `chat_notes.py` | Write the dialogue notes in a claude.ai chat or with Claude Code (your subscription) instead of the API. |
+| `chat_notes.py` | Write the dialogue notes in a claude.ai chat or with Claude Code (your subscription) instead of the API; `show-frames` and `collect-frames` do the same for the frame pass, so `/refine` needs no API credits either. |
 | `languages.py` | Language codes and names shared by the scripts (`fr`, `fre`, `French` are all French). |
 | `prompts.py` | How the scripts ask questions: in Terminal as usual, or answered by another program such as a GUI ([docs/gui-protocol.md](docs/gui-protocol.md)). |
+| `timecode.py` | Reading and writing times, shared by the scripts: SRT and ASS timestamps, `1:02:03` for messages, and lengths such as `5:00` or `5m` for `--limit`. |
+| `subtitles.py` | Reads SRT files into numbered lines and finds the line a note quotes (accents, case and tags ignored). |
+| `fileio.py` | Writes files all at once, so a stopped run never leaves half a file; reads subtitle files in whatever encoding they come in; knows the settings folder. |
+| `claude_api.py` | The one place the scripts talk to the Claude API: the key (`--set-api-key`), one request with retries, and the price table for the cost estimates. |
+| `cli_common.py` | The command-line flags the scripts share (`--limit`, `--film-language`, `--title`, `--model`, `--yes` and the rest), defined once so they mean the same everywhere, and how `context_notes.py` passes them on to the steps it runs. |
 
 ## Requirements
 
@@ -116,8 +121,9 @@ python3 app.py
 - **Write the notes.** The cost appears on screen before anything is sent, along with any other question (picking up
   a stopped run, for example). Progress is shown as it goes, and Cancel stops it the way Ctrl-C does.
 - **Watch:** open a finished video in VLC from the list.
-- **Settings** has your Anthropic API key (saved in the usual place), the OpenSubtitles login, and a button that
-  installs the VLC extension.
+- **Settings** has where Claude runs (Claude Code on your Claude subscription, or your Anthropic API key; see
+  "Running on your Claude subscription" below), the key itself (saved in the usual place), the OpenSubtitles login,
+  and a button that installs the VLC extension.
 
 Keep the Terminal window open while you use it; Ctrl-C there stops it. It runs the same scripts described below, so
 anything it does you can also do by hand. Only your computer can reach it: it listens on 127.0.0.1, and the page's
@@ -282,6 +288,11 @@ This folder is also a Claude Code project. Run `claude` in it and:
 - `/notes "<film>.mkv"`: Claude Code writes the dialogue notes itself, on your Claude subscription instead of API
   credits. A note-writer agent (Opus) takes the film one part at a time; the result goes through
   `chat_notes.py collect`, then the `.ass` is built and checked for repeats and timing.
+- `/refine "<film>.mkv"`: the frame pass on your subscription. A frame-reviewer agent (Opus) looks at the contact
+  sheets for one stretch of the video at a time, adds notes about what's on screen (signs, props, costume, period
+  detail), and fixes, retimes or drops dialogue notes the frames show to be wrong. `chat_notes.py collect-frames`
+  applies its replies the way `--refine` applies the API's, with the same backup and report, then the `.ass` is
+  rebuilt and checked. Run `/notes` first: the frame pass works on notes that already exist.
 - `/check "<film>.mkv"`: subtitles found and synced, every note's timing checked, fixes offered.
 
 `CLAUDE.md` holds what the project has learned so far (benchmark results, defaults, pitfalls). The agents are in
@@ -312,13 +323,51 @@ The extension looks for `<video name>.notes.ass` beside the video and gives you 
 
 ## API key and cost
 
-- Claude calls use your own Anthropic API key. API usage is billed separately from a claude.ai subscription.
+- By default, Claude calls use your own Anthropic API key. API usage is billed separately from a claude.ai
+  subscription. (To use the subscription instead, see the next section.)
 - The key is read from `--api-key-file`, then `~/.config/context-notes/api-key` (or `$XDG_CONFIG_HOME/context-notes/api-key`), then the `ANTHROPIC_API_KEY` environment variable as a fallback. The file must be readable only by you; `--set-api-key` creates it that way.
 - Rough costs at the default model's list price: writing notes (`--generate`) is on the order of a few cents per episode; `--refine`, which sends images, is on the order of 10 to 25 cents. The tool shows an estimate and asks before sending. Prices change; check [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing).
 
+## Running on your Claude subscription (no API key)
+
+If you pay for a Claude plan (Pro or Max), every step that talks to Claude can run through **Claude Code** instead of
+an API key: writing the notes, the frame pass, `context_notes.py`, and the app. It uses your plan's allowance, not
+API credits.
+
+What it needs:
+
+- Claude Code installed and signed in: install it from [claude.com/claude-code](https://claude.com/claude-code), then
+  run `claude` once in Terminal and log in. That's all; the scripts find the `claude` command themselves.
+- The same models as the API route (`--model claude-opus-5-5 --effort high`, for example).
+
+Turn it on once, and every later run uses it:
+
+```bash
+python3 make_ass.py --set-backend claude-code      # saved in ~/.config/context-notes/backend
+python3 make_ass.py --set-backend api              # back to your API key
+```
+
+Or choose per run with `--backend claude-code` (or `--backend api`) on `make_ass.py` or `context_notes.py`. In the
+app, it's **Settings → Where Claude runs**, saved as soon as you pick it.
+
+What it costs: nothing on top of your plan. Each run counts against the plan's usage limit, like a conversation in
+Claude Code does; if the limit is reached, the run stops with Claude's message and the finished parts are kept, so
+you can pick up later. The "Plan:" line still shows the size in tokens, with "on your Claude subscription (no API
+credits)" instead of a price. Heavy use, such as the frame pass on a long film with `--frames dense`, can use up a
+day's allowance.
+
+How it works: each request runs `claude -p` (Claude Code's headless mode) in the folder that holds your video, with
+the same instructions the API route sends. For the frame pass, Claude Code is told where the contact sheets are and
+opens them itself with its Read tool, which shows it the pictures; it's allowed only that one tool, and only in that
+folder. The notes file records `"backend": "claude-code"` so you can tell later which route wrote it.
+
 ## Privacy
 
-`--generate` sends the subtitle text to the Anthropic API. `--refine` also sends frames from your video as small JPEG contact sheets. Nothing is sent without the confirmation prompt (unless you pass `--yes`), and nothing else leaves your machine. The scripts use only the Python standard library for networking.
+`--generate` sends the subtitle text to Anthropic: to the API with your key, or through Claude Code on your
+subscription (`--backend claude-code`). `--refine` also sends frames from your video as small JPEG contact sheets
+(through Claude Code, it reads the same JPEGs with its Read tool). Nothing is sent without the confirmation prompt
+(unless you pass `--yes`), and nothing else leaves your machine. The scripts use only the Python standard library for
+networking; Claude Code is run as a command, in your media folder, with only its Read tool switched on.
 
 ## Limitations
 

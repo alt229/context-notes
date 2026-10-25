@@ -1,0 +1,77 @@
+/* Organisms: the page's sections, in page order, then the dialogs. */
+
+/* Header */
+header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+/* The screen: the notes' own look (gold labels, pale text on dark boxes) */
+.screen { position: relative; display: grid; margin: 14px 0 10px; padding: 16px 18px 14px; min-height: 300px;
+  grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr auto;
+  grid-template-areas: "left right" "title title" "sub sub"; gap: 12px 20px;
+  border-radius: var(--radius-lg); overflow: hidden; color: var(--screen-ink);
+  background: linear-gradient(105deg, #1E2A38 0%, #2A2C42 55%, #3D2E48 100%); }
+.note .acts :focus-visible, .screen :focus-visible { outline-color: var(--screen-gold); }
+.titlecard { grid-area: title; align-self: center; justify-self: center; text-align: center; max-width: 38ch; padding: 10px 0; }
+.titlecard .title { font: 500 clamp(28px, 4.4vw, 46px)/1.12 var(--serif); letter-spacing: .005em; overflow-wrap: anywhere;
+  text-wrap: balance; }
+.titlecard .sub { margin-top: 8px; font: 15px/1.4 var(--sans); color: rgba(240, 240, 240, .72); }
+.subline { grid-area: sub; justify-self: center; text-align: center; max-width: 64ch; min-height: 1.3em;
+  font: 600 clamp(15px, 1.9vw, 19px)/1.3 var(--overlay); color: #FFFFFF; overflow-wrap: anywhere;
+  text-shadow: var(--shadow-caption);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* The steps of a run (a real sequence, so they're numbered) */
+ol.steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 22px; padding: 0; list-style: none; counter-reset: step; }
+ol.steps[hidden] { display: none; }
+
+/* Choosing a film or folder */
+.chooser label.big { display: block; font-weight: 650; margin-bottom: 6px; }
+.row #path { flex: 1 1 320px; }
+
+/* The video list */
+ul.videos { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+
+/* The options panel */
+fieldset { border: 0; margin: 0 0 16px; padding: 0; min-width: 0; }
+fieldset:disabled { opacity: .7; }
+legend { font-weight: 650; padding: 0; margin-bottom: 4px; }
+#limit { width: 5.5em; }
+details.more summary { cursor: pointer; font-weight: 600; margin: 2px 0 12px; }
+
+/* The run bar */
+.runrow { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.runrow .btn { padding: 10px 18px; font-size: var(--text-body); }
+
+/* The log */
+details.log { margin-top: 30px; }
+details.log summary { cursor: pointer; font-weight: 600; }
+details.log pre { max-height: 340px; overflow: auto; margin: 10px 0 0; padding: 10px 12px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius); font: var(--text-mono)/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Dialogs: shared chrome, then the file browser's own parts */
+dialog { width: min(660px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: var(--radius-dialog);
+  background: var(--surface); color: var(--ink); }
+dialog::backdrop { background: rgba(10, 14, 20, .5); }
+.dhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px;
+  border-bottom: 1px solid var(--line); }
+.dhead h2 { margin: 0; }
+.dbody { padding: 6px 16px 18px; max-height: min(72vh, 720px); overflow: auto; }
+.dbody section { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.dbody section:last-child { border-bottom: 0; }
+.dbody p { margin: 4px 0 10px; max-width: 64ch; }
+.dbody .field input { width: 100%; }
+.dfoot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
+.places { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.places .btn { font-size: var(--text-small); padding: 4px 10px; }
+.where { font-size: var(--text-small); color: var(--muted); overflow-wrap: anywhere; margin: 4px 0 8px; }
+ul.entries { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+ul.entries li { border-bottom: 1px solid var(--line); }
+ul.entries button { display: block; width: 100%; text-align: left; padding: 8px 4px; background: none; border: 0;
+  cursor: pointer; overflow-wrap: anywhere; }
+ul.entries button:hover { background: var(--bg); }
+ul.entries .kind { color: var(--muted); font-size: var(--text-tiny); margin-left: 6px; }
+
+@media (max-width: 620px) {
+  .screen { grid-template-columns: 1fr; grid-template-areas: "left" "right" "title" "sub"; min-height: 340px; }
+  .note.right { justify-self: start; text-align: left; }
+  .note.right .acts { justify-content: flex-start; }
+}

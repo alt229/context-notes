@@ -45,18 +45,19 @@ Answer with the text as one line. `hidden` inputs (keys and passwords) are never
 
 ### `estimate`
 
-This is sent before anything goes to the API. Unless `--yes` or `--estimate-only` was given, the matching
+This is sent before anything goes to Claude (the API, or Claude Code). Unless `--yes` or `--estimate-only` was given, the matching
 `.send` question follows it.
 
 ```
-@context-notes {"v": 1, "type": "estimate", "step": "generate", "model": "claude-sonnet-5-5", "lines": 13, "requests": 1, "input_tokens": 1792, "output_tokens": 139, "cost_usd": 0.005, "limit": null}
+@context-notes {"v": 1, "type": "estimate", "step": "generate", "model": "claude-sonnet-5-5", "backend": "api", "lines": 13, "requests": 1, "input_tokens": 1792, "output_tokens": 139, "cost_usd": 0.005, "limit": null}
 ```
 
 | Field | Meaning |
 |---|---|
 | `step` | `generate` (notes from the dialogue) or `refine` (the video-frames pass) |
-| `model`, `requests` | which Claude model, and how many API requests |
-| `input_tokens`, `output_tokens`, `cost_usd` | the estimate; `cost_usd` is `null` when the model's price isn't known |
+| `model`, `requests` | which Claude model, and how many requests |
+| `backend` | where Claude runs: `api` (the user's key, API credits) or `claude-code` (Claude Code on their subscription) |
+| `input_tokens`, `output_tokens`, `cost_usd` | the estimate; `cost_usd` is `null` when the model's price isn't known, and always `null` for `claude-code` (no credits are spent) |
 | `limit` | seconds, when `--limit` is in force; otherwise `null` |
 | `lines` | generate only: subtitle lines sent |
 | `mode`, `offset`, `images`, `notes` | refine only: `full` or `visual-only`; the sync offset used; how many contact-sheet images; how many existing notes |
@@ -104,8 +105,8 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 
 | id | Asked by | Choices (default) | About |
 |---|---|---|---|
-| `generate.send` | `generate_notes.py` | y / n (**n**) | Send the subtitles to the API |
-| `refine.send` | `refine_notes.py` | y / n (**n**) | Send frames and subtitles to the API |
+| `generate.send` | `generate_notes.py` | y / n (**n**) | "Send the subtitle text to the Claude API now?", or with the `claude-code` backend "Send the subtitle text to Claude Code (your subscription) now?" |
+| `refine.send` | `refine_notes.py` | y / n (**n**) | "Send the video frames and subtitle text to the Claude API now?", or with `claude-code` "...to Claude Code (your subscription) now?" |
 | `generate.resume` | `generate_notes.py` | p / s (p) | The last run stopped part-way: pick up where it left off, or start again |
 | `refine.resume` | `refine_notes.py` | p / s (p) | The last refine stopped part-way: pick up, or start again from the notes as they were before it |
 | `sync.unmeasured` | `context_notes.py` | y / n (y) | The sync couldn't be measured: treat as in sync? |
@@ -151,6 +152,9 @@ Cancelled; nothing was sent.        (stderr; exit code 1)
   exactly one line per event. All the scripts in a run share stdin, and each one reads exactly its own line.
 - Keep the API key out of command lines and logs. Let the scripts read it from the key file, and save it there
   with `--set-api-key`.
+- Where Claude runs is the `--backend` flag (`api` or `claude-code`), or the setting saved with `--set-backend`.
+  With `claude-code`, no key is needed, but the `claude` command has to be installed and signed in; a script stops
+  at once with a plain message when it isn't, before any local work.
 
 ## Cancelling
 
@@ -179,4 +183,4 @@ What happens then:
   `input()` or `getpass` directly. Give every new question a stable id, and add it to the table above.
 - Send events only through `prompts.py`. Never send one while a printed line is still open
   (`print(..., end=" ")`): an event must start its own line, or a GUI misses it. The tests check this.
-- Write any file a later run reads with `make_ass.write_text_safely()` or `make_ass.replacing()`, never in place.
+- Write any file a later run reads with `fileio.write_text_safely()` or `fileio.replacing()`, never in place.

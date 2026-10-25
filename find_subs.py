@@ -39,9 +39,11 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cli_common  # noqa: E402
+import fileio  # noqa: E402
 import languages  # noqa: E402
-import make_ass  # noqa: E402
 import prompts  # noqa: E402
+import subtitles  # noqa: E402
 
 SUB_DIRS = re.compile(r"^(subs?|subtitles?|untertitel|sous[- ]titres|subtitulos)$", re.I)
 JUNK = re.compile(r"\b(2160p|1080p|720p|576p|480p|bluray|blu-ray|brrip|bdrip|web-?dl|webrip|web|hdtv|dvdrip|remux|x264|"
@@ -70,7 +72,7 @@ def title_key(name):
     if e:
         s = s[:e.start()]                              # 'Blackadder S01E02 Head' -> 'blackadder'; episodes go by code
     s = JUNK.sub(" ", s)
-    return re.sub(r"\s+", " ", make_ass.fold(s)).strip()
+    return re.sub(r"\s+", " ", subtitles.fold(s)).strip()
 
 
 def show_key(video):
@@ -99,7 +101,7 @@ def lang_of(path):
         if c in languages.LANGUAGES and (len(part) > 2 or k == len(parts) - 1):
             return c
     try:
-        return languages.guess(" ".join(c["text"] for c in make_ass.parse_srt(path)[:300]))
+        return languages.guess(" ".join(c["text"] for c in subtitles.parse_srt(path)[:300]))
     except (OSError, ValueError):
         return None
 
@@ -136,7 +138,7 @@ def nearby(video):
 
     # beside the video: same film, differently named
     for p in listdir(folder):
-        if p.suffix.lower() != ".srt" or make_ass.fold(p.name).startswith(make_ass.fold(video.stem) + "."):
+        if p.suffix.lower() != ".srt" or subtitles.fold(p.name).startswith(subtitles.fold(video.stem) + "."):
             continue                                   # already the normal name; context_notes.py sees it
         if same_film(p.name):
             consider(p, "beside the video" + (" (the only video here)" if alone and title_key(p.name) != key else ""))
@@ -146,7 +148,7 @@ def nearby(video):
             if p.is_file() and same_film(p.name):
                 consider(p, f"in {d.name}/")
         for sub in (x for x in listdir(d) if x.is_dir()):
-            if same_film(sub.name) or make_ass.fold(sub.name) == make_ass.fold(video.stem):
+            if same_film(sub.name) or subtitles.fold(sub.name) == subtitles.fold(video.stem):
                 for p in listdir(sub):
                     if p.is_file():
                         consider(p, f"in {d.name}/{sub.name}/")
@@ -162,7 +164,7 @@ def rank(p):
     forced = "forced" in name
     sdh = bool(re.search(r"\b(sdh|hi|cc)\b|hearing", re.sub(r"[._\-]", " ", name)))
     try:
-        lines = len(make_ass.parse_srt(p))
+        lines = len(subtitles.parse_srt(p))
     except (OSError, ValueError):
         lines = 0
     return (forced, sdh, -lines)
@@ -185,7 +187,7 @@ def place_beside(video, src, lang):
     dest = video.with_name(f"{video.stem}.{lang}.srt")
     if dest.exists():
         return dest
-    with make_ass.replacing(dest) as tmp:            # all at once: a half-copied file would be used next time
+    with fileio.replacing(dest) as tmp:            # all at once: a half-copied file would be used next time
         shutil.copy2(src, tmp)
     return dest
 
@@ -402,7 +404,7 @@ def search_online(video, lang, cfg, api=OS_API, ask=None):
         dest = video.with_name(f"{video.stem}.{lang}.opensubtitles.srt")
     check = video.with_name(f"{video.stem}.{lang}.download-unchecked")
     check.write_bytes(data)
-    if not make_ass.parse_srt(check):
+    if not subtitles.parse_srt(check):
         bad = check.with_name(check.name.replace("-unchecked", "-unreadable"))
         check.replace(bad)
         say(f"  ! The download isn't a readable .srt file; left it as {bad.name} for you to look at.")
@@ -519,10 +521,9 @@ def main(argv=None):
     ap.add_argument("--online", action="store_true", help="search OpenSubtitles.com without asking first")
     ap.add_argument("--offline", action="store_true", help="don't search online")
     ap.add_argument("--transcribe", action="store_true", help="write subtitles with speech recognition if nothing is found")
-    ap.add_argument("--model", help="speech model for --transcribe (default: base.en, or small for other languages)")
-    ap.add_argument("--limit", type=make_ass.duration_arg, metavar="TIME",
-                    help="speech recognition on only the first part, e.g. 10:00, 600 or 10m, to try it quickly "
-                         "(10:00 writes <video>.<lang>.transcribed.first600s.srt)")
+    cli_common.add_speech_model_arg(ap, purpose="--transcribe")
+    cli_common.add_limit_arg(ap, help="speech recognition on only the first part, e.g. 10:00, 600 or 10m, to try it "
+                                      "quickly (10:00 writes <video>.<lang>.transcribed.first600s.srt)")
     ap.add_argument("--list", action="store_true", help="just list subtitle files found nearby, and stop")
     ap.add_argument("--set-opensubtitles", action="store_true", help="save your OpenSubtitles.com login, test it and exit")
     ap.add_argument("--test-opensubtitles", action="store_true",

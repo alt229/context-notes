@@ -1,0 +1,56 @@
+/* Molecules: small groups of atoms that go together. */
+
+/* A labelled field, a checkbox row and a radio choice (the options form and the settings dialog). */
+.field { display: block; margin: 0 0 14px; }
+.field > span { display: block; font-size: 15px; margin-bottom: 4px; }
+.field select, .field input:not([type=checkbox]):not([type=radio]) { width: 100%; }
+.check { display: flex; align-items: baseline; gap: 8px; margin: 8px 0 0; }
+.check.spaced { margin: 0 0 14px; }
+.choice { display: flex; gap: 9px; align-items: baseline; padding: 3px 0; }
+.choice small, .field small, .check small { display: block; color: var(--muted); font-size: var(--text-small); }
+
+/* The key banner under the header. */
+.banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+  margin-top: 12px; padding: 10px 14px; background: var(--surface); border-left: 3px solid var(--gold); }
+.banner[hidden] { display: none; }
+
+/* A note card on the screen: gold label, pale text on a dark box, optional buttons. */
+.note { max-width: min(46ch, 100%); font-family: var(--overlay); }
+.note[hidden] { display: none; }
+.note.left { grid-area: left; justify-self: start; }
+.note.right { grid-area: right; justify-self: end; text-align: right; }
+.note .label, .note .text, .note .acts { background: var(--screen-box); padding: 3px 10px; }
+.note .label { display: inline-block; color: var(--screen-gold); font-weight: 700; font-size: var(--text-mono); letter-spacing: .03em;
+  text-transform: uppercase; padding-top: 5px; }
+.note .text { font-size: 15.5px; line-height: 1.35; padding-bottom: 7px; white-space: pre-line; }
+.note .acts { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 10px; }
+.note.right .acts { justify-content: flex-end; }
+.note .acts button { font: 600 14px/1.2 var(--overlay); padding: 7px 12px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid rgba(255, 200, 90, .65); background: transparent; color: var(--screen-gold); }
+.note .acts button.primary { background: var(--screen-gold); color: var(--screen-on-gold); border-color: var(--screen-gold); }
+.note .acts button:disabled { opacity: .5; cursor: default; }
+.note .acts input { flex: 1 1 200px; padding: 6px 8px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,.3);
+  background: rgba(0,0,0,.35); color: var(--screen-ink); }
+.note.show { animation: fade .25s ease-out; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* One step of a run (numbered by the list). */
+ol.steps li { flex: 1 1 0; min-width: 96px; padding-top: 6px; border-top: 3px solid var(--line);
+  font-size: var(--text-small); color: var(--muted); }
+ol.steps li::before { counter-increment: step; content: counter(step) ". "; }
+ol.steps li.done { border-color: var(--ink); color: var(--ink); }
+ol.steps li.active { border-color: var(--gold); color: var(--ink); font-weight: 650; }
+ol.steps li.skipped { opacity: .55; }
+
+/* One row of the video list: name, state, what's done, buttons. */
+ul.videos li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 14px; padding: 11px 0;
+  border-bottom: 1px solid var(--line); }
+ul.videos .name { font-weight: 600; overflow-wrap: anywhere; }
+ul.videos .meta { grid-column: 1; color: var(--muted); font-size: var(--text-small); overflow-wrap: anywhere; }
+ul.videos .state { grid-row: 1; grid-column: 2; font-size: var(--text-small); font-weight: 650; white-space: nowrap; }
+ul.videos .acts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+ul.videos .acts .btn { font-size: var(--text-small); padding: 5px 11px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .note.show { animation: none; }
+}

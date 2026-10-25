@@ -4,6 +4,7 @@ import pytest
 from conftest import make_srt, run_cli
 
 import make_ass
+import subtitles
 
 
 # ---------------------------------------------------------------- reading subtitles
@@ -11,7 +12,7 @@ def test_parse_srt_handles_bom_crlf_missing_index_and_dot_milliseconds(tmp_path)
     raw = "﻿1\r\n00:00:01,000 --> 00:00:02,500\r\nHello\r\n\r\n00:00:03.250 --> 00:00:04.000\r\nNo index here\r\n"
     p = tmp_path / "a.srt"
     p.write_bytes(raw.encode("utf-8"))
-    cues = make_ass.parse_srt(p)
+    cues = subtitles.parse_srt(p)
     assert [c["text"] for c in cues] == ["Hello", "No index here"]
     assert cues[0]["start"] == 1.0 and cues[0]["end"] == 2.5
     assert cues[1]["start"] == 3.25
@@ -21,7 +22,7 @@ def test_parse_srt_handles_bom_crlf_missing_index_and_dot_milliseconds(tmp_path)
 def test_read_text_falls_back_to_cp1252(tmp_path):
     p = tmp_path / "a.srt"
     p.write_bytes("1\n00:00:01,000 --> 00:00:02,000\ncafé \u201cquoted\u201d\n".encode("cp1252"))
-    assert make_ass.parse_srt(p)[0]["text"] == "café \u201cquoted\u201d"
+    assert subtitles.parse_srt(p)[0]["text"] == "café \u201cquoted\u201d"
 
 
 # ---------------------------------------------------------------- matching quotes to lines
@@ -31,19 +32,19 @@ CUES = [{"n": i + 1, "start": float(i), "end": i + 0.9, "text": t} for i, t in e
 
 
 def test_norm_strips_tags_case_punctuation_and_curly_quotes():
-    assert make_ass.norm("<i>It’s</i> ROY!") == "it's roy"
+    assert subtitles.norm("<i>It’s</i> ROY!") == "it's roy"
 
 
 def test_find_cue_basic_spanning_and_occurrence():
-    assert make_ass.find_cue(CUES, "go-to guy", 0) == 2
-    assert make_ass.find_cue(CUES, "good friend as the go-to", 0) == 1          # quote spans two cues
-    assert make_ass.find_cue(CUES, "Come in", 0, occurrence=2) == 3
-    assert make_ass.find_cue(CUES, "no such words", 0) is None
+    assert subtitles.find_cue(CUES, "go-to guy", 0) == 2
+    assert subtitles.find_cue(CUES, "good friend as the go-to", 0) == 1          # quote spans two cues
+    assert subtitles.find_cue(CUES, "Come in", 0, occurrence=2) == 3
+    assert subtitles.find_cue(CUES, "no such words", 0) is None
 
 
 def test_find_cue_prefers_hits_after_the_previous_note():
-    assert make_ass.find_cue(CUES, "come in", 1) == 3
-    assert make_ass.find_cue(CUES, "come in", 0) == 0
+    assert subtitles.find_cue(CUES, "come in", 1) == 3
+    assert subtitles.find_cue(CUES, "come in", 0) == 0
 
 
 # ---------------------------------------------------------------- placing notes

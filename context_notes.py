@@ -35,9 +35,12 @@ HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 import analyze  # noqa: E402
+import cli_common  # noqa: E402
+import fileio  # noqa: E402
 import languages  # noqa: E402
-import make_ass  # noqa: E402
 import prompts  # noqa: E402
+import subtitles  # noqa: E402
+import timecode  # noqa: E402
 
 SEASON_DIR = re.compile(r"^(season|series|saison|staffel|temporada|stagione|seizoen)\s*\d+$|^s\d{1,2}$", re.I)
 DERIVED_SUFFIX = re.compile(r"(\.embedded(\.[a-z]{2})?)?(\.aligned(\.first\d+s)?)?$")
@@ -78,7 +81,7 @@ def covers(have, want):
 
 def load_notes(path):
     try:
-        spec = json.loads(make_ass.read_text(path))
+        spec = json.loads(fileio.read_text(path))
     except (OSError, ValueError):
         return None
     return spec if isinstance(spec, dict) else {"notes": spec}
@@ -132,7 +135,7 @@ def subtitle_files(video):
         lang, tags = languages.from_filename(base_name, stem)
         if lang is None:
             try:
-                lang = languages.guess(" ".join(c["text"] for c in make_ass.parse_srt(p)[:300]))
+                lang = languages.guess(" ".join(c["text"] for c in subtitles.parse_srt(p)[:300]))
             except (OSError, ValueError):
                 lang = None
         out.append({"path": p, "lang": lang, "tags": tags, "embedded": "embedded" in tags,
@@ -264,7 +267,7 @@ def status_line(st):
         subs = f"none in {languages.name(st['display_lang'])}; found {found_elsewhere(st['subs'])}"
     if st["have"]:
         lim = (st["spec"] or {}).get("limit")
-        notes = f"{st['have']} notes" + (f" (first {make_ass.fmt_limit(lim)})" if lim else "")
+        notes = f"{st['have']} notes" + (f" (first {timecode.fmt_limit(lim)})" if lim else "")
         refined = (st["spec"] or {}).get("refined")
         notes += ((", refine stopped part-way" if refined.get("stopped_after") else ", refined") if refined
                   else ", not refined")
@@ -299,19 +302,13 @@ def script(name, *args):
 
 
 def common_api_args(opts):
-    out = []
-    for flag, value in (("--model", opts.model), ("--audience", opts.audience), ("--notes-language", opts.notes_language),
-                        ("--api-url", opts.api_url), ("--api-key-file", opts.api_key_file),
-                        ("--effort", getattr(opts, "effort", None))):
-        if value:
-            out += [flag, value]
-    if opts.yes:
-        out.append("--yes")
-    return out
+    """The flags make_ass.py --generate/--refine take from ours. The film's language and the title are worked out
+    per video, so they aren't passed on from here (see process)."""
+    return (cli_common.claude_args_from(opts) + cli_common.film_args_from(opts, only=("audience", "notes_language"))
+            + cli_common.yes_args_from(opts))
 
 
-def limit_args(opts):
-    return ["--limit", f"{opts.limit:g}"] if opts.limit else []
+limit_args = cli_common.limit_args_from
 
 
 def get_subtitles(video, lang, opts, required=True, accept_unknown=False):
@@ -403,7 +400,7 @@ def match_timing(video, shown, main, notes, opts):
     than the soundtrack); falls back to the soundtrack if they don't resemble each other."""
     spec = load_notes(notes) if notes.exists() else None
     main_offset = float((spec or {}).get("video_offset", 0) or 0)
-    off, strength, corr = analyze.subtitle_offset(make_ass.parse_srt(shown), make_ass.parse_srt(main))
+    off, strength, corr = analyze.subtitle_offset(subtitles.parse_srt(shown), subtitles.parse_srt(main))
     if strength < 1.3 or corr < 0.4:
         say(f"{shown.name} and {main.name} don't line up clearly, so checking {shown.name} against the soundtrack.")
         return sync_original(video, shown, opts)
@@ -493,7 +490,7 @@ def check_sync(video, srt, film, display_lang, embedded, opts):
     aligned = analyze.aligned_path(srt, opts.limit if opts.limit else None)
     if not aligned.exists():
         raise Stop(f"Re-timing ran but {aligned.name} wasn't written.")
-    kept, total = len(make_ass.parse_srt(aligned)), len(make_ass.limit_cues(make_ass.parse_srt(srt), opts.limit))
+    kept, total = len(subtitles.parse_srt(aligned)), len(subtitles.limit_cues(subtitles.parse_srt(srt), opts.limit))
     if kept < 0.5 * total:
         rejected = aligned.with_name(aligned.name + ".rejected")
         aligned.replace(rejected)               # out of the way, or the next run would pick it up as the timing
@@ -622,8 +619,8 @@ def process(video, opts):
 
     need_generate = opts.redo or not have
     if have and not opts.redo and not covers(spec.get("limit"), opts.limit):
-        lim = make_ass.fmt_limit(spec["limit"])
-        want = "the whole video" if not opts.limit else f"the first {make_ass.fmt_limit(opts.limit)}"
+        lim = timecode.fmt_limit(spec["limit"])
+        want = "the whole video" if not opts.limit else f"the first {timecode.fmt_limit(opts.limit)}"
         pick = ask(f"{notes.name} only covers the first {lim}. Write new notes for {want}? (the old file is kept as .bak)",
                    {"y": "yes, write new notes", "n": "no, keep these"}, "y", opts.yes, id="notes.limited")
         need_generate = pick == "y"
@@ -697,10 +694,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("path", help="a video file, or a folder of them")
     ap.add_argument("--status", action="store_true", help="show what's done and what's left, then stop")
-    ap.add_argument("--limit", type=make_ass.duration_arg, metavar="TIME",
-                    help="only the first part of each video, e.g. 5:00, 300 or 5m (for testing)")
-    ap.add_argument("--film-language", metavar="LANG",
-                    help="language spoken in the video: fr, de, es, ... (default: from the audio track's tag, else en)")
+    cli_common.add_limit_arg(ap, help="only the first part of each video, e.g. 5:00, 300 or 5m (for testing)")
+    cli_common.add_film_args(ap, only=("film_language", "title", "audience", "notes_language"), notes_language_default=None,
+                             film_language="language spoken in the video: fr, de, es, ... (default: from the audio "
+                                           "track's tag, else en)",
+                             title="full title, for a single video (default: show name + file name)")
     ap.add_argument("--subs-language", metavar="LANG",
                     help="subtitles Claude writes the notes from (default: the film's own language, so a French film's "
                          "notes explain the French). en: work from English subtitles, compared with the original. "
@@ -709,18 +707,12 @@ def main(argv=None):
                     help="subtitles to show on screen, e.g. en: notes found in the French, English subtitles shown. "
                          "No API cost if the notes exist (just rebuilds the .ass); remembered for later runs")
     ap.add_argument("--show", help="show name for the titles Claude sees (default: guessed from the folder names)")
-    ap.add_argument("--title", help="full title, for a single video (default: show name + file name)")
-    ap.add_argument("--yes", action="store_true",
-                    help="don't stop to ask: approve the API costs and take the default answer to every question")
+    cli_common.add_yes_arg(ap)
     ap.add_argument("--no-refine", action="store_true", help="skip the (pricier) video-frames step")
     ap.add_argument("--redo", action="store_true", help="write the notes again even if they exist (old ones kept as .bak)")
     ap.add_argument("--recursive", action="store_true", help="with a folder: include subfolders")
-    ap.add_argument("--frames", choices=("keyframes", "dense"), default="keyframes", help="for the refine step")
-    ap.add_argument("--model", help="Claude model (default: claude-sonnet-5-5)")
-    ap.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"),
-                    help="the model's effort setting (default: the model's own default; Haiku 4.5 doesn't support it)")
-    ap.add_argument("--audience", help="who the notes are for")
-    ap.add_argument("--notes-language", help="language to write the notes in (default: English)")
+    cli_common.add_frames_arg(ap)
+    cli_common.add_claude_args(ap, show_key_file=False)      # --model, --effort, --backend, --api-url, --api-key-file
     ap.add_argument("--check-alignment", action="store_true",
                     help="check every note against the speech in the seconds before it, and offer to fix stretches "
                          "that are out (transcribes the soundtrack once; also works on videos already done)")
@@ -729,9 +721,7 @@ def main(argv=None):
                     help="for the alignment check: seconds before each note to look at (default 10)")
     ap.add_argument("--offline", action="store_true",
                     help="when a video has no subtitles, don't search OpenSubtitles.com for them")
-    ap.add_argument("--align-model", help="speech model for re-timing (default: base.en, or small for other languages)")
-    ap.add_argument("--api-key-file", help=argparse.SUPPRESS)
-    ap.add_argument("--api-url", help=argparse.SUPPRESS)
+    cli_common.add_speech_model_arg(ap, flag="--align-model", purpose="re-timing")
     opts = ap.parse_args(argv)
     opts.subs_language = languages.code(opts.subs_language) if opts.subs_language else None
     opts.show_subs = languages.code(opts.show_subs) if opts.show_subs else None
@@ -747,7 +737,7 @@ def main(argv=None):
     if opts.title and len(videos) > 1:
         sys.exit("--title is for a single video. For a folder, use --show and the file names do the rest.")
 
-    say(f"{len(videos)} video(s)" + (f", first {make_ass.fmt_limit(opts.limit)} of each" if opts.limit else "") + ":")
+    say(f"{len(videos)} video(s)" + (f", first {timecode.fmt_limit(opts.limit)} of each" if opts.limit else "") + ":")
     for v in videos:
         st = inspect(v, opts)
         say(status_line(st))
@@ -755,9 +745,12 @@ def main(argv=None):
     if opts.status:
         return 0
     if not all(inspect(v, opts)["done"] for v in videos):
-        import generate_notes
-        try:
-            generate_notes.load_key(opts.api_key_file)          # stop now, not after minutes of local work
+        import claude_api
+        try:                                                # stop now, not after minutes of local work
+            if claude_api.load_backend(opts.backend) == "api":
+                claude_api.load_key(opts.api_key_file)
+            else:
+                claude_api.check_claude_code()
         except SystemExit as e:
             sys.exit(str(e))
 

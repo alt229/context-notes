@@ -27,9 +27,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 sys.path.insert(0, str(REPO))
-import generate_notes as gn  # noqa: E402
-import make_ass  # noqa: E402
+import claude_api  # noqa: E402
 import refine_notes as rn  # noqa: E402
+import subtitles  # noqa: E402
 
 COMMON = """You are an impartial judge of "pop-up context notes" written for viewers of the 1988 anime film Akira. The \
 viewer is an English speaker watching the Japanese original with subtitles. Good notes explain what a non-native viewer \
@@ -105,7 +105,7 @@ def gather(out):
         if not (d / "cell.json").exists():
             continue
         cfg, spec = load(d / "cell.json"), load(d / "notes.json")
-        cues = make_ass.parse_srt(cfg["subs"])
+        cues = subtitles.parse_srt(cfg["subs"])
         times = rn.note_times(cues, spec["notes"], float(spec.get("video_offset", 0) or 0))
         items = []
         for k, n in enumerate(spec["notes"], 1):
@@ -119,8 +119,8 @@ def gather(out):
 
 def build_windows(cells, cfg, out, english, span, korean=None):
     limit = float(cfg["limit"])
-    eng = make_ass.parse_srt(english)
-    kor = make_ass.parse_srt(korean or cfg["subs"])
+    eng = subtitles.parse_srt(english)
+    kor = subtitles.parse_srt(korean or cfg["subs"])
     sheets = pickle.loads(Path(cfg["prep_pkl"]).read_bytes())["sheets"]
     wins = []
     for i, lo in enumerate(range(0, int(limit), span)):
@@ -176,7 +176,7 @@ def run_judge(a):
         w["single"] = bool(a.single_track)
     cache = out / "judge-cache"
     cache.mkdir(exist_ok=True)
-    key = gn.load_key(a.api_key_file)
+    key = claude_api.load_key(a.api_key_file)
     started = time.time()
     deadline = started + a.budget if a.budget else None
 
@@ -192,7 +192,7 @@ def run_judge(a):
         if deadline and time.time() + a.min_remaining > deadline:
             return w["key"], None, "deferred"
         try:
-            r = gn.call_api(key, a.judge_model, system, content, timeout=600, max_tokens=a.max_tokens,
+            r = claude_api.call_api(key, a.judge_model, system, content, timeout=600, max_tokens=a.max_tokens,
                             effort=a.judge_effort)
         except BaseException as e:           # call_api exits the process on a hard API error
             return w["key"], None, f"error: {e}"
@@ -261,7 +261,7 @@ def run_judge(a):
             s[kind]["clusters_total"] = len(tot)
         summary[c] = s
     save = {"judge_model": a.judge_model, "judge_effort": a.judge_effort, "windows": len(wins), "bad_windows": bad,
-            "tokens_in": tin, "tokens_out": tout, "judge_cost": gn.cost(a.judge_model, tin, tout),
+            "tokens_in": tin, "tokens_out": tout, "judge_cost": claude_api.cost(a.judge_model, tin, tout),
             "summary": summary,
             "notes": {c: v["speech"] + v["visual"] for c, v in per.items()},
             "wrong_notes": {c: [dict(i, kind=k) for k in ("speech", "visual") for i in v[k] if i["acc"] == "wrong"]

@@ -1,0 +1,80 @@
+"""
+subtitles.py - reading SRT subtitle files and finding the line a note belongs to.
+
+parse_srt() turns a subtitle file into a list of cues: {"n": 1, "start": 3.0, "end": 5.5, "text": "..."}, numbered
+from 1 in file order. Notes attach to a line by quoting part of it, so find_cue() looks for the quote in the cues
+with accents, case, tags and punctuation ignored (fold() and norm()). limit_cues() keeps only the lines that start
+before a --limit. Writing the .ass file is make_ass.py's job, not this module's.
+"""
+import re
+import unicodedata
+
+from fileio import read_text
+from timecode import TS, ts_to_s
+
+
+# ---------------------------------------------------------------- SRT parsing
+def parse_srt(path):
+    """The cues in an SRT file, numbered from 1 in file order. Blocks without a timing line or text are skipped."""
+    text = read_text(path).replace("\r\n", "\n").replace("\r", "\n")
+    cues = []
+    for block in re.split(r"\n\s*\n", text.strip()):
+        lines = block.split("\n")
+        # find the timing line (index line is optional / sometimes missing)
+        for i, line in enumerate(lines):
+            m = re.match(TS + r"\s*-->\s*" + TS, line.strip())
+            if m:
+                g = m.groups()
+                start, end = ts_to_s(*g[:4]), ts_to_s(*g[4:])
+                body = "\n".join(lines[i + 1:]).strip()
+                if body:
+                    cues.append({"start": start, "end": end, "text": body})
+                break
+    for n, c in enumerate(cues, 1):
+        c["n"] = n
+    return cues
+
+
+def limit_cues(cues, limit):
+    """Only the subtitle lines that start before `limit` seconds (all of them if limit is None)."""
+    return cues if not limit else [c for c in cues if c["start"] < limit]
+
+
+# ---------------------------------------------------------------- matching
+def fold(s):
+    """Lower-case and drop accents: 'Été, Straße, cœur' -> 'ete, strasse, coeur'. Curly apostrophes become '."""
+    s = unicodedata.normalize("NFKD", s.lower())
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    for a, b in (("ß", "ss"), ("œ", "oe"), ("æ", "ae"), ("ø", "o"), ("ł", "l"), ("’", "'"), ("‘", "'")):
+        s = s.replace(a, b)
+    return s
+
+
+def norm(s):
+    """fold(), with tags stripped and everything but letters, digits, apostrophes and single spaces removed."""
+    s = re.sub(r"<[^>]+>|\{[^}]*\}", " ", s)          # strip tags
+    s = re.sub(r"[^a-z0-9' ]+", " ", fold(s))
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def find_cue(cues, needle, after_idx, occurrence=1):
+    """Find the cue containing `needle`, preferring hits after the previous
+    note's cue so repeated phrases resolve in order. Lines that span two cues
+    are handled by also testing each cue joined with the next one."""
+    n = norm(needle)
+    if not n:
+        return None
+    normed = [norm(c["text"]) for c in cues]
+    hits = []
+    for i, here in enumerate(normed):
+        if n in here:
+            hits.append(i)
+        elif i + 1 < len(normed) and n in here + " " + normed[i + 1] and n not in normed[i + 1]:
+            hits.append(i)   # quote spans this cue and the next
+    if not hits:
+        return None
+    ordered = [h for h in hits if h >= after_idx] + [h for h in hits if h < after_idx]
+    if occurrence > 1:
+        ordered = sorted(hits)
+        return ordered[occurrence - 1] if occurrence <= len(ordered) else None
+    return ordered[0]

@@ -6,6 +6,7 @@ import pytest
 from conftest import make_srt, message, needs_ffmpeg, run_cli
 
 import refine_notes as rn
+import timecode
 
 
 # ---------------------------------------------------------------- times
@@ -26,8 +27,8 @@ def test_resolve_time(value, lo, hi, expected, how):
 
 
 def test_parse_time_and_formatters():
-    assert rn.parse_time("1:02:03.5") == 3723.5 and rn.parse_time("2:30") == 150 and rn.parse_time("x") is None
-    assert rn.hms(3725) == "1:02:05" and rn.srt_ts(3725.5) == "01:02:05,500"
+    assert timecode.parse_time("1:02:03.5") == 3723.5 and timecode.parse_time("2:30") == 150 and timecode.parse_time("x") is None
+    assert timecode.hms(3725) == "1:02:05" and timecode.srt_ts(3725.5) == "01:02:05,500"
 
 
 # ---------------------------------------------------------------- guarding against the wrong video
@@ -154,14 +155,43 @@ def project(tmp_path, videos):
 
 def refine_responder(n, body, headers):
     user = [b for b in body["messages"][0]["content"] if b["type"] == "text"][-1]["text"]
-    lo = rn.parse_time(re.search(r"This stretch: (\S+) to", user).group(1))
+    lo = timecode.parse_time(re.search(r"This stretch: (\S+) to", user).group(1))
     ids = [int(i) for i in re.findall(r"^#(\d+) \[", user, re.M)]
-    reply = {"add": [{"at": rn.hms(lo + 5), "kind": "visual", "category": "Prop", "text": f"Prop at {rn.hms(lo + 5)}",
+    reply = {"add": [{"at": timecode.hms(lo + 5), "kind": "visual", "category": "Prop", "text": f"Prop at {timecode.hms(lo + 5)}",
                       "confidence": "high"},
                      {"at": round((lo + 20) / 60, 2), "kind": "visual", "category": "Prop", "text": "Prop in decimal minutes"}],
              "revise": [{"id": ids[0], "text": "REVISED", "reason": "frames"}] if ids else [],
              "drop": [{"id": ids[-1], "reason": "wrong"}] if len(ids) > 1 else []}
     return 200, message(json.dumps(reply), usage=(5000, 300))
+
+
+@needs_ffmpeg
+def test_plan_refine_works_out_the_plan_without_the_network(project, capsys):
+    import claude_api
+    original = (project / "notes-synced.json").read_text()
+    plan = rn.plan_refine(project / "synced.srt", project / "notes-synced.json", project / "synced.mp4", estimate_only=True)
+    assert plan.key is None and not plan.visual_only and plan.first == 1 and plan.todo == plan.wins and plan.total >= 2
+    assert plan.offset == pytest.approx(0.9, abs=0.1) and plan.title == "Test Show" and plan.resume_from is None
+    assert plan.n_img == sum(len(w["sheets"]) for w in plan.wins) and plan.est_in > plan.n_img * 100
+    assert plan.cost == pytest.approx(claude_api.cost(plan.model, plan.est_in, plan.est_out))
+    assert "sync offset set to" in plan.sync_msg and "NOT reliably" not in plan.sys_prompt
+    assert plan.times[1] == pytest.approx(3.0 + plan.offset) and len(plan.times) == len(plan.notes)
+    out = capsys.readouterr().out
+    assert "Mode: full (subtitles are in sync with the video)." in out
+    assert f"Plan: {len(plan.todo)} request(s) to claude-sonnet-5-5, {plan.n_img} contact-sheet images" in out
+    assert (project / "notes-synced.json").read_text() == original and not list(project.glob("*.bak"))
+
+    # the message for one stretch names the sheets by path; they are encoded only at the API call
+    content, listed = rn.window_content(plan, 1, plan.todo[0], plan.notes, plan.times)
+    images = [b for b in content if b["type"] == "image"]
+    assert images and all(b["path"].endswith(".jpg") and "source" not in b for b in images)
+    assert content[-1]["type"] == "text" and "Part 1 of" in content[-1]["text"] and 1 in listed
+    encoded = claude_api.encode_images(content)
+    assert all(b["source"]["type"] == "base64" for b in encoded if b["type"] == "image")
+
+    plan = rn.plan_refine(project / "drift.srt", project / "notes-drift.json", project / "drift.mp4", estimate_only=True)
+    assert plan.visual_only and "NOT reliably in step" in plan.sys_prompt
+    assert "Mode: on-screen notes only" in capsys.readouterr().out
 
 
 @needs_ffmpeg

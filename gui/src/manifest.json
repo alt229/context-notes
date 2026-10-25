@@ -1,0 +1,40 @@
+{
+  "_comment": "The files gui/assemble.py puts together, in order. Paths are relative to gui/src. Add a new file to the right list; the order within a list is the order in the page.",
+  "styles": [
+    "styles/tokens.css",
+    "styles/base.css",
+    "styles/atoms.css",
+    "styles/molecules.css",
+    "styles/organisms.css",
+    "styles/layout.css"
+  ],
+  "page": [
+    "partials/header.html",
+    "partials/banner.html",
+    "partials/screen.html",
+    "partials/steps.html",
+    "partials/chooser.html",
+    "partials/videos.html",
+    "partials/options.html",
+    "partials/actions.html",
+    "partials/log.html"
+  ],
+  "dialogs": [
+    "partials/browser-dialog.html",
+    "partials/settings-dialog.html"
+  ],
+  "scripts": [
+    "js/00-util.js",
+    "js/10-api.js",
+    "js/20-state.js",
+    "js/components/screen.js",
+    "js/components/steps.js",
+    "js/components/options.js",
+    "js/components/videoList.js",
+    "js/components/chooser.js",
+    "js/components/runner.js",
+    "js/components/log.js",
+    "js/components/settings.js",
+    "js/90-main.js"
+  ]
+}

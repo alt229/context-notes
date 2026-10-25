@@ -112,6 +112,48 @@ def api():
     server.close()
 
 
+@pytest.fixture(autouse=True)
+def _claude_runs_where_the_test_says(monkeypatch):
+    """A developer's own backend setting and `claude` path never leak into a test."""
+    monkeypatch.delenv("CONTEXT_NOTES_BACKEND", raising=False)
+    monkeypatch.delenv("CONTEXT_NOTES_CLAUDE_BIN", raising=False)
+    monkeypatch.delenv("FAKE_CLAUDE_FAIL", raising=False)
+
+
+class FakeClaude:
+    """The stand-in `claude` command (tests/fake_claude.py), installed for one test. `calls` is what it was given:
+    one dict per run with "argv", "prompt" and "cwd". fail(mode) makes the next runs fail ("limit", "login",
+    "limit-after-N"; see fake_claude.py)."""
+
+    def __init__(self, exe, log, monkeypatch):
+        self.exe, self.log, self._mp = exe, log, monkeypatch
+
+    @property
+    def calls(self):
+        if not self.log.exists():
+            return []
+        return [json.loads(ln) for ln in self.log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+    def fail(self, mode):
+        self._mp.setenv("FAKE_CLAUDE_FAIL", mode)
+
+
+@pytest.fixture
+def fake_claude(tmp_path, monkeypatch):
+    """tests/fake_claude.py, copied to a temporary folder as an executable called `claude`, with
+    CONTEXT_NOTES_CLAUDE_BIN pointing at it (so claude_api finds it, in this process and in the scripts it runs)."""
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
+    exe = bin_dir / "claude"
+    source = (ROOT / "tests" / "fake_claude.py").read_text(encoding="utf-8").split("\n", 1)[1]
+    exe.write_text(f"#!{sys.executable}\n" + source, encoding="utf-8")       # this Python, wherever `python3` points
+    exe.chmod(0o755)
+    log = tmp_path / "fake-claude-calls.jsonl"
+    monkeypatch.setenv("CONTEXT_NOTES_CLAUDE_BIN", str(exe))
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
+    return FakeClaude(exe, log, monkeypatch)
+
+
 @pytest.fixture
 def api_key_file(home):
     """A valid-looking key stored where the scripts look for it."""

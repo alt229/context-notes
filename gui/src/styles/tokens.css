@@ -1,0 +1,58 @@
+/* Design tokens: the only place colours, font stacks, radii and the type scale are defined. */
+:root {
+  color-scheme: light dark;
+  --bg: #E8EBEF;
+  --surface: #F7F8FA;
+  --ink: #1C2430;
+  --muted: #5A6473;
+  --line: #CBD2DA;
+  --primary: #2B3550;
+  --on-primary: #FFFFFF;
+  --focus: #2B3550;
+  --gold: #D99A22;
+  --ready: #2E7A4D;
+  --stopped: #946414;
+  --problem: #B42318;
+  --sans: "Avenir Next", Avenir, "Segoe UI Variable Text", "Segoe UI", Ubuntu, Cantarell, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "URW Palladio L", P052, "Book Antiqua", Georgia, serif;
+  --overlay: "Helvetica Neue", Arial, "Liberation Sans", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+
+  /* The screen keeps the notes' own look in both colour schemes, so its colours don't change in dark mode. */
+  --screen-ink: #F0F0F0;
+  --screen-gold: #FFC85A;
+  --screen-on-gold: #1A1E26;
+  --screen-box: rgba(12, 12, 18, .76);
+
+  /* Spacing and shape */
+  --gutter: 16px;
+  --radius-sm: 3px;
+  --radius: 6px;
+  --radius-lg: 8px;
+  --radius-dialog: 10px;
+
+  /* Type scale */
+  --text-mono: 12.5px;
+  --text-tiny: 13px;
+  --text-small: 14px;
+  --text-body: 16px;
+  --text-heading: 18px;
+
+  --shadow-caption: 0 0 3px #000, 0 0 3px #000, 0 1px 2px #000;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12161C;
+    --surface: #191F28;
+    --ink: #E4E8ED;
+    --muted: #9BA5B2;
+    --line: #2B333E;
+    --primary: #E4E8ED;
+    --on-primary: #141A22;
+    --focus: #FFC85A;
+    --gold: #FFC85A;
+    --ready: #6CC08D;
+    --stopped: #E2B24F;
+    --problem: #F4876F;
+  }
+}

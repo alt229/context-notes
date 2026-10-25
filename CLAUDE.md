@@ -15,11 +15,20 @@ Read `README.md` for the full command reference. This file holds what we've lear
 2. **Sync.** `analyze.py SRT --video V --frames none --shift auto` fixes a constant offset. `--align` re-times with
    faster-whisper when the offset drifts (different cut).
 3. **Dialogue notes.** Two routes:
-   - The API: `make_ass.py --generate`, which costs credits.
-   - The subscription: `chat_notes.py prepare`, then one reply per part, then `chat_notes.py collect`. In this
-     project, `/notes` does this with the **note-writer** agent.
-4. **Frame notes.** `make_ass.py --refine` uses the API only; there is no subscription route yet. It sends contact
-   sheets of keyframes.
+   - `make_ass.py --generate`: the API with Erin's key (costs credits), or `--backend claude-code`, which runs each
+     request through the installed Claude Code command (`claude -p`) on her subscription. `--set-backend` saves the
+     choice in `~/.config/context-notes/backend`; `claude_api.send()` is the one place that dispatches.
+   - The subscription from inside a Claude Code conversation: `chat_notes.py prepare`, then one reply per part, then
+     `chat_notes.py collect`. In this project, `/notes` does this with the **note-writer** agent.
+4. **Frame notes.** Three routes:
+   - The API: `make_ass.py --refine`, which costs credits. It sends contact sheets of keyframes as images.
+   - The subscription, headless: `make_ass.py --refine --backend claude-code` tells Claude Code where the JPEGs are
+     (`--tools Read --add-dir`), so it opens them with its Read tool. It runs in the media folder, never in this
+     repo, so this CLAUDE.md isn't loaded into it.
+   - The subscription, in this project: `chat_notes.py show-frames` prints one stretch (its instructions, the
+     contact-sheet files to open, the dialogue and the existing notes), and `chat_notes.py collect-frames` applies
+     the `frames-<k>.txt` replies to the notes file exactly as `--refine` does (same backup, report and
+     `stopped_after` pick-up). `/refine` does this with the **frame-reviewer** agent.
 5. **Build.** `make_ass.py SRT NOTES --video V`. Repeats are left out (`dedupe.py`) and timing comes from the notes
    file's `timing`.
 6. **Check.** `align_check.py V SRT` measures every note against the speech in the 10 s before it. `--fix` corrects
@@ -43,7 +52,7 @@ Read `README.md` for the full command reference. This file holds what we've lear
   - Neither hybrid (Sonnet for one step, Opus for the other) is safe across titles.
   - Erin's plan: films she loves (Das Boot, Waking Ned Devine, Akira) get Opus high; British series (Blackadder,
     Red Dwarf) get Sonnet high.
-  - `generate_notes.DEFAULT_MODEL` is still `claude-sonnet-5-5`. Pass `--model claude-opus-5-5 --effort high` for
+  - `claude_api.DEFAULT_MODEL` is still `claude-sonnet-5-5`. Pass `--model claude-opus-5-5 --effort high` for
     Opus.
 - **Routing by the model's own confidence** isn't worth building. It would have to flag about 65% of notes to catch
   most errors.
@@ -96,7 +105,8 @@ Read `README.md` for the full command reference. This file holds what we've lear
    permission prompt to read it.
 2. **Never spend API credits without a yes from Erin in this conversation.** That covers `--generate`, `--refine`,
    `bench.py` and `judge.py`. Each one prints a cost estimate first, so show it. `/notes` uses the subscription,
-   not the API.
+   not the API. `--backend claude-code` also uses the subscription (the Plan line then says so instead of a price),
+   but it still counts against her plan's limit, so still ask before a run.
 3. **API keys** live in `~/.config/context-notes/api-key` (mode 600). Erin prefers config files to environment
    variables. Never print a key.
 4. **Originals are never changed.** Scripts write `.aligned.srt`, `.bak` and new files beside the original. Keep it
@@ -112,7 +122,7 @@ Read `README.md` for the full command reference. This file holds what we've lear
    question a stable id and add it to the table in `docs/gui-protocol.md`. Events go through `prompts.py` too, and
    never while a printed line is still open (`end=" "`).
 8. **Write files all at once.** Anything a later run reads (caches, subtitles, notes, `.ass`) is written with
-   `make_ass.write_text_safely()` or `make_ass.replacing()`, so Ctrl-C or a GUI's Cancel can't leave half a file.
+   `fileio.write_text_safely()` or `fileio.replacing()`, so Ctrl-C or a GUI's Cancel can't leave half a file.
 9. **Write for Erin.** Plain English in messages and docs, and say what to do next. She runs macOS (Apple
    Silicon, Homebrew, Python 3.14) and works in Terminal.
 
@@ -120,10 +130,15 @@ Read `README.md` for the full command reference. This file holds what we've lear
 
 - A local web page for friends who don't use Terminal. It runs `context_notes.py` with `CONTEXT_NOTES_UI=json`
   (`docs/gui-protocol.md`) and shows the questions, the cost, progress and Cancel.
-- Standard library only. One HTML file, with no external scripts, fonts or images.
+- Standard library only. One HTML file, with no external scripts, fonts or images. It is generated from `gui/src`
+  by `gui/assemble.py` (`gui/README.md` explains the layers): edit the sources, then run `python3 gui/assemble.py`
+  to regenerate it, or `tests/test_gui_assemble.py` fails.
 - Security: it listens on 127.0.0.1 only, every request needs the random key, and `Host` and `Origin` are checked.
   The API key never goes to the page; it only shows the last 4 characters. Keep all of this when changing it.
 - New options friends should reach go in the page's form, and in `common_args` / `App.run` in `app.py`.
+- Settings → "Where Claude runs" picks the backend (`/api/info` reports it with whether Claude Code is installed;
+  `POST /api/backend` saves it through `make_ass.py --set-backend`). The "Add your key" banner shows only when the
+  backend is the API and there's no key.
 - WSL is supported through a small layer: Windows paths, `explorer.exe`, `vlc.exe`, and PowerShell file dialogs.
   Native Windows is not.
 - Tests: `tests/test_app.py` (HTTP, whole runs, cancel). To look at the page, run it with `--api-url` pointing at the
@@ -135,6 +150,8 @@ Read `README.md` for the full command reference. This file holds what we've lear
 |---|---|---|
 | `subtitle-prep` | Haiku | Find subtitles, run the sync and alignment checks, and summarise what the reports say. It runs scripts and reads their output; it doesn't write code. |
 | `note-writer` | Opus | Write the notes for ONE part of a film (`chat_notes.py show`) as a JSON array, saved as `part-<k>.txt`. This replaces the API's `--generate` and runs on the subscription. |
+| `frame-reviewer` | Opus | Look at the contact sheets for ONE stretch of the video (`chat_notes.py show-frames`) and write the refine reply as a JSON object, saved as `frames-<k>.txt`. This replaces the API's `--refine` and runs on the subscription. It opens the sheets with the Read tool, so it sees the frames. |
 
-Commands: `/notes <video> [options]` (subscription-written notes, end to end) and `/check <video>` (subtitles,
-sync, alignment and repeats, with no API use).
+Commands: `/notes <video> [options]` (subscription-written dialogue notes, end to end), `/refine <video> [options]`
+(the frame pass on the subscription; needs the notes first) and `/check <video>` (subtitles, sync, alignment and
+repeats, with no API use).

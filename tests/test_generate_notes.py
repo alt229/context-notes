@@ -7,8 +7,10 @@ import stat
 import pytest
 from conftest import make_srt, message, run_cli
 
+import claude_api
 import generate_notes as gn
 import make_ass
+import subtitles
 
 
 # ---------------------------------------------------------------- reading replies
@@ -75,56 +77,56 @@ def make_ass_cues(n):
 
 
 def test_cost_uses_the_price_table():
-    assert gn.cost("claude-sonnet-5-5", 1_000_000, 1_000_000) == pytest.approx(12.0)
-    assert gn.cost("some-future-model", 1, 1) is None
+    assert claude_api.cost("claude-sonnet-5-5", 1_000_000, 1_000_000) == pytest.approx(12.0)
+    assert claude_api.cost("some-future-model", 1, 1) is None
 
 
 # ---------------------------------------------------------------- API key storage
 def test_set_key_writes_a_private_file(home, monkeypatch):
     monkeypatch.setattr(getpass, "getpass", lambda prompt: "  sk-ant-abc123456  ")
-    gn.set_key()
+    claude_api.set_key()
     path = home / ".config" / "context-notes" / "api-key"
     assert path.read_text() == "sk-ant-abc123456\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
-    assert gn.load_key() == "sk-ant-abc123456"
+    assert claude_api.load_key() == "sk-ant-abc123456"
 
 
 def test_set_key_rejects_things_that_are_not_keys(home, monkeypatch):
     monkeypatch.setattr(getpass, "getpass", lambda prompt: "hunter2")
     with pytest.raises(SystemExit):
-        gn.set_key()
+        claude_api.set_key()
     assert not (home / ".config" / "context-notes" / "api-key").exists()
 
 
 def test_load_key_refuses_a_world_readable_file(api_key_file):
     api_key_file.chmod(0o644)
     with pytest.raises(SystemExit) as e:
-        gn.load_key()
+        claude_api.load_key()
     assert "chmod 600" in str(e.value)
 
 
 def test_load_key_order_file_then_environment(home, monkeypatch):
     with pytest.raises(SystemExit) as e:
-        gn.load_key()
+        claude_api.load_key()
     assert "--set-api-key" in str(e.value)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-env")
-    assert gn.load_key() == "sk-ant-from-env"
+    assert claude_api.load_key() == "sk-ant-from-env"
     explicit = home / "mykey"
     explicit.write_text("sk-ant-explicit\n")
     explicit.chmod(0o600)
-    assert gn.load_key(str(explicit)) == "sk-ant-explicit"
+    assert claude_api.load_key(str(explicit)) == "sk-ant-explicit"
 
 
 def test_xdg_config_home_is_respected(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    assert gn.key_path() == tmp_path / "xdg" / "context-notes" / "api-key"
+    assert claude_api.key_path() == tmp_path / "xdg" / "context-notes" / "api-key"
 
 
 # ---------------------------------------------------------------- talking to the API
 def test_call_api_sends_the_documented_request(api):
     api.responder = lambda n, body, headers: (200, message("hello"))
-    reply = gn.call_api("sk-ant-k", "model-x", "SYSTEM", "USER", api.url, max_tokens=123)
+    reply = claude_api.call_api("sk-ant-k", "model-x", "SYSTEM", "USER", api.url, max_tokens=123)
     assert reply["content"][0]["text"] == "hello"
     call = api.calls[0]
     assert call["headers"]["x-api-key"] == "sk-ant-k" and call["headers"]["anthropic-version"] == "2023-06-01"
@@ -133,18 +135,28 @@ def test_call_api_sends_the_documented_request(api):
 
 
 def test_call_api_retries_when_busy_and_gives_clear_errors(api, monkeypatch):
-    monkeypatch.setattr(gn.time, "sleep", lambda s: None)
+    monkeypatch.setattr(claude_api.time, "sleep", lambda s: None)
     api.responder = lambda n, body, h: (529, {"error": {"message": "Overloaded"}}, {"retry-after": "1"}) if n == 1 \
         else (200, message("ok"))
-    assert gn.call_api("k", "m", "s", "u", api.url)["content"][0]["text"] == "ok" and len(api.calls) == 2
+    assert claude_api.call_api("k", "m", "s", "u", api.url)["content"][0]["text"] == "ok" and len(api.calls) == 2
     api.responder = lambda n, body, h: (401, {"error": {"message": "invalid x-api-key"}})
     with pytest.raises(SystemExit) as e:
-        gn.call_api("k", "m", "s", "u", api.url)
+        claude_api.call_api("k", "m", "s", "u", api.url)
     assert "rejected the key" in str(e.value)
     api.responder = lambda n, body, h: (400, {"error": {"message": "Your credit balance is too low"}})
     with pytest.raises(SystemExit) as e:
-        gn.call_api("k", "m", "s", "u", api.url)
+        claude_api.call_api("k", "m", "s", "u", api.url)
     assert "credit balance is too low" in str(e.value)
+
+
+def test_encode_images_reads_files_only_at_the_api_boundary(tmp_path):
+    jpg = tmp_path / "sheet.jpg"
+    jpg.write_bytes(b"\xff\xd8not really a jpeg")
+    already = {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "QUJD"}}
+    out = claude_api.encode_images([{"type": "text", "text": "hi"}, {"type": "image", "path": str(jpg)}, already])
+    assert out[0] == {"type": "text", "text": "hi"} and out[2] is already
+    assert out[1] == {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                  "data": "/9hub3QgcmVhbGx5IGEganBlZw=="}}
 
 
 # ---------------------------------------------------------------- generating notes
@@ -177,7 +189,7 @@ def test_generate_writes_a_notes_file_and_reports_problems(tmp_path, api, api_ke
     printed = capsys.readouterr().out
     assert "outside the lines being annotated" in printed and "Used" in printed
     # every note must be placeable in the subtitles
-    placed, missing = make_ass.place_notes(make_ass.parse_srt(srt), saved["notes"], 0)
+    placed, missing = make_ass.place_notes(subtitles.parse_srt(srt), saved["notes"], 0)
     assert not missing and len(placed) == len(saved["notes"])
 
 
@@ -199,6 +211,48 @@ def test_generate_saves_partial_progress_when_the_api_fails(tmp_path, api, api_k
         gn.generate(make_srt(tmp_path / "ep.srt", n=30), tmp_path / "n.json", assume_yes=True, api_url=api.url)
     assert json.loads((tmp_path / "n.partial.json").read_text())["notes"]
     assert not (tmp_path / "n.json").exists()
+
+
+def test_plan_generate_works_out_the_plan_without_the_network(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(gn, "CHUNK_CHARS", 400)
+    srt = make_srt(tmp_path / "ep.srt", n=30)
+    plan = gn.plan_generate(srt, tmp_path / "n.json", title="Test Show", limit=60, estimate_only=True)
+    assert plan.key is None and (plan.first, plan.earlier, plan.through) == (1, [], 0)
+    assert len(plan.cues) == 10 and plan.send == plan.cues and len(plan.all_parts) > 1
+    assert plan.n_send == len(plan.all_parts) and plan.est_in > 0 and plan.cost == pytest.approx(
+        claude_api.cost(plan.model, plan.est_in, plan.est_out))
+    assert plan.title == "Test Show" and plan.situation is None and plan.partial == tmp_path / "n.partial.json"
+    assert "Viewer: Fluent in English, didn't grow up in the UK." in plan.system and "Write every note in English" in plan.system
+    out = capsys.readouterr().out
+    assert "Limited to the first 1:00: 10 of 30 lines." in out
+    assert f"Plan: 10 lines in {plan.n_send} request(s) to claude-sonnet-5-5" in out
+    assert not (tmp_path / "n.json").exists()
+
+    # a stopped run's partial file: the plan picks up after the parts it covers (the default answer)
+    through = plan.all_parts[0][-1]["n"]
+    kept = [{"match": "Line 1 of", "category": "Idiom", "text": "kept", "confidence": "high", "kind": "speech"}]
+    plan.partial.write_text(json.dumps({"notes": kept, "through_line": through, "subtitles": "ep.srt",
+                                        "film_language": None, "limit": 60.0}))
+    plan = gn.plan_generate(srt, tmp_path / "n.json", limit=60, estimate_only=True)
+    assert plan.first == 2 and plan.earlier == kept and plan.through == through
+    assert plan.send == [c for p in plan.all_parts[1:] for c in p] and plan.title == "ep"
+    assert "Picking up where the last run stopped: 1 notes kept; part 2 of" in capsys.readouterr().out
+
+
+def test_generate_part_and_write_notes_file(tmp_path, api, monkeypatch):
+    monkeypatch.setattr(gn, "CHUNK_CHARS", 400)
+    srt = make_srt(tmp_path / "ep.srt", n=30)
+    plan = gn.plan_generate(srt, tmp_path / "n.json", estimate_only=True)
+    api.responder = notes_for_each_part
+    part_notes, usage, problems = gn.generate_part(plan, 1, plan.all_parts[0], [], [], "sk-ant-k", api.url)
+    assert len(part_notes) == 2 and usage == {"input_tokens": 2000, "output_tokens": 300}
+    assert any("outside the lines being annotated" in p for p in problems) and any("anchored" in p for p in problems)
+    assert api.calls[0]["body"]["system"] == plan.system and isinstance(api.calls[0]["body"]["messages"][0]["content"], str)
+    plan.partial.write_text("{}")
+    spec = gn.write_notes_file(plan, part_notes)
+    assert json.loads((tmp_path / "n.json").read_text()) == spec and not plan.partial.exists()
+    assert spec["notes"][0]["category"] == "About these notes" and spec["notes"][1:] == part_notes
+    assert spec["generated_by"] == plan.model and "limit" not in spec
 
 
 def test_generate_needs_confirmation_unless_yes(tmp_path, api, api_key_file):

@@ -74,6 +74,7 @@ def unit(cell_dir, budget, min_remaining=MIN_REMAINING):
     cell_dir = Path(cell_dir)
     cfg = load(cell_dir / "cell.json")
     import analyze
+    import claude_api
     import generate_notes as gn
     import refine_notes as rn
 
@@ -81,9 +82,9 @@ def unit(cell_dir, budget, min_remaining=MIN_REMAINING):
     cache = cell_dir / "api-cache"
     cache.mkdir(exist_ok=True)
     tally = {"secs": 0.0, "calls": 0}
-    real = gn.call_api
+    real = claude_api.call_api
 
-    def cached(key, model, system, user, url=gn.API_URL, timeout=300, max_tokens=gn.MAX_TOKENS, effort=None):
+    def cached(key, model, system, user, url=claude_api.API_URL, timeout=300, max_tokens=claude_api.MAX_TOKENS, effort=None):
         h = hashlib.sha256(json.dumps([model, system, user, max_tokens, effort], sort_keys=True,
                                       ensure_ascii=False).encode()).hexdigest()[:24]
         f = cache / f"{h}.json"
@@ -100,7 +101,7 @@ def unit(cell_dir, budget, min_remaining=MIN_REMAINING):
         tally["calls"] += 1
         return r
 
-    gn.call_api = cached
+    claude_api.call_api = cached
     pkl = Path(cfg["prep_pkl"])
 
     def fake_analyze(cues, video, frames_mode="keyframes", fallback_offset=0.0, say=print, limit=None):
@@ -132,8 +133,8 @@ def unit(cell_dir, budget, min_remaining=MIN_REMAINING):
         u = re.search(r"Used ([\d,]+) input and ([\d,]+) output tokens", out)
         tin, tout = (int(u.group(1).replace(",", "")), int(u.group(2).replace(",", ""))) if u else (0, 0)
         problems = [ln.strip()[2:] for ln in out.splitlines() if ln.startswith("  ! ")]
-        m = {"in": tin, "out": tout, "cost": gn.cost(model or cfg["model"], tin, tout), "api_seconds": round(tally["secs"], 1),
-             "calls": tally["calls"], "problems": problems,
+        m = {"in": tin, "out": tout, "cost": claude_api.cost(model or cfg["model"], tin, tout),
+             "api_seconds": round(tally["secs"], 1), "calls": tally["calls"], "problems": problems,
              "truncated": sum("cut off" in p for p in problems)}
         return "ok", (m, out)
 
@@ -218,10 +219,11 @@ def prep_reuse(analysis_dir, video, subs, limit, tail_dir):
     sees exactly the frames the real pipeline saw). Keyframe times come from the file's packet flags; the
     resulting sheet names are checked against the ones on disk."""
     import analyze
-    import make_ass
     import numpy as np
+    import subtitles
+    import timecode
     analysis_dir, tail_dir = Path(analysis_dir), Path(tail_dir)
-    cues = make_ass.limit_cues(make_ass.parse_srt(subs), limit)
+    cues = subtitles.limit_cues(subtitles.parse_srt(subs), limit)
     db = np.load(analysis_dir / "soundtrack.npy")[: int(round(limit * analyze.FPS_A))]
     sync = analyze.sync_check(db, cues, limit)
     constant = sync["offset"] is not None and "--align" not in sync["verdict"]
@@ -241,7 +243,7 @@ def prep_reuse(analysis_dir, video, subs, limit, tail_dir):
     sheets = []
     for i, k in enumerate(range(0, len(picked), 12)):
         chunk = picked[k:k + 12]
-        name = analysis_dir / "sheets" / f"sheet_{i + 1:03d}_{analyze.hms(chunk[0]).replace(':', '.')}.jpg"
+        name = analysis_dir / "sheets" / f"sheet_{i + 1:03d}_{timecode.hms(chunk[0]).replace(':', '.')}.jpg"
         if len(chunk) == 12 and name.exists():
             sheets.append((name, chunk[0], chunk[-1]))
         else:       # the last, shorter sheet: rebuild it from the stored frames so it stops at the limit
@@ -255,12 +257,13 @@ def prep_reuse(analysis_dir, video, subs, limit, tail_dir):
 
 # ------------------------------------------------------------------ orchestration
 def cmd_run(a):
-    import make_ass
+    import subtitles
+    import timecode
     out = Path(a.out).resolve()
     (out / "runs").mkdir(parents=True, exist_ok=True)
     video = Path(a.video).resolve()
     subs = Path(a.subs).resolve()
-    limit = make_ass.duration_arg(a.limit)
+    limit = timecode.duration_arg(a.limit)
     started = time.time()
 
     prep = out / "_prep"
@@ -271,12 +274,12 @@ def cmd_run(a):
     pkl = prep / f"analysis-{int(limit)}s.pkl"
     if not pkl.exists():
         import analyze
-        print(f"Preparing the video analysis for the first {make_ass.fmt_limit(limit)} (once; all cells share it)...",
+        print(f"Preparing the video analysis for the first {timecode.fmt_limit(limit)} (once; all cells share it)...",
               flush=True)
         if a.reuse_analysis:
             an = prep_reuse(a.reuse_analysis, video, subs, limit, prep / "sheets-tail")
         else:
-            cues = make_ass.parse_srt(subs)
+            cues = subtitles.parse_srt(subs)
             an = analyze.analyze_video(cues, link, "keyframes", fallback_offset=0.0, limit=limit)
         pkl.write_bytes(pickle.dumps(an))
         print(f"  done in {time.time() - started:.0f} s: {len(an['sheets'])} contact sheets", flush=True)

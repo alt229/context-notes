@@ -60,19 +60,15 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True        # keep the project folder free of __pycache__
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cli_common  # noqa: E402
+import fileio  # noqa: E402
 import languages  # noqa: E402
-import make_ass  # noqa: E402  (SRT parsing and time formatting)
 import prompts  # noqa: E402
+import subtitles  # noqa: E402
+import timecode  # noqa: E402
 
 SR = 16000          # audio sample rate used for analysis
 FPS_A = 50          # audio analysis frames per second (20 ms)
-
-
-def hms(t, frac=False):
-    t = max(0.0, t)
-    h, rem = divmod(t, 3600)
-    m, s = divmod(rem, 60)
-    return f"{int(h)}:{int(m):02d}:{s:04.1f}" if frac else f"{int(h)}:{int(m):02d}:{int(s):02d}"
 
 
 def clean(text):
@@ -96,7 +92,7 @@ def need_ffmpeg():
 def write_transcript(cues, out):
     with open(out, "w", encoding="utf-8") as f:
         for c in cues:
-            f.write(f"{c['n']} [{hms(c['start'])}] {clean(c['text'])}\n")
+            f.write(f"{c['n']} [{timecode.hms(c['start'])}] {clean(c['text'])}\n")
     return out
 
 
@@ -178,12 +174,12 @@ def strip_sdh(text):
 
 def extract_subtitles(video, track, out, sdh=False):
     """Write one embedded text subtitle track to an SRT file."""
-    with make_ass.replacing(out) as tmp:             # all at once: a stopped extraction leaves no half file
+    with fileio.replacing(out) as tmp:             # all at once: a stopped extraction leaves no half file
         r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-map", f"0:s:{track['n']}",
                             "-c:s", "srt", "-f", "srt", str(tmp)], capture_output=True, text=True)
         if r.returncode:
             sys.exit(f"ffmpeg couldn't extract subtitle track {track['n']}:\n{r.stderr[-600:]}")
-    cues = make_ass.parse_srt(out)
+    cues = subtitles.parse_srt(out)
     if sdh:
         keep = []
         for c in cues:
@@ -192,12 +188,9 @@ def extract_subtitles(video, track, out, sdh=False):
                 keep.append({**c, "text": body})
         cues = keep
 
-        def ts(t):
-            ms = int(round(t * 1000))
-            return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
-        make_ass.write_text_safely(out, "".join(f"{n}\n{ts(c['start'])} --> {ts(c['end'])}\n{c['text']}\n\n"
-                                                for n, c in enumerate(cues, 1)))
-        cues = make_ass.parse_srt(out)
+        fileio.write_text_safely(out, "".join(f"{n}\n{timecode.srt_ts(c['start'])} --> {timecode.srt_ts(c['end'])}\n"
+                                               f"{c['text']}\n\n" for n, c in enumerate(cues, 1)))
+        cues = subtitles.parse_srt(out)
     return cues
 
 
@@ -247,9 +240,9 @@ def soundtrack_db(video, astream, folder, limit=None, duration=None):
         pass
     db = speech_band_db(video, astream, limit, duration)
     try:
-        with make_ass.replacing(cache) as tmp, open(tmp, "wb") as f:      # all at once, then the key that vouches for it
+        with fileio.replacing(cache) as tmp, open(tmp, "wb") as f:      # all at once, then the key that vouches for it
             np.save(f, db)
-        make_ass.write_text_safely(meta, json.dumps(key), encoding=None)
+        fileio.write_text_safely(meta, json.dumps(key), encoding=None)
     except OSError:
         pass
     return db
@@ -408,7 +401,7 @@ def sync_check(db, cues, duration):
     last_end = (cues[-1]["end"] + coarse) if cues else 0
     verdict = []
     if last_end > duration + 30:
-        verdict.append(f"The subtitles run to {hms(last_end)} but the video is only {hms(duration)}: "
+        verdict.append(f"The subtitles run to {timecode.hms(last_end)} but the video is only {timecode.hms(duration)}: "
                        "they're probably for a different cut or release. Use --align.")
     valid = [t for t in thirds if t is not None]
     if verdict:
@@ -552,9 +545,9 @@ def contact_sheets(frames, cues, offset, outdir, min_gap=1.5):
         for i, ((t, _), im) in enumerate(zip(chunk, ims)):
             x, y = (i % cols) * (tw + 4), (i // cols) * (th + lab + 4)
             sheet.paste(im.resize((tw, th)), (x, y))
-            d.text((x + 4, y + th + 2), hms(t, frac=True), font=big, fill=(255, 220, 90))
+            d.text((x + 4, y + th + 2), timecode.hms(t, frac=True), font=big, fill=(255, 220, 90))
             d.text((x + 4, y + th + 22), line_at(t)[:60], font=small, fill=(210, 210, 210))
-        name = outdir / f"sheet_{len(sheets) + 1:03d}_{hms(chunk[0][0]).replace(':', '.')}.jpg"
+        name = outdir / f"sheet_{len(sheets) + 1:03d}_{timecode.hms(chunk[0][0]).replace(':', '.')}.jpg"
         sheet.save(name, quality=82)
         sheets.append((name, chunk[0][0], chunk[-1][0]))     # file, first and last frame time
     return sheets
@@ -606,7 +599,7 @@ def transcribe(video, astream, model_name, cache, language="en", limit=None, tas
     out = []
     # Written to a temporary file that becomes the cache only once every segment is in. A cache file is reused
     # whenever it exists, so a stopped run must never leave a partial one behind.
-    with make_ass.replacing(cache) as tmp, open(tmp, "w") as f:
+    with fileio.replacing(cache) as tmp, open(tmp, "w") as f:
         for s in segs:
             row = {"s": s.start, "e": s.end, "t": s.text,
                    "w": [[w.start, w.end, w.word] for w in (s.words or [])]}
@@ -615,11 +608,11 @@ def transcribe(video, astream, model_name, cache, language="en", limit=None, tas
             if prompts.machine():
                 prompts.progress("transcribe", s.end, total, "seconds", every=0.5)
             else:
-                print(f"\r  transcribing: {hms(s.end)} of {hms(total)}  ({time.time() - t0:.0f} s)",
+                print(f"\r  transcribing: {timecode.hms(s.end)} of {timecode.hms(total)}  ({time.time() - t0:.0f} s)",
                       end="", flush=True)
     if prompts.machine():
         prompts.progress("transcribe", total, total, "seconds")
-        print(f"  transcribed {hms(total)} ({time.time() - t0:.0f} s)", flush=True)
+        print(f"  transcribed {timecode.hms(total)} ({time.time() - t0:.0f} s)", flush=True)
     else:
         print()
     return out
@@ -630,7 +623,7 @@ def align(cues, asr):
     import difflib
 
     def words(text):
-        text = make_ass.fold(re.sub(r"<[^>]+>|\{[^}]*\}", " ", text))      # lower case, accents dropped (été -> ete)
+        text = subtitles.fold(re.sub(r"<[^>]+>|\{[^}]*\}", " ", text))      # lower case, accents dropped (été -> ete)
         return [w for w in re.findall(r"[a-z']+", text) if w.strip("'")]
 
     sw, st, sc = [], [], []
@@ -717,18 +710,12 @@ def align(cues, asr):
                 cand = [(0, (dl + dr) / 2)]
             if cand:
                 assigned[i] = min(cand)[1]
-    segments = [{"from": hms(cues[g[0]]["start"]), "to": hms(cues[g[-1]]["end"]),
+    segments = [{"from": timecode.hms(cues[g[0]]["start"]), "to": timecode.hms(cues[g[-1]]["end"]),
                  "offset": round(d, 2), "lines": len(g)} for g, d in zip(groups, gd)]
     stats = {"subtitle_words": len(sw), "transcript_words": len(aw),
              "matched_words": sum(len(v) for v in anchors.values()),
              "lines": len(cues), "kept": len(assigned), "dropped": len(cues) - len(assigned)}
     return assigned, segments, stats
-
-
-def _srt_ts(t):
-    """Standard SRT time, 00:00:03,880 (millisecond precision)."""
-    ms = int(round(max(0.0, t) * 1000))
-    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
 
 
 def parse_shift(text):
@@ -774,8 +761,8 @@ def write_srt(cues, assigned, out):
             continue
         n += 1
         s, e = c["start"] + assigned[i], c["end"] + assigned[i]
-        blocks.append(f"{n}\n{_srt_ts(s)} --> {_srt_ts(e)}\n{c['text']}\n\n")
-    make_ass.write_text_safely(out, "".join(blocks))             # all at once: never half a subtitle file
+        blocks.append(f"{n}\n{timecode.srt_ts(s)} --> {timecode.srt_ts(e)}\n{c['text']}\n\n")
+    fileio.write_text_safely(out, "".join(blocks))             # all at once: never half a subtitle file
 
 
 # ---------------------------------------------------------------- video analysis as data
@@ -792,10 +779,10 @@ def analyze_video(cues, video, frames_mode="keyframes", fallback_offset=0.0, say
     out = video.parent / f"{video.stem} analysis"
     out.mkdir(exist_ok=True)
     duration, astream, vstream = probe(video)
-    say(f"  video {hms(duration)}, audio {astream.get('channels') if astream else 0} ch")
+    say(f"  video {timecode.hms(duration)}, audio {astream.get('channels') if astream else 0} ch")
     if limit and limit < duration:
         duration = limit
-        cues = make_ass.limit_cues(cues, limit)
+        cues = subtitles.limit_cues(cues, limit)
     say("  measuring the soundtrack...")
     db = soundtrack_db(video, astream, out, limit, duration=duration)
     sync = sync_check(db, cues, duration)
@@ -837,13 +824,13 @@ def main():
                     help="with --align: have speech recognition translate the film's speech into English, and time "
                          "the English subtitles to that. For English subtitles on a film in another language, when "
                          "the other-language subtitles don't match the speech")
-    ap.add_argument("--model", default=None,
-                    help="speech model for --align: tiny.en (fastest), base.en (default), small.en (best). "
-                         "For other languages: base, small (default), medium")
-    ap.add_argument("--limit", type=make_ass.duration_arg, metavar="TIME",
-                    help="only the first part of the video, e.g. 5:00, 300 or 5m (soundtrack, frames and --align)")
-    ap.add_argument("--film-language", metavar="LANG",
-                    help="language spoken in the video, e.g. fr, de, es (for --align's speech recognition; default en)")
+    cli_common.add_speech_model_arg(ap, help="speech model for --align: tiny.en (fastest), base.en (default), small.en "
+                                             "(best). For other languages: base, small (default), medium")
+    cli_common.add_limit_arg(ap, help="only the first part of the video, e.g. 5:00, 300 or 5m (soundtrack, frames and "
+                                      "--align)")
+    cli_common.add_film_args(ap, only=("film_language",),
+                             film_language="language spoken in the video, e.g. fr, de, es (for --align's speech "
+                                           "recognition; default en)")
     ap.add_argument("--sub-lang", metavar="LANG",
                     help="embedded subtitles: pick the track in this language (e.g. fr) -> <video>.embedded.<lang>.srt")
     ap.add_argument("--shift", type=parse_shift, metavar="auto|SECONDS",
@@ -903,11 +890,11 @@ def main():
         cues = extract_subtitles(src, track, srt, sdh=a.strip_sdh)
     else:
         srt = src
-        cues = make_ass.parse_srt(srt)
+        cues = subtitles.parse_srt(srt)
     if not cues:
         sys.exit(f"No subtitles found in {srt}")
     tr = write_transcript(cues, srt.with_suffix(".transcript.txt"))
-    print(f"{len(cues)} subtitle lines, {hms(cues[0]['start'])} to {hms(cues[-1]['end'])}")
+    print(f"{len(cues)} subtitle lines, {timecode.hms(cues[0]['start'])} to {timecode.hms(cues[-1]['end'])}")
     print(f"  -> {tr}")
     shifted = None
     if isinstance(a.shift, float):
@@ -915,7 +902,7 @@ def main():
         dropped = shift_srt(cues, a.shift, shifted)
         print(f"Shifted every line {abs(a.shift):.2f} s {'later' if a.shift > 0 else 'earlier'} -> {shifted}"
               + dropped_msg(dropped))
-        cues = make_ass.parse_srt(shifted)
+        cues = subtitles.parse_srt(shifted)
         if a.video:
             print("Checking the shifted subtitles against the video...")
     all_cues = cues
@@ -931,12 +918,12 @@ def main():
     out.mkdir(exist_ok=True)
     duration, astream, vstream = probe(video)
     size = f"{vstream.get('width')}x{vstream.get('height')}" if vstream else "audio only"
-    print(f"video {hms(duration)}, {size}, audio {astream.get('channels') if astream else 0} ch")
+    print(f"video {timecode.hms(duration)}, {size}, audio {astream.get('channels') if astream else 0} ch")
     limit = a.limit if a.limit and a.limit < duration else None
     if limit:
         duration = limit
-        cues = make_ass.limit_cues(cues, limit)
-        print(f"Limited to the first {make_ass.fmt_limit(limit)} ({len(cues)} subtitle lines)")
+        cues = subtitles.limit_cues(cues, limit)
+        print(f"Limited to the first {timecode.fmt_limit(limit)} ({len(cues)} subtitle lines)")
         if not cues:
             sys.exit("No subtitle lines start that early. Use a longer --limit.")
 
@@ -957,7 +944,7 @@ def main():
         report["alignment"] = {**stats, "segments": segments, "file": aligned.name}
         print(f"  kept {stats['kept']} of {stats['lines']} lines, {len(segments)} stretch(es) "
               f"with different offsets -> {aligned}")
-        work_cues = make_ass.parse_srt(aligned)
+        work_cues = subtitles.parse_srt(aligned)
 
     print("Measuring the soundtrack...")
     db = soundtrack_db(video, astream, out, limit, duration=duration)
@@ -976,7 +963,7 @@ def main():
             report["shift"] = {"seconds": sync["offset"], "file": fixed.name}
             print(f"  Fixed: every line shifted {sync['offset']:+.2f} s -> {fixed}" + dropped_msg(dropped))
             if limit:
-                print(f"  (Measured on the first {make_ass.fmt_limit(limit)} only, so the file is named for that. "
+                print(f"  (Measured on the first {timecode.fmt_limit(limit)} only, so the file is named for that. "
                       "Run without --limit to check the whole film.)")
     moments = loud_moments(db, work_cues, offset)
     report["loud_moments_without_dialogue"] = moments
@@ -992,9 +979,9 @@ def main():
         report["contact_sheets"] = len(sheets)
         print(f"  {len(frames)} frames -> {len(sheets)} contact sheets in {out / 'sheets'}")
 
-    make_ass.write_text_safely(out / "analysis.json", json.dumps(report, indent=1), encoding=None)
+    fileio.write_text_safely(out / "analysis.json", json.dumps(report, indent=1), encoding=None)
     with open(out / "report.txt", "w", encoding="utf-8") as f:
-        f.write(f"{video.name}  ({hms(duration)})\nsubtitles: {srt.name}\n\n")
+        f.write(f"{video.name}  ({timecode.hms(duration)})\nsubtitles: {srt.name}\n\n")
         f.write(f"SYNC: {sync['verdict']}\n  overall offset: {sync['offset']} s; by thirds: {sync['thirds']}\n\n")
         if "alignment" in report:
             al = report["alignment"]
@@ -1004,7 +991,8 @@ def main():
             f.write("\n")
         f.write("LOUD MOMENTS WITHOUT DIALOGUE (look here for sight gags):\n")
         for m in moments:
-            f.write(f"  {hms(m['start'])}  {m['end'] - m['start']:4.1f}s  +{m['loudness_db']} dB  after: {m['after_line']}\n")
+            f.write(f"  {timecode.hms(m['start'])}  {m['end'] - m['start']:4.1f}s  +{m['loudness_db']} dB  "
+                    f"after: {m['after_line']}\n")
     print(f"Report -> {out / 'report.txt'}")
 
 

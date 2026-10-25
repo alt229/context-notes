@@ -21,7 +21,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import make_ass  # noqa: E402
+import fileio  # noqa: E402
+import subtitles  # noqa: E402
 
 EXEMPT = {"running gag", "setup", "payoff", "about these notes"}
 
@@ -40,12 +41,12 @@ LEAD_COLON = re.compile(r"^\s*([^.:;!?]{2,40}?)\s*:\s")       # 'Kaleun: short f
 
 def terms(text):
     """Content words of a note, accents folded: 'The Maginot Line failed' -> {'maginot', 'line', 'failed'}."""
-    return {w.strip("'") for w in re.findall(r"[a-z0-9']+", make_ass.fold(text))
+    return {w.strip("'") for w in re.findall(r"[a-z0-9']+", subtitles.fold(text))
             if len(w.strip("'")) > 2 and w.strip("'") not in STOP}
 
 
 def _clean(s):
-    return make_ass.norm(s)
+    return subtitles.norm(s)
 
 
 OPEN, CLOSE = "‘'“\"«„", "’'”\"»“"
@@ -162,7 +163,7 @@ def find_duplicates(notes):
 def main():
     if len(sys.argv) != 2 or sys.argv[1] in ("-h", "--help"):
         sys.exit(__doc__)
-    spec = json.loads(make_ass.read_text(sys.argv[1]))
+    spec = json.loads(fileio.read_text(sys.argv[1]))
     notes = spec["notes"] if isinstance(spec, dict) else spec
     dups, similar = find_duplicates(notes)
 

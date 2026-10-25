@@ -7,6 +7,20 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- Claude on your subscription, with no API key: `--backend claude-code` (or once, `make_ass.py --set-backend
+  claude-code`) runs every request through the installed Claude Code command (`claude -p`) instead of the API, for
+  writing notes, the frame pass, `context_notes.py` and the app (Settings → Where Claude runs). The frame pass gives
+  Claude Code the contact sheets to open with its Read tool. The estimate shows the size in tokens and "on your Claude
+  subscription" instead of a price; the notes file records `"backend": "claude-code"`. `--backend api` and the saved
+  key work as before.
+- The frame pass on your Claude subscription, inside Claude Code. `/refine "<video>"` runs a frame-reviewer agent
+  (Opus) once per stretch of the video; it opens the contact sheets, adds on-screen notes and fixes the dialogue
+  notes the frames show to be wrong. Behind it, `chat_notes.py show-frames VIDEO SRT --part K` prints one stretch
+  for the agent (`--part 0` prints how many there are and the mode), and `chat_notes.py collect-frames VIDEO SRT
+  DIR` applies the `frames-<k>.txt` replies the way `make_ass.py --refine` applies the API's: a backup of the notes
+  and the `.ass`, a report of every change, and if a part's reply is missing the run stops there and the next one
+  picks up. Replies that aren't the JSON object asked for are kept as `<notes>.frames<k>.failed.txt`. `/notes` now
+  offers `/refine` before the API route.
 - `prompts.py`, the groundwork for a GUI. With `CONTEXT_NOTES_UI=json` set, every question, hidden prompt (API key,
   OpenSubtitles login) and cost estimate is written as one JSON line on stdout and answered on stdin, through every
   script a run starts. Without it, the scripts ask exactly as before. See `docs/gui-protocol.md`.
@@ -45,6 +59,27 @@ All notable changes to this project are recorded here. The format follows
   (`/notes`, `/check`).
 
 ### Changed
+- The shared helpers that had grown inside `make_ass.py` and `generate_notes.py` now have their own files:
+  `timecode.py` (reading and writing times), `subtitles.py` (reading SRT files and finding the line a note
+  quotes), `fileio.py` (writing files all at once, reading odd encodings, the settings folder) and
+  `claude_api.py` (the API key, one request with retries, the price table). Every script and test uses the new
+  files directly. The old names still work (`make_ass.parse_srt`, `make_ass.write_text_safely()`,
+  `generate_notes.load_key`, `generate_notes.DEFAULT_MODEL` and the rest are re-exported, with a comment
+  saying where they went), so your own scripts and the docs' examples keep running. Nothing changes in what
+  the scripts do or write.
+- The flags the scripts share (`--limit`, `--film-language`, `--original-subs`, `--title`, `--year`, `--audience`,
+  `--notes-language`, `--model`, `--effort`, `--api-key-file`, `--yes`, `--frames` and the speech model) are
+  defined once, in `cli_common.py`, which also passes them on from `context_notes.py` to the steps it runs. Every
+  flag keeps its name and default; `--help` wording is now the same from script to script, and `chat_notes.py`
+  gained the full help texts (its `--limit` is checked as `TIME`, like the others). Behind `make_ass.py --generate`
+  and `--refine`, `generate_notes.generate()` and `refine_notes.refine()` are now short orchestrators over
+  separate steps that can be tested and reused on their own: `plan_generate` / `plan_refine` (everything up to
+  and including the cost estimate), `confirm_generate` / `confirm_refine` (the "send?" question),
+  `generate_part` / `refine_window` (one request each, the only place that talks to Claude; the contact sheets
+  are passed as file paths and encoded only at the API call) and `write_notes_file` / `finish_refine`. What
+  they print, ask and write is unchanged.
+- The app's page is now built from sources in `gui/src` (styles by layer, one markup partial and one script per
+  section) by `gui/assemble.py`, which writes the single self-contained `gui/index.html`. See `gui/README.md`.
 - At most three notes on screen (the one hard limit). A fourth note waits until the earliest note leaves; while it waits,
   every note still on screen gives up half a second of timer per second of wait. The build reports how many notes waited.
 - A note that appears while earlier notes are still on screen stays up longer: half of each earlier note's own time is added. A note's own time is still capped at 24 s, and the total is capped at 45 s (`LINGER_CEILING`).

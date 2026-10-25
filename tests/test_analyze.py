@@ -5,17 +5,18 @@ import pytest
 from conftest import make_srt, needs_ffmpeg, run_cli
 
 import analyze
-import make_ass
+import subtitles
+import timecode
 
 
 def test_hms_and_clean():
-    assert analyze.hms(3725.4) == "1:02:05"
-    assert analyze.hms(3725.4, frac=True) == "1:02:05.4"
+    assert timecode.hms(3725.4) == "1:02:05"
+    assert timecode.hms(3725.4, frac=True) == "1:02:05.4"
     assert analyze.clean("<i>Hi</i>\n{\\an8}there") == "Hi / there"
 
 
 def test_write_transcript(tmp_path, sample_srt):
-    cues = make_ass.parse_srt(sample_srt)
+    cues = subtitles.parse_srt(sample_srt)
     out = analyze.write_transcript(cues, tmp_path / "t.txt")
     lines = out.read_text().splitlines()
     assert lines[0] == "1 [0:00:03] Line 1 of the original test script"
@@ -144,7 +145,7 @@ def test_write_srt_drops_unassigned_lines(tmp_path):
     cues = [{"n": 1, "start": 1.0, "end": 2.0, "text": "keep"}, {"n": 2, "start": 3.0, "end": 4.0, "text": "drop"}]
     out = tmp_path / "a.srt"
     analyze.write_srt(cues, {0: 0.5}, out)
-    parsed = make_ass.parse_srt(out)
+    parsed = subtitles.parse_srt(out)
     assert [c["text"] for c in parsed] == ["keep"] and parsed[0]["start"] == pytest.approx(1.5)
 
 

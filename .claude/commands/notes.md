@@ -14,8 +14,9 @@ Read `CLAUDE.md` first; its rules bind you. Keep your messages short.
 - Skip every video that already has a `<stem>.notes.ass` beside it.
 - Tell Erin which ones are to do, and roughly 2 Opus runs per 25-minute episode.
 - Then do steps 1 to 6 for each one, one video at a time and in order. Ask questions as they come up.
-- Leave out step 7 per video. At the end, offer the frame pass once for the whole folder with
-  `python3 context_notes.py "<folder>" --recursive --model claude-opus-5-5 --effort high`, which asks before each video.
+- Leave out step 7 per video. At the end, offer the frame pass once for the whole folder: `/refine "<folder>"`
+  on the subscription, or on the API `python3 context_notes.py "<folder>" --recursive --model claude-opus-5-5 --effort high`,
+  which asks before each video.
 - If her usage limit stops the run, rerun `/notes` on the same folder. Finished videos are skipped, and finished
   parts are kept.
 - Finish with one line per video, then the next step.
@@ -49,7 +50,11 @@ Read `CLAUDE.md` first; its rules bind you. Keep your messages short.
    - Run `python3 make_ass.py "<srt>" "<notes>" --video "<video>" --timing-report`.
    - Delegate to **subtitle-prep** for the alignment check.
    - If stretches are out, ask Erin whether to run `align_check.py ... --fix` and rebuild from the `.aligned.srt`.
-7. **Offer the frame pass.** The on-screen notes need the API: `python3 context_notes.py "<video>" --model claude-opus-5-5 --effort high`
-   skips generate because the notes exist. Show its cost estimate and run it only if Erin says yes.
+7. **Offer the frame pass.** The on-screen notes (what's in the frames: signs, props, costume, period detail) are a
+   separate pass. Offer two routes, the subscription first:
+   - `/refine "<video>"` with the same options: Claude Code looks at the frames itself with the **frame-reviewer**
+     agent, one Opus run per part on her plan's usage, no API credits.
+   - The API: `python3 context_notes.py "<video>" --model claude-opus-5-5 --effort high` skips generate because the
+     notes exist. Show its cost estimate and run it only if Erin says yes.
 
 Finish with 3 to 5 lines: notes written, repeats left out, timing, alignment, next step.

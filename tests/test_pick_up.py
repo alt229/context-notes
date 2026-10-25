@@ -9,7 +9,7 @@ from conftest import make_srt, needs_ffmpeg, run_cli
 from test_progress_and_cancel import LONG, cancel_when, held_after_first
 from test_prompts import drive
 
-import refine_notes as rn
+import timecode
 
 FAIL = (400, {"error": {"message": "credit balance is too low"}})          # the API stopping a run part-way
 
@@ -135,7 +135,7 @@ def stopped_refine(project, api, home):
 
 def stretch_start(call):
     text = [b for b in call["body"]["messages"][0]["content"] if b["type"] == "text"][-1]["text"]
-    return rn.parse_time(re.search(r"This stretch: (\S+) to", text).group(1))
+    return timecode.parse_time(re.search(r"This stretch: (\S+) to", text).group(1))
 
 
 @needs_ffmpeg

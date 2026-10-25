@@ -12,41 +12,40 @@ The API key is read from (first match wins):
     1. --api-key-file PATH
     2. ~/.config/context-notes/api-key        (or $XDG_CONFIG_HOME/context-notes/api-key)
     3. the ANTHROPIC_API_KEY environment variable (fallback only)
-The file must be readable only by you (chmod 600); --set-api-key creates it that way.
+The file must be readable only by you (chmod 600); --set-api-key creates it that way. The key handling and the
+request itself live in claude_api.py.
 
-Uses only the Python standard library. Calls cost API credits, which are billed
-separately from a claude.ai subscription. A preview of the size and approximate
-cost is shown before anything is sent.
+Claude can run two ways (the "backend", claude_api.load_backend): through the API with your key (costs API credits,
+billed separately from a claude.ai subscription), or through Claude Code on your Claude subscription
+(`--backend claude-code`, or once: `make_ass.py --set-backend claude-code`). A preview of the size and, for the
+API, the approximate cost is shown before anything is sent.
+
+Uses only the Python standard library.
 """
+import dataclasses
 import json
-import os
 import re
-import stat
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
+import claude_api
+import fileio
 import languages
-import make_ass
 import prompts
+import subtitles
+import timecode
 
-API_URL = "https://api.anthropic.com/v1/messages"
-API_VERSION = "2023-06-01"
-DEFAULT_MODEL = "claude-sonnet-5-5"
-# USD per million tokens (input, output). Checked October 2026; see
-# https://platform.claude.com/docs/en/about-claude/pricing for current figures.
-PRICES = {
-    "claude-sonnet-5-5": (2.0, 10.0),
-    "claude-opus-5-5": (4.0, 20.0),
-    "claude-haiku-4-5-20251001": (1.0, 5.0),
-    "claude-fable-5-1": (10.0, 50.0),
-}
+# Moved out of this file (the API client and key handling -> claude_api.py, the settings folder -> fileio.py).
+# Kept here so older callers and docs that say generate_notes.load_key, generate_notes.DEFAULT_MODEL and so on
+# still work. New code imports claude_api directly.
+from claude_api import (API_URL, API_VERSION, DEFAULT_MODEL, MAX_TOKENS, PRICES,  # noqa: F401  (moved to claude_api.py)
+                        call_api, cost, key_path, load_key, set_key)
+from fileio import config_dir  # noqa: F401  (moved to fileio.py)
+
 CHUNK_CHARS = 10000        # transcript characters per request (about 2,500 tokens)
 CONTEXT_LINES = 6          # lines of the previous chunk shown for orientation
-MAX_TOKENS = 8000          # reply limit per request
 DEFAULT_AUDIENCE = "Fluent in English, didn't grow up in the UK"
 
 CATEGORIES = ["British English", "Idiom", "Wordplay", "Cultural reference", "Historical context",
@@ -153,93 +152,6 @@ def resolve_year(explicit=None, video=None, title=None, say=print):
         say("No release year found in the title, the file or its folder. The old-film rule is off; "
             "add --year 1974 (for example) to turn it on.")
     return year
-
-
-# ---------------------------------------------------------------- API key
-def config_dir():
-    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "context-notes"
-
-
-def key_path():
-    return config_dir() / "api-key"
-
-
-def set_key():
-    """Prompt (hidden) for the API key and store it where only this user can read it."""
-    path = key_path()
-    key = prompts.secret("Paste your Anthropic API key (input is hidden), then press Return: ", id="api-key").strip()
-    if not key:
-        sys.exit("Nothing entered; nothing saved.")
-    if not key.startswith("sk-ant-"):
-        sys.exit("That doesn't look like an Anthropic API key (they start with sk-ant-). Nothing saved.")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(path.parent, 0o700)
-    except OSError:
-        pass
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(key + "\n")
-    os.chmod(path, 0o600)
-    print(f"Saved to {path} (readable only by you). Key ends in ...{key[-4:]}")
-    print("Create or manage keys at https://console.anthropic.com/settings/keys")
-
-
-def load_key(explicit=None):
-    path = Path(explicit).expanduser() if explicit else key_path()
-    if path.exists():
-        if os.name == "posix" and path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
-            sys.exit(f"{path} can be read by other users. Lock it down first:\n  chmod 600 \"{path}\"")
-        key = path.read_text().strip()
-        if key:
-            return key
-        sys.exit(f"{path} is empty. Run  python3 make_ass.py --set-api-key")
-    if explicit:
-        sys.exit(f"Can't find the key file {explicit}")
-    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if key:
-        return key
-    sys.exit("No API key found. Save one with:\n  python3 make_ass.py --set-api-key\n"
-             f"(stored in {key_path()})")
-
-
-# ---------------------------------------------------------------- API call
-def call_api(key, model, system, user, url=API_URL, timeout=300, max_tokens=MAX_TOKENS, effort=None):
-    """`user` is a string, or a list of content blocks (text and images).
-    `effort` ("low", "medium", "high", ...) is sent as output_config.effort; None leaves the model's own default
-    (Haiku 4.5 rejects the field, so only pass it for models that support it)."""
-    payload = {"model": model, "max_tokens": max_tokens, "system": system,
-               "messages": [{"role": "user", "content": user}]}
-    if effort:
-        payload["output_config"] = {"effort": effort}
-    body = json.dumps(payload).encode()
-    headers = {"x-api-key": key, "anthropic-version": API_VERSION,
-               "content-type": "application/json", "user-agent": "context-notes/0.1"}
-    for attempt in range(4):
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.load(r)
-        except urllib.error.HTTPError as e:
-            try:
-                msg = json.load(e)["error"]["message"]
-            except Exception:
-                msg = e.reason
-            if e.code in (429, 500, 502, 503, 529) and attempt < 3:
-                wait = float(e.headers.get("retry-after") or 2 ** (attempt + 1) * 2)
-                print(f"    API busy ({e.code}); retrying in {wait:.0f} s...")
-                time.sleep(min(wait, 60))
-                continue
-            if e.code == 401:
-                sys.exit("The API rejected the key (401). Check it, or save a new one with --set-api-key.")
-            sys.exit(f"API error {e.code}: {msg}")
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
-            if attempt < 3:
-                print(f"    network problem ({e}); retrying...")
-                time.sleep(2 ** (attempt + 1))
-                continue
-            sys.exit(f"Couldn't reach the API: {e}")
 
 
 # ---------------------------------------------------------------- prompts
@@ -368,7 +280,7 @@ def pair_original(cues, original):
 
 
 def fmt_line(c, extra=None):
-    line = f"{c['n']} [{make_ass.fmt_ass_time(c['start']).split('.')[0]}] " + \
+    line = f"{c['n']} [{timecode.fmt_ass_time(c['start']).split('.')[0]}] " + \
         re.sub(r"<[^>]+>|\{[^}]*\}", "", c["text"]).replace("\n", " / ").strip()
     if extra and c["n"] in extra["text"]:
         line += f"  ‹{extra['lang']}: {extra['text'][c['n']]}›"
@@ -442,8 +354,8 @@ def check_note(raw, cues, lo, hi):
             "confidence": conf if conf in ("high", "medium", "low") else "medium", "kind": "speech"}
     match = str(raw.get("match") or "").strip()
     idx = cue - 1
-    n = make_ass.norm(match)
-    normed = [make_ass.norm(c["text"]) for c in cues]
+    n = subtitles.norm(match)
+    normed = [subtitles.norm(c["text"]) for c in cues]
 
     def has(i):                        # same test make_ass uses, incl. quotes spanning two lines
         if n in normed[i]:
@@ -478,13 +390,6 @@ def estimate(cues, extra=None):
     return len(parts), int(est_in), est_out
 
 
-def cost(model, tin, tout):
-    if model not in PRICES:
-        return None
-    pi, po = PRICES[model]
-    return tin * pi / 1e6 + tout * po / 1e6
-
-
 def subtitle_setup(cues, film_language=None, original_srt=None, say=print):
     """Work out how the subtitles relate to the film's language. Returns (situation, extra) for
     language_section() and fmt_line(): situation is None for an English film."""
@@ -492,7 +397,7 @@ def subtitle_setup(cues, film_language=None, original_srt=None, say=print):
         return None, None
     lang = languages.code(film_language)
     if original_srt:
-        original = make_ass.parse_srt(original_srt)
+        original = subtitles.parse_srt(original_srt)
         paired, share = pair_original(cues, original)
         say(f"Original {languages.name(lang)} subtitles: {len(original)} lines, matched to {share:.0%} of the lines "
             f"you'll see.")
@@ -533,23 +438,65 @@ def pick_up_choice(partial, srt_path, cues, film_language, limit, auto):
     return (notes, through) if pick == "p" else ([], 0)
 
 
-def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=None, language="English",
-             assume_yes=False, key_file=None, api_url=API_URL, film_language=None, original_srt=None,
-             limit=None, video_offset=None, effort=None, max_tokens=MAX_TOKENS, year=None, estimate_only=False):
-    """Write the notes file. With estimate_only, stop after the size and cost estimate: no API key is needed,
-    nothing is sent and nothing is written (returns None)."""
-    all_cues = make_ass.parse_srt(srt_path)
+@dataclasses.dataclass
+class GeneratePlan:
+    """Everything decided before anything is sent: what plan_generate() worked out and printed. generate() runs it;
+    a test or another front end can look at it first."""
+    srt_path: Path
+    notes_path: Path
+    partial: Path                    # <notes>.partial.json, where a stopped run keeps its notes
+    cues: list                       # the subtitle lines (after --limit)
+    all_parts: list                  # the lines in request-sized parts
+    first: int                       # the first part to send (after 1 when picking up a stopped run)
+    earlier: list                    # notes kept from the stopped run
+    through: int                     # the last subtitle line those notes cover
+    send: list                       # the lines that will be sent
+    title: str
+    audience: str
+    situation: object                # None for an English film, else "original", "paired" or "translated"
+    extra: object                    # the original-language lines for "paired", else None
+    system: str                      # the system prompt, filled in
+    language: str
+    year: object
+    model: str
+    limit: object
+    film_language: object
+    original_srt: object
+    video_offset: object
+    n_send: int                      # the estimate: requests, tokens in and out, dollars (None for an unknown model)
+    est_in: int
+    est_out: int
+    cost: object
+    key: object = None               # the API key (None with estimate_only, or on the subscription)
+    backend: str = "api"             # "api" (your key) or "claude-code" (your subscription)
+
+
+def plan_generate(srt_path, notes_path, model=claude_api.DEFAULT_MODEL, audience=None, title=None, language="English",
+                  assume_yes=False, key_file=None, film_language=None, original_srt=None, limit=None, video_offset=None,
+                  year=None, estimate_only=False, backend=None):
+    """Everything up to the "send?" question: read the subtitles, work out the language situation, offer to pick up a
+    stopped run, print the plan and send the `estimate` event. Nothing is sent and nothing is written. The backend is
+    settled here (claude_api.load_backend: --backend, the environment, the saved setting, else the API), and the API
+    key is read, or Claude Code looked for, before any of that work, so a missing one stops the run at once (not with
+    estimate_only)."""
+    all_cues = subtitles.parse_srt(srt_path)
     if not all_cues:
         sys.exit(f"No subtitle cues found in {srt_path}")
-    cues = make_ass.limit_cues(all_cues, limit)
+    cues = subtitles.limit_cues(all_cues, limit)
     if not cues:
-        sys.exit(f"No subtitle lines start in the first {make_ass.fmt_limit(limit)} of {srt_path}.")
-    key = None if estimate_only else load_key(key_file)     # fail early if there's no usable key
+        sys.exit(f"No subtitle lines start in the first {timecode.fmt_limit(limit)} of {srt_path}.")
+    backend = claude_api.load_backend(backend)
+    key = None
+    if not estimate_only:                                              # fail early if there's no way to reach Claude
+        if backend == "api":
+            key = claude_api.load_key(key_file)
+        else:
+            claude_api.check_claude_code()
     title = title or Path(srt_path).stem
     situation, extra = subtitle_setup(cues, film_language, original_srt)
     audience = audience or default_audience(film_language, situation)
     if limit:
-        print(f"Limited to the first {make_ass.fmt_limit(limit)}: {len(cues)} of {len(all_cues)} lines.")
+        print(f"Limited to the first {timecode.fmt_limit(limit)}: {len(cues)} of {len(all_cues)} lines.")
     all_parts = chunks(cues, extra)
     parts = len(all_parts)
     partial = Path(notes_path).with_suffix(".partial.json")
@@ -559,19 +506,11 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     if first > 1:
         print(f"Picking up where the last run stopped: {len(earlier)} notes kept; part {first} of {parts} is next.")
     n_send, est_in, est_out = estimate(send, extra) if send else (0, 0, 0)
-    c = cost(model, est_in, est_out)
+    c = claude_api.cost(model, est_in, est_out, backend)
     print(f"Plan: {len(send)} lines in {n_send} request(s) to {model}; about {est_in:,} tokens in and "
-          f"{est_out:,} out" + (f", roughly ${c:.2f} in API credits." if c is not None else "."))
-    prompts.event("estimate", step="generate", model=model, lines=len(send), requests=n_send, input_tokens=est_in,
-                  output_tokens=est_out, cost_usd=None if c is None else round(c, 4), limit=limit)
-    if estimate_only:
-        print("Estimate only: nothing was sent.")
-        return None
-    if send and not assume_yes:
-        if not prompts.interactive():
-            sys.exit("Not an interactive terminal, so add --yes to confirm sending the subtitles to the API.")
-        if not prompts.confirm("Send the subtitle text to the Claude API now?", id="generate.send"):
-            sys.exit("Cancelled; nothing was sent.")
+          f"{est_out:,} out" + claude_api.cost_note(c, backend))
+    prompts.event("estimate", step="generate", model=model, backend=backend, lines=len(send), requests=n_send,
+                  input_tokens=est_in, output_tokens=est_out, cost_usd=None if c is None else round(c, 4), limit=limit)
     foreign = situation is not None
     system = SYSTEM.format(audience=audience, language=language, era_section=era_section(year),
                            cats=", ".join(FOREIGN_CATEGORIES if foreign else CATEGORIES),
@@ -579,56 +518,139 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
                                              if foreign else ""),
                            examples=(ORIGINAL_EXAMPLES if situation == "original" else FOREIGN_EXAMPLES) if foreign
                            else ENGLISH_EXAMPLES)
+    return GeneratePlan(srt_path=Path(srt_path), notes_path=Path(notes_path), partial=partial, cues=cues,
+                        all_parts=all_parts, first=first, earlier=earlier, through=through, send=send, title=title,
+                        audience=audience, situation=situation, extra=extra, system=system, language=language,
+                        year=year, model=model, limit=limit, film_language=film_language, original_srt=original_srt,
+                        video_offset=video_offset, n_send=n_send, est_in=est_in, est_out=est_out, cost=c, key=key,
+                        backend=backend)
 
-    notes, tin, tout, problems = list(earlier), 0, 0, []
-    prev_tail = all_parts[first - 2][-CONTEXT_LINES:] if first > 1 else []
-    done_line = through                          # the last subtitle line whose part is finished
+
+def confirm_generate(plan, assume_yes=False):
+    """The "send?" question (--yes answers it). Stops the run on no, or when there is nobody to ask."""
+    if plan.send and not assume_yes:
+        where = "Claude Code (your subscription)" if plan.backend == "claude-code" else "the Claude API"
+        if not prompts.interactive():
+            sys.exit(f"Not an interactive terminal, so add --yes to confirm sending the subtitles to {where}.")
+        if not prompts.confirm(f"Send the subtitle text to {where} now?", id="generate.send"):
+            sys.exit("Cancelled; nothing was sent.")
+
+
+def generate_part(plan, k, part, prev_tail, notes, key, api_url=claude_api.API_URL, max_tokens=claude_api.MAX_TOKENS,
+                  effort=None):
+    """One request: the lines of `part` (with `prev_tail` for orientation and `notes` so far, whose topics aren't
+    repeated) go to Claude, and its reply is checked line by line. Returns (the notes it wrote, usage, problems).
+    The one call to Claude is claude_api.send (the API or Claude Code, by plan.backend); the message itself is built
+    by user_message(). Claude Code runs in the notes file's folder."""
+    lo, hi = part[0]["n"], part[-1]["n"]
+    message = user_message(plan.title, part, prev_tail, notes, k, len(plan.all_parts), plan.extra)
+    reply = claude_api.send(plan.backend, plan.model, plan.system, message, key=key, api_url=api_url,
+                            max_tokens=max_tokens, effort=effort, workdir=plan.notes_path.resolve().parent)
+    usage = reply.get("usage", {})
+    problems = []
+    if reply.get("stop_reason") == "refusal":
+        problems.append(f"part {k}: the model declined to write notes for these lines")
+    text = "".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text")
+    raw_notes = extract_objects(text)
+    part_notes = []
+    for r in raw_notes:
+        note, why = check_note(r, plan.cues, lo, hi)
+        if note is None:
+            problems.append(f"part {k}: dropped a note ({why})")
+            continue
+        if why:
+            problems.append(f"part {k}: {why}")
+        part_notes.append(note)
+    if reply.get("stop_reason") == "max_tokens":
+        problems.append(f"part {k}: reply was cut off, so later notes in this part may be missing")
+    if not raw_notes and text.strip() not in ("[]", ""):
+        bad = plan.notes_path.with_suffix(f".part{k}.failed.txt")
+        bad.write_text(text, encoding="utf-8")
+        problems.append(f"part {k}: couldn't read the reply; saved it to {bad.name}")
+    return part_notes, usage, problems
+
+
+def write_notes_file(plan, notes):
+    """Write the notes file all at once: an intro note, the settings the notes were written with, and the notes.
+    The partial file from a stopped run goes, since its notes are in the notes file now. Returns the file's contents."""
+    ms = int(round(plan.cues[0]["start"] * 1000))
+    intro = {"at": f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}",
+             "category": "About these notes", "duration": 9, "kind": "speech",
+             "text": f"Pre-alpha context notes written by Claude ({plan.model}) for this viewer: {plan.audience.rstrip('.')}. "
+                     "Each note appears just after its line. “(less sure)” means: check me."
+                     + (f" These notes cover only the first {timecode.fmt_limit(plan.limit)}." if plan.limit else "")}
+    spec = {"title": f"{plan.title} (context notes)", "audience": plan.audience,
+            "scope": "Dialogue notes written from the subtitles only (no video or audio was analysed)",
+            "generated_by": plan.model}
+    if plan.backend != "api":
+        spec["backend"] = plan.backend
+    if plan.video_offset is not None:
+        spec["video_offset"] = round(float(plan.video_offset), 2)
+    if plan.situation is not None:
+        spec["film_language"] = languages.code(plan.film_language)
+        if plan.original_srt:
+            spec["original_subtitles"] = Path(plan.original_srt).name
+    if plan.limit:
+        spec["limit"] = round(plan.limit, 1)
+    if plan.year:
+        spec["year"] = int(plan.year)
+    spec["notes"] = [intro] + notes
+    fileio.write_text_safely(plan.notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
+    try:
+        plan.partial.unlink()                    # its notes are in the notes file now
+    except OSError:
+        pass
+    return spec
+
+
+def generate(srt_path, notes_path, model=claude_api.DEFAULT_MODEL, audience=None, title=None, language="English",
+             assume_yes=False, key_file=None, api_url=claude_api.API_URL, film_language=None, original_srt=None,
+             limit=None, video_offset=None, effort=None, max_tokens=claude_api.MAX_TOKENS, year=None, estimate_only=False,
+             backend=None):
+    """Write the notes file: plan_generate, the "send?" question, one request per part, write_notes_file.
+    With estimate_only, stop after the size and cost estimate: no API key is needed, nothing is sent and nothing is
+    written (returns None). A run that stops part-way keeps its notes in <notes>.partial.json for the next one.
+    `backend` is "api", "claude-code" or None (the saved setting, else the API)."""
+    plan = plan_generate(srt_path, notes_path, model=model, audience=audience, title=title, language=language,
+                         assume_yes=assume_yes, key_file=key_file, film_language=film_language,
+                         original_srt=original_srt, limit=limit, video_offset=video_offset, year=year,
+                         estimate_only=estimate_only, backend=backend)
+    if estimate_only:
+        print("Estimate only: nothing was sent.")
+        return None
+    confirm_generate(plan, assume_yes)
+
+    parts = len(plan.all_parts)
+    notes, tin, tout, problems = list(plan.earlier), 0, 0, []
+    prev_tail = plan.all_parts[plan.first - 2][-CONTEXT_LINES:] if plan.first > 1 else []
+    done_line = plan.through                     # the last subtitle line whose part is finished
 
     def keep_partial(k):
         if notes:
-            make_ass.write_text_safely(partial, json.dumps(
-                {"notes": notes, "through_line": done_line, "subtitles": Path(srt_path).name,
-                 "film_language": film_language, "limit": round(limit, 1) if limit else None, "model": model},
+            fileio.write_text_safely(plan.partial, json.dumps(
+                {"notes": notes, "through_line": done_line, "subtitles": plan.srt_path.name,
+                 "film_language": film_language, "limit": round(limit, 1) if limit else None, "model": model,
+                 "backend": plan.backend},
                 indent=1, ensure_ascii=False))
             print(f"\n  Stopped after part {k - 1} of {parts}. The {len(notes)} notes written so far "
-                  f"were saved to {partial.name}; the next run offers to pick up from there.", flush=True)
+                  f"were saved to {plan.partial.name}; the next run offers to pick up from there.", flush=True)
 
-    k = first
+    k = plan.first
     try:
-        for k, part in enumerate(all_parts[first - 1:], first):
+        for k, part in enumerate(plan.all_parts[plan.first - 1:], plan.first):
             lo, hi = part[0]["n"], part[-1]["n"]
             prompts.progress("generate", k - 1, parts, "requests")     # before the line below, which stays open
             print(f"  part {k}/{parts}: lines {lo}-{hi} ...", end=" ", flush=True)
             try:
-                reply = call_api(key, model, system, user_message(title, part, prev_tail, notes, k, parts, extra), api_url,
-                                 max_tokens=max_tokens, effort=effort)
+                part_notes, usage, part_problems = generate_part(plan, k, part, prev_tail, notes, plan.key, api_url,
+                                                                 max_tokens, effort)
             except SystemExit:                               # an API error: keep what was paid for
                 keep_partial(k)
                 raise
-            usage = reply.get("usage", {})
             tin += usage.get("input_tokens", 0)
             tout += usage.get("output_tokens", 0)
-            if reply.get("stop_reason") == "refusal":
-                problems.append(f"part {k}: the model declined to write notes for these lines")
-            text = "".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text")
-            raw_notes = extract_objects(text)
-            kept, part_notes = 0, []
-            for r in raw_notes:
-                note, why = check_note(r, cues, lo, hi)
-                if note is None:
-                    problems.append(f"part {k}: dropped a note ({why})")
-                    continue
-                if why:
-                    problems.append(f"part {k}: {why}")
-                part_notes.append(note)
-                kept += 1
-            if reply.get("stop_reason") == "max_tokens":
-                problems.append(f"part {k}: reply was cut off, so later notes in this part may be missing")
-            if not raw_notes and text.strip() not in ("[]", ""):
-                bad = Path(notes_path).with_suffix(f".part{k}.failed.txt")
-                bad.write_text(text, encoding="utf-8")
-                problems.append(f"part {k}: couldn't read the reply; saved it to {bad.name}")
-            print(f"{kept} notes")
+            problems += part_problems
+            print(f"{len(part_notes)} notes")
             prev_tail = part[-CONTEXT_LINES:]
             notes.extend(part_notes)             # a part counts once all of it is in, so a stop never splits one
             done_line = hi
@@ -637,35 +659,10 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
         raise
     prompts.progress("generate", parts, parts, "requests")
 
-    ms = int(round(cues[0]["start"] * 1000))
-    intro = {"at": f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}",
-             "category": "About these notes", "duration": 9, "kind": "speech",
-             "text": f"Pre-alpha context notes written by Claude ({model}) for this viewer: {audience.rstrip('.')}. "
-                     "Each note appears just after its line. “(less sure)” means: check me."
-                     + (f" These notes cover only the first {make_ass.fmt_limit(limit)}." if limit else "")}
-    spec = {"title": f"{title} (context notes)", "audience": audience,
-            "scope": "Dialogue notes written from the subtitles only (no video or audio was analysed)",
-            "generated_by": model}
-    if video_offset is not None:
-        spec["video_offset"] = round(float(video_offset), 2)
-    if foreign:
-        spec["film_language"] = languages.code(film_language)
-        if original_srt:
-            spec["original_subtitles"] = Path(original_srt).name
-    if limit:
-        spec["limit"] = round(limit, 1)
-    if year:
-        spec["year"] = int(year)
-    spec["notes"] = [intro] + notes
-    make_ass.write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
-    try:
-        partial.unlink()                         # its notes are in the notes file now
-    except OSError:
-        pass
-
-    actual = cost(model, tin, tout)
+    spec = write_notes_file(plan, notes)
+    actual = claude_api.cost(model, tin, tout, plan.backend)
     print(f"Wrote {len(notes)} notes -> {notes_path}")
-    print(f"Used {tin:,} input and {tout:,} output tokens" + (f" (about ${actual:.2f})." if actual is not None else "."))
+    print(f"Used {tin:,} input and {tout:,} output tokens" + claude_api.used_note(actual, plan.backend))
     for p in problems:
         print("  ! " + p)
     if not notes:
@@ -675,6 +672,6 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
 
 if __name__ == "__main__":
     if "--set-api-key" in sys.argv:
-        set_key()
+        claude_api.set_key()
     else:
         sys.exit(__doc__)
