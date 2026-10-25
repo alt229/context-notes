@@ -15,6 +15,7 @@ Usage:
     python3 make_ass.py episode.srt --refine --video episode.mp4         # Claude improves the notes using the video's
                                                                          # frames and soundtrack; backs up notes + old .ass
     python3 make_ass.py --set-api-key                                    # once: save your API key
+    python3 make_ass.py --set-claude-token                               # once, on a server: the token from `claude setup-token`
     python3 make_ass.py --set-backend claude-code                        # once: run Claude through Claude Code instead,
                                                                          # on your Claude subscription (no API key)
     python3 make_ass.py episode.srt notes.json --video episode.mp4      # -> episode.notes.ass
@@ -570,6 +571,9 @@ def main():
                         "--refine only adds on-screen notes and leaves your existing notes alone")
     g.add_argument("--set-api-key", action="store_true",
                    help="save your Anthropic API key to ~/.config/context-notes/api-key (hidden prompt) and exit")
+    g.add_argument("--set-claude-token", action="store_true",
+                   help="save the sign-in token that `claude setup-token` prints (hidden prompt; empty removes it) "
+                        "and exit. For a computer where Claude Code can't sign in itself, such as the Docker setup")
     g.add_argument("--set-backend", choices=("api", "claude-code"), metavar="{api,claude-code}",
                    help="save where Claude runs from now on and exit: api (your key, API credits) or claude-code (the "
                         "installed Claude Code command, on your Claude subscription). --backend overrides it per run")
@@ -598,6 +602,10 @@ def main():
     if a.set_api_key:
         import claude_api
         claude_api.set_key()
+        return
+    if a.set_claude_token:
+        import claude_api
+        claude_api.set_claude_token_interactive()
         return
     if a.set_backend:
         import claude_api

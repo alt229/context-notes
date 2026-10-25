@@ -7,6 +7,17 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- A hosted mode for the app, for when the browser is on another computer (the Docker setup now uses it): `app.py
+  --hosted` hides and refuses the file dialogs, "Open in VLC", "Show in folder" and the VLC installer, and Settings
+  offers the VLC extension as a download instead. Settings is reorganised (Claude, OpenSubtitles.com, VLC extension,
+  This computer), and Claude Code on a server can sign in with a token from `claude setup-token`, pasted in Settings
+  or saved with `make_ass.py --set-claude-token` and passed to `claude` as `CLAUDE_CODE_OAUTH_TOKEN`; "Check sign-in"
+  runs `claude auth status`.
+- Running it in Docker behind HTTPS: `Dockerfile`, `docker-compose.yml` and `deploy/` (Caddy with the Cloudflare DNS
+  plugin, so a Let's Encrypt certificate is issued and renewed without opening a port to the internet; Claude Code
+  installed in the image for the subscription backend). `app.py` gained `--host`, `--public-url` (one more name
+  the Host/Origin checks accept) and `--key-file` (a page key that survives restarts), and `CONTEXT_NOTES_PLACES`
+  adds folders to the chooser. See `docs/docker.md`.
 - Claude on your subscription, with no API key: `--backend claude-code` (or once, `make_ass.py --set-backend
   claude-code`) runs every request through the installed Claude Code command (`claude -p`) instead of the API, for
   writing notes, the frame pass, `context_notes.py` and the app (Settings → Where Claude runs). The frame pass gives

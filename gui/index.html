@@ -72,6 +72,8 @@
 body { margin: 0; background: var(--bg); color: var(--ink); font: var(--text-body)/1.5 var(--sans); }
 h1 { margin: 0; font-size: var(--text-heading); font-weight: 650; letter-spacing: .01em; }
 h2 { margin: 0 0 8px; font-size: var(--text-body); font-weight: 650; }
+h3 { margin: 12px 0 4px; font-size: var(--text-body); font-weight: 600; }
+[hidden] { display: none !important; }
 a { color: inherit; }
 button, input, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -80,6 +82,7 @@ button, input, select { font: inherit; color: inherit; }
 /* Atoms: buttons, inputs, the progress bar, state badges, hints and messages. */
 .btn { font-weight: 600; font-size: 15px; padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--line);
   background: var(--surface); color: var(--ink); cursor: pointer; }
+a.btn { display: inline-block; text-decoration: none; }
 .btn:hover:not(:disabled) { border-color: var(--muted); }
 .btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
 .btn.quiet { background: transparent; border-color: transparent; padding-left: 6px; padding-right: 6px;
@@ -170,6 +173,13 @@ ul.videos .acts .btn { font-size: var(--text-small); padding: 5px 11px; }
 @media (prefers-reduced-motion: reduce) {
   .note.show { animation: none; }
 }
+
+/* A short table of where a file goes (the settings dialog), and a numbered list of steps. */
+.table-wrap { overflow-x: auto; margin: 4px 0 10px; }
+table.where { border-collapse: collapse; font-size: var(--text-small); }
+table.where th, table.where td { text-align: left; padding: 5px 12px 5px 0; vertical-align: baseline; border-bottom: 1px solid var(--line); }
+ol.steps-list { margin: 4px 0 10px; padding-left: 22px; max-width: 64ch; }
+ul.videos .acts .path { font-family: var(--mono); font-size: var(--text-mono); color: var(--muted); user-select: all; overflow-wrap: anywhere; }
 
 /* ---- styles/organisms.css ---- */
 /* Organisms: the page's sections, in page order, then the dialogs. */
@@ -407,49 +417,80 @@ ul.entries .kind { color: var(--muted); font-size: var(--text-tiny); margin-left
   <div class="dhead"><h2 id="settingsTitle">Settings</h2>
     <button type="button" class="btn quiet" data-close>Close</button></div>
   <div class="dbody">
-    <section>
-      <h2>Where Claude runs</h2>
+    <section id="claudeSection">
+      <h2>Claude</h2>
       <label class="choice"><input type="radio" name="backend" value="claude-code">
         <span>Claude Code, on my Claude subscription <small id="claudeCodeStatus"></small></span></label>
       <label class="choice"><input type="radio" name="backend" value="api">
         <span>My Anthropic API key <small>Billed per use as API credits, separately from a subscription.</small></span></label>
       <p class="msg" id="backendMsg" role="status"></p>
-      <p class="hint">Saved as soon as you choose. Claude Code is the <code>claude</code> command from
-        <a href="https://claude.com/claude-code" target="_blank" rel="noreferrer noopener">claude.com/claude-code</a>;
-        run it once in Terminal to sign in. The same models are used either way.</p>
-    </section>
-    <section>
-      <h2>Anthropic API key</h2>
-      <p id="keyStatus"></p>
-      <label class="field"><span>Paste a new key</span>
-        <input id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
-      <div class="row">
-        <button type="button" class="btn primary" id="saveKeyBtn">Save the key</button>
-        <button type="button" class="btn" id="testKeyBtn">Check the key</button>
+      <p class="hint">Saved as soon as you choose. The same models are used either way.</p>
+
+      <div id="claudeCodeBox" hidden>
+        <p id="claudeStatus" role="status"></p>
+        <button type="button" class="btn" id="checkSignInBtn">Check sign-in</button>
+        <p class="hint" id="claudeSharedNote" hidden>This server is already signed in another way, for example through a
+          shared sign-in folder. You can still paste a token below; if you do, the app uses it instead.</p>
+        <h3>Sign in</h3>
+        <ol class="steps-list">
+          <li>On any computer that has Claude Code, run <code>claude setup-token</code> in Terminal.</li>
+          <li>Sign in in the browser window it opens.</li>
+          <li>Copy the token it prints and paste it here.</li>
+        </ol>
+        <label class="field"><span>Token</span>
+          <input id="claudeToken" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the token"></label>
+        <button type="button" class="btn primary" id="saveTokenBtn">Save the token</button>
+        <p class="msg" id="tokenMsg" role="status"></p>
+        <p class="hint">The token is kept on the server, in a file only the app can read. Saving this box empty
+          removes it, which signs the app out.</p>
       </div>
-      <p class="msg" id="keyMsg" role="status"></p>
-      <p class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a>.
-        API use is billed to your Anthropic account, separately from a Claude subscription.</p>
+
+      <div id="apiKeyBox" hidden>
+        <p id="keyStatus"></p>
+        <label class="field"><span>Paste a new key</span>
+          <input id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
+        <div class="row">
+          <button type="button" class="btn primary" id="saveKeyBtn">Save the key</button>
+          <button type="button" class="btn" id="testKeyBtn">Check the key</button>
+        </div>
+        <p class="msg" id="keyMsg" role="status"></p>
+        <p class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a>.
+          API use is billed to your Anthropic account, separately from a Claude subscription.</p>
+      </div>
     </section>
     <section>
       <h2>OpenSubtitles.com</h2>
       <p>Optional. Used to find subtitles for videos that have none. You need a free account and an API key from
-        <a href="https://www.opensubtitles.com/consumers" target="_blank" rel="noreferrer noopener">opensubtitles.com/consumers</a>.</p>
+        <a href="https://www.opensubtitles.com/consumers" target="_blank" rel="noreferrer noopener">opensubtitles.com/consumers</a>.
+        Their service wants both the API key and your username and password, so fill in all three.</p>
       <p id="osStatus"></p>
       <label class="field"><span>API key</span><input id="osKey" type="password" autocomplete="off"></label>
       <label class="field"><span>Username</span><input id="osUser" type="text" autocomplete="off"></label>
       <label class="field"><span>Password</span><input id="osPass" type="password" autocomplete="off"></label>
       <button type="button" class="btn" id="saveOsBtn">Save and test the login</button>
       <p class="msg" id="osMsg" role="status"></p>
+      <p class="hint">These are kept in a file on the server, readable only by the app.</p>
     </section>
     <section>
       <h2>VLC extension</h2>
       <p>Loads the notes when you play a video in VLC, with a checkbox for each kind of note.</p>
-      <p id="vlcStatus"></p>
-      <button type="button" class="btn" id="installVlcBtn">Install the VLC extension</button>
-      <p class="msg" id="vlcMsg" role="status"></p>
+      <div id="vlcLocal">
+        <p id="vlcStatus"></p>
+        <button type="button" class="btn" id="installVlcBtn">Install the VLC extension</button>
+        <p class="msg" id="vlcMsg" role="status"></p>
+      </div>
+      <div id="vlcHosted" hidden>
+        <p><a class="btn" id="vlcDownload" href="#">Download the VLC extension</a></p>
+        <p>Put the file in VLC's extensions folder on your own computer:</p>
+        <div class="table-wrap"><table class="where">
+          <tr><th scope="row">macOS</th><td><code>~/Library/Application Support/org.videolan.vlc/lua/extensions/</code></td></tr>
+          <tr><th scope="row">Linux</th><td><code>~/.local/share/vlc/lua/extensions/</code></td></tr>
+          <tr><th scope="row">Windows</th><td><code>%APPDATA%\vlc\lua\extensions\</code></td></tr>
+        </table></div>
+        <p>Then restart VLC and choose <strong>VLC → Extensions → Context Notes</strong>.</p>
+      </div>
     </section>
-    <section>
+    <section id="aboutSection">
       <h2>This computer</h2>
       <p id="aboutText"></p>
     </section>
@@ -524,6 +565,7 @@ const CN = {};
   }
 
   CN.api = api;
+  CN.key = KEY;               // for links that can't send a header, such as a download
 })();
 
 // ---- js/20-state.js ----
@@ -537,6 +579,8 @@ const CN = {};
 
   const state = {
     info: null,          // the answer to /api/info: key, OpenSubtitles, VLC, system
+    claudeSignedIn: null, // whether Claude Code is signed in: true, false, or null when not known yet
+    claudeStatus: null,   // the last answer of /api/claude/status
     videos: [],          // the rows of the video list, each with a `state`
     job: { next: 0 },    // how far through the run's items the page has read
     lastEstimate: null,  // the latest `estimate` event, shown with the "send?" question
@@ -551,8 +595,13 @@ const CN = {};
   function blocker(info) {
     if (!info) return null;
     if (info.backend === "claude-code") {
-      return info.claude_code.installed ? null
-        : "Claude Code isn't installed on this computer. Install it and sign in, or choose your API key in Settings. It's only needed when Claude writes notes.";
+      if (!info.claude_code.installed) {
+        return (info.hosted ? "Claude Code isn't installed on the server." : "Claude Code isn't installed on this computer.")
+          + " Install it and sign in, or choose your API key in Settings. It's only needed when Claude writes notes.";
+      }
+      return state.claudeSignedIn === false
+        ? "Claude Code isn't signed in. Open Settings → Claude to sign in. It's only needed when Claude writes notes."
+        : null;
     }
     return info.key.found ? null : "Add your Anthropic API key in Settings. It's only needed when Claude writes notes.";
   }
@@ -702,7 +751,8 @@ const CN = {};
 })();
 
 // ---- js/components/videoList.js ----
-// The list of videos: what each one's state is, how it's described, and its Open in VLC / Show in folder buttons.
+// The list of videos: what each one's state is, how it's described, and its Open in VLC / Show in folder buttons
+// (or, when the app runs on another computer, its path as text to copy).
 (() => {
   const { $, el, api, plural, clock, STATES, state } = CN;
 
@@ -728,7 +778,10 @@ const CN = {};
     $("videosEmpty").hidden = videos.length > 0;
     for (const v of videos) {
       const acts = [];
-      if (v.state === "ready" || (v.ass && v.state !== "working")) {
+      const hosted = !!(state.info && state.info.hosted);
+      if (hosted) {
+        if (v.path) acts.push(el("span", { class: "path" }, v.path));
+      } else if (v.state === "ready" || (v.ass && v.state !== "working")) {
         acts.push(el("button", { type: "button", class: "btn", onclick: () => openVlc(v) }, "Open in VLC"));
         acts.push(el("button", { type: "button", class: "btn quiet", onclick: () => reveal(v) }, "Show in folder"));
       }
@@ -1003,7 +1056,8 @@ const CN = {};
 })();
 
 // ---- js/components/settings.js ----
-// The Settings dialog: where Claude runs, the API key, the OpenSubtitles login, the VLC extension, and about this computer.
+// The Settings dialog: Claude (Claude Code sign-in or API key), the OpenSubtitles login, the VLC extension, and about this
+// computer. Which parts show depends on the backend chosen and on whether the app runs on another computer (info.hosted).
 (() => {
   const { $, api, state } = CN;
 
@@ -1011,18 +1065,29 @@ const CN = {};
     const { info } = state;
     const chosen = document.querySelector(`input[name=backend][value="${info.backend}"]`);
     if (chosen) chosen.checked = true;
-    $("claudeCodeStatus").textContent = info.claude_code.installed ? "(installed)" : "(not found: install Claude Code and sign in)";
+    const where = info.hosted ? "the server" : "this computer";
+    $("claudeCodeStatus").textContent = info.claude_code.installed ? "(installed)" : `(not found on ${where}: install Claude Code and sign in)`;
+    $("claudeCodeBox").hidden = info.backend !== "claude-code";
+    $("apiKeyBox").hidden = info.backend !== "api";
+    renderClaudeStatus();
     const k = info.key;
     if (k.found) $("keyStatus").textContent = k.source === "environment"
-      ? `Using the key in the ANTHROPIC_API_KEY setting of this computer (ends in …${k.ends}). A key saved here takes its place.`
-      : `Saved. It ends in …${k.ends} and is kept in ${k.file}, readable only by you.`;
+      ? `Using the key in the ANTHROPIC_API_KEY setting of ${where} (ends in …${k.ends}). A key saved here takes its place.`
+      : `Saved. It ends in …${k.ends} and is kept in ${k.file}, readable only by the app.`;
     else $("keyStatus").textContent = "No key yet.";
     if (k.problem) $("keyStatus").textContent += " " + k.problem;
     $("testKeyBtn").disabled = !k.found;
     $("keyBanner").hidden = !(info.backend === "api" && !k.found);
+    // Things that only make sense when the browser and the app are on the same computer.
+    const hosted = !!info.hosted;
+    $("pickFile").hidden = $("pickFolder").hidden = !info.dialogs;
+    $("aboutSection").hidden = hosted;
+    $("vlcLocal").hidden = hosted;
+    $("vlcHosted").hidden = !hosted;
+    $("vlcDownload").href = "/api/vlc/extension?k=" + encodeURIComponent(CN.key);
     const os = info.opensubtitles;
     $("osStatus").textContent = os.saved ? `Saved, for the account ${os.username}.` : "No login saved.";
-    const vlc = info.vlc;
+    const vlc = info.vlc || [];
     if (!vlc.length) $("vlcStatus").textContent = "Couldn't work out where VLC keeps extensions on this computer.";
     else if (vlc.every((x) => x.current)) $("vlcStatus").textContent = "Installed and up to date.";
     else if (vlc.some((x) => x.installed)) $("vlcStatus").textContent = "Installed, but an older version.";
@@ -1032,6 +1097,30 @@ const CN = {};
     $("aboutText").textContent = `Running on ${systems[info.system] || info.system}. Speech recognition (for re-timing subtitles and checking notes) is `
       + (info.speech ? "installed." : "not installed. To add it: pip3 install faster-whisper");
     $("speechHint").textContent = info.speech ? "Slow the first time; free." : "Needs speech recognition, which isn't installed (see Settings).";
+  }
+  // The line under "Claude Code": what /api/claude/status last said (state.claudeStatus), or what /api/info already knows.
+  function renderClaudeStatus() {
+    const { info, claudeStatus } = state;
+    const status = $("claudeStatus");
+    $("claudeSharedNote").hidden = true;
+    $("checkSignInBtn").disabled = !info.claude_code.installed;
+    if (!info.claude_code.installed) { status.textContent = `Claude Code isn't installed on ${info.hosted ? "the server" : "this computer"}.`; return; }
+    if (!claudeStatus) { status.textContent = "Checking the sign-in…"; return; }
+    status.textContent = claudeStatus.signed_in
+      ? `Signed in${claudeStatus.method ? " (" + claudeStatus.method + ")" : ""}.` : claudeStatus.message || "Not signed in.";
+    $("claudeSharedNote").hidden = !(claudeStatus.signed_in && !info.claude_code.token_saved);
+  }
+  // Ask the app whether Claude Code is signed in (it runs the Claude Code command, so it takes a moment).
+  async function checkClaude() {
+    const { info } = state;
+    if (!info || !info.claude_code.installed) { state.claudeSignedIn = null; renderClaudeStatus(); return; }
+    state.claudeStatus = null;
+    renderClaudeStatus();
+    const r = await api("/api/claude/status", {});
+    state.claudeStatus = r.error ? { signed_in: false, message: r.error } : r;
+    state.claudeSignedIn = r.error ? null : !!r.signed_in;
+    renderClaudeStatus();
+    if (!state.running) (state.videos.length ? CN.readyScreen : CN.idleScreen)();
   }
   async function reloadInfo() {
     const r = await api("/api/info");
@@ -1052,7 +1141,16 @@ const CN = {};
     const r = await api("/api/backend", { backend: picked.value });
     msg("backendMsg", r.message || r.error, !!r.ok);
     await reloadInfo();
-    if (!state.running) (state.videos.length ? CN.readyScreen : CN.idleScreen)();
+    if (picked.value === "claude-code") await checkClaude();
+    else if (!state.running) (state.videos.length ? CN.readyScreen : CN.idleScreen)();
+  }
+  async function saveToken() {
+    msg("tokenMsg", "Saving…");
+    const r = await api("/api/claude/token", { token: $("claudeToken").value });
+    $("claudeToken").value = "";
+    msg("tokenMsg", r.message || r.error, !!r.ok);
+    await reloadInfo();
+    if (r.ok) await checkClaude();
   }
   async function saveKey() {
     msg("keyMsg", "Saving…");
@@ -1081,7 +1179,7 @@ const CN = {};
     await reloadInfo();
   }
 
-  Object.assign(CN, { renderSettings, reloadInfo, msg, saveBackend, saveKey, testKey, saveOs, installVlc });
+  Object.assign(CN, { renderSettings, reloadInfo, checkClaude, saveToken, msg, saveBackend, saveKey, testKey, saveOs, installVlc });
 })();
 
 // ---- js/90-main.js ----
@@ -1092,9 +1190,16 @@ const CN = {};
   for (const d of document.querySelectorAll("dialog")) {
     d.querySelector("[data-close]").addEventListener("click", () => d.close());
   }
-  $("settingsBtn").addEventListener("click", async () => { await CN.reloadInfo(); $("settings").showModal(); });
+  $("settingsBtn").addEventListener("click", async () => {
+    await CN.reloadInfo();
+    $("settings").showModal();
+    if (state.info.backend === "claude-code") CN.checkClaude();
+  });
   $("bannerKeyBtn").addEventListener("click", async () => { await CN.reloadInfo(); $("settings").showModal(); $("keyInput").focus(); });
   for (const r of document.querySelectorAll("input[name=backend]")) r.addEventListener("change", CN.saveBackend);
+  $("saveTokenBtn").addEventListener("click", CN.saveToken);
+  $("claudeToken").addEventListener("keydown", (e) => { if (e.key === "Enter") CN.saveToken(); });
+  $("checkSignInBtn").addEventListener("click", CN.checkClaude);
   $("saveKeyBtn").addEventListener("click", CN.saveKey);
   $("keyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") CN.saveKey(); });
   $("testKeyBtn").addEventListener("click", CN.testKey);
@@ -1118,6 +1223,7 @@ const CN = {};
     if (!(await CN.reloadInfo())) return;
     CN.fillLanguages();
     CN.restore();
+    if (state.info.backend === "claude-code") CN.checkClaude();       // so "Before you start" can say if it isn't signed in
     if (state.info.running) {
       await CN.refresh();
       $("log").dataset.fresh = "yes";

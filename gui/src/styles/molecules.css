@@ -54,3 +54,10 @@ ul.videos .acts .btn { font-size: var(--text-small); padding: 5px 11px; }
 @media (prefers-reduced-motion: reduce) {
   .note.show { animation: none; }
 }
+
+/* A short table of where a file goes (the settings dialog), and a numbered list of steps. */
+.table-wrap { overflow-x: auto; margin: 4px 0 10px; }
+table.where { border-collapse: collapse; font-size: var(--text-small); }
+table.where th, table.where td { text-align: left; padding: 5px 12px 5px 0; vertical-align: baseline; border-bottom: 1px solid var(--line); }
+ol.steps-list { margin: 4px 0 10px; padding-left: 22px; max-width: 64ch; }
+ul.videos .acts .path { font-family: var(--mono); font-size: var(--text-mono); color: var(--muted); user-select: all; overflow-wrap: anywhere; }

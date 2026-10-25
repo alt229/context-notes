@@ -8,6 +8,8 @@
 
   const state = {
     info: null,          // the answer to /api/info: key, OpenSubtitles, VLC, system
+    claudeSignedIn: null, // whether Claude Code is signed in: true, false, or null when not known yet
+    claudeStatus: null,   // the last answer of /api/claude/status
     videos: [],          // the rows of the video list, each with a `state`
     job: { next: 0 },    // how far through the run's items the page has read
     lastEstimate: null,  // the latest `estimate` event, shown with the "send?" question
@@ -22,8 +24,13 @@
   function blocker(info) {
     if (!info) return null;
     if (info.backend === "claude-code") {
-      return info.claude_code.installed ? null
-        : "Claude Code isn't installed on this computer. Install it and sign in, or choose your API key in Settings. It's only needed when Claude writes notes.";
+      if (!info.claude_code.installed) {
+        return (info.hosted ? "Claude Code isn't installed on the server." : "Claude Code isn't installed on this computer.")
+          + " Install it and sign in, or choose your API key in Settings. It's only needed when Claude writes notes.";
+      }
+      return state.claudeSignedIn === false
+        ? "Claude Code isn't signed in. Open Settings → Claude to sign in. It's only needed when Claude writes notes."
+        : null;
     }
     return info.key.found ? null : "Add your Anthropic API key in Settings. It's only needed when Claude writes notes.";
   }

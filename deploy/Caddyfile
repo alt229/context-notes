@@ -1,0 +1,15 @@
+# Reverse proxy in front of the app. Everything site-specific comes from the environment (.env).
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	tls {
+		dns cloudflare {$CLOUDFLARE_API_TOKEN}
+		# Check the challenge record through public DNS, so a private copy of the zone (a home router answering
+		# for the same name) doesn't hide it.
+		resolvers 1.1.1.1 1.0.0.1
+	}
+	encode gzip
+	reverse_proxy app:8080
+}

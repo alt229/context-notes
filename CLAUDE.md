@@ -134,11 +134,18 @@ Read `README.md` for the full command reference. This file holds what we've lear
   by `gui/assemble.py` (`gui/README.md` explains the layers): edit the sources, then run `python3 gui/assemble.py`
   to regenerate it, or `tests/test_gui_assemble.py` fails.
 - Security: it listens on 127.0.0.1 only, every request needs the random key, and `Host` and `Origin` are checked.
+  `--host 0.0.0.0 --public-url https://name --key-file F` (the Docker setup, `docs/docker.md`) opens it to one
+  named address behind a reverse proxy; the key and the checks still apply, with that one name added.
   The API key never goes to the page; it only shows the last 4 characters. Keep all of this when changing it.
 - New options friends should reach go in the page's form, and in `common_args` / `App.run` in `app.py`.
-- Settings → "Where Claude runs" picks the backend (`/api/info` reports it with whether Claude Code is installed;
+- Settings → Claude picks the backend (`/api/info` reports it with whether Claude Code is installed;
   `POST /api/backend` saves it through `make_ass.py --set-backend`). The "Add your key" banner shows only when the
-  backend is the API and there's no key.
+  backend is the API and there's no key. For a server with no `claude` sign-in, `POST /api/claude/token` saves a
+  `claude setup-token` token (`claude_api.set_claude_token`, mode 600, passed to `claude` as
+  `CLAUDE_CODE_OAUTH_TOKEN`; never sent back to the page) and `POST /api/claude/status` runs `claude auth status`.
+- `--hosted` (the Docker setup) means the browser is on another computer: `/api/vlc/install`, `/api/vlc/open`,
+  `/api/reveal` and `/api/pick` answer 400, `/api/info` says `hosted`, `dialogs: false` and `vlc: []`, and the page
+  offers the VLC extension as a download (`GET /api/vlc/extension?k=KEY`) instead. Tests: `tests/test_app_hosted.py`.
 - WSL is supported through a small layer: Windows paths, `explorer.exe`, `vlc.exe`, and PowerShell file dialogs.
   Native Windows is not.
 - Tests: `tests/test_app.py` (HTTP, whole runs, cancel). To look at the page, run it with `--api-url` pointing at the

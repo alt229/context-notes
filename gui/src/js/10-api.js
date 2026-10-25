@@ -19,4 +19,5 @@
   }
 
   CN.api = api;
+  CN.key = KEY;               // for links that can't send a header, such as a download
 })();

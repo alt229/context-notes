@@ -5,6 +5,7 @@ app.py - Context Notes in your web browser, on this computer only.
     python3 app.py                   start it and open the page in your browser
     python3 app.py --no-browser      only print the page's address
     python3 app.py --port 8765       use this port (default: any free one)
+    python3 app.py --hosted          the browser is on another computer: hide and refuse what only works on this one
 
 The page runs the same scripts as Terminal (context_notes.py and the rest, as described in docs/gui-protocol.md). It
 asks the same questions and shows the same cost estimate before anything is sent. Press Ctrl-C here to stop it.
@@ -51,6 +52,8 @@ TEXT_OPTIONS = (("film_language", "--film-language"), ("subs_language", "--subs-
                 ("notes_language", "--notes-language"))
 WINDOWS_PATH = re.compile(r"^(?:[a-zA-Z]:[\\/]|\\\\)")
 MAX_BODY = 1 << 20
+HOSTED_REFUSES = ("/api/vlc/install", "/api/vlc/open", "/api/reveal", "/api/pick")     # these act on the server
+HOSTED_MESSAGE = "Not available when the app runs on another computer."
 
 
 # ---------------------------------------------------------------- this computer
@@ -121,6 +124,8 @@ def places():
         if path and Path(path).is_dir() and str(path) not in [p["path"] for p in out]:
             out.append({"label": label, "path": str(path)})
     add("Home", home)
+    for extra in filter(None, os.environ.get("CONTEXT_NOTES_PLACES", "").split(os.pathsep)):
+        add(Path(extra).name or extra, Path(extra))        # e.g. /media in the Docker setup
     for name in ("Movies", "Videos", "Desktop", "Downloads"):
         add(name, home / name)
     if where == "mac":
@@ -245,13 +250,49 @@ def key_info():
 
 
 def backend_info():
-    """Where Claude runs (the saved setting, or "api"), and whether Claude Code is installed on this computer."""
+    """Where Claude runs (the saved setting, or "api"), whether Claude Code is installed on this computer, and
+    whether a sign-in token is saved (never the token itself)."""
     found = claude_api.claude_bin()
     try:
         backend = claude_api.load_backend()
     except SystemExit:                                   # a hand-edited file with a wrong value: the page shows api
         backend = "api"
-    return backend, {"installed": bool(found), "path": found}
+    return backend, {"installed": bool(found), "path": found, "token_saved": claude_api.load_claude_token() is not None}
+
+
+def claude_status(api_bin=None):
+    """Is Claude Code signed in? Runs `claude auth status --json` with the environment the backend uses (so a saved
+    token counts) and reads the answer as data. Returns {"signed_in", "method", "message", "installed"}."""
+    found = api_bin or claude_api.claude_bin()
+    if not found:
+        return {"signed_in": False, "method": None, "installed": False,
+                "message": "Claude Code isn't installed on the server."}
+    try:
+        r = subprocess.run([found, "auth", "status", "--json"], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=20, env=claude_api.claude_env(), stdin=subprocess.DEVNULL,
+                           cwd=str(Path.home()))
+    except subprocess.TimeoutExpired:
+        return {"signed_in": False, "method": None, "installed": True,
+                "message": "Claude Code didn't answer within 20 seconds. Try again."}
+    except OSError as e:
+        return {"signed_in": False, "method": None, "installed": True,
+                "message": f"Couldn't run Claude Code: {e.strerror or e}"}
+    data = None
+    for chunk in (r.stdout.strip(), (r.stdout.strip().splitlines() or [""])[-1]):
+        try:
+            data = json.loads(chunk)
+            break
+        except ValueError:
+            continue
+    if not isinstance(data, dict):
+        return {"signed_in": False, "method": None, "installed": True,
+                "message": "Couldn't tell whether Claude Code is signed in (it gave an answer this app doesn't "
+                           "understand). Try a note run, or paste a token below."}
+    if data.get("loggedIn") is True:
+        method = data.get("authMethod") if isinstance(data.get("authMethod"), str) else None
+        return {"signed_in": True, "method": method, "installed": True,
+                "message": f"Signed in ({method})." if method else "Signed in."}
+    return {"signed_in": False, "method": None, "installed": True, "message": "Not signed in."}
 
 
 def opensubtitles_info():
@@ -517,17 +558,20 @@ class Job:
 
 
 class App:
-    def __init__(self, api_url=None):
-        self.token = secrets.token_urlsafe(24)
+    def __init__(self, api_url=None, token=None, public_url=None, hosted=False):
+        self.hosted = bool(hosted)
+        self.token = token or secrets.token_urlsafe(24)
+        self.public_url = public_url.rstrip("/") if public_url else None
         self.api_url = api_url
         self.job = None
         self.lock = threading.Lock()
 
     def info(self):
         backend, claude_code = backend_info()
-        return {"system": system(), "home": str(Path.home()), "key": key_info(), "backend": backend,
-                "claude_code": claude_code, "opensubtitles": opensubtitles_info(),
-                "vlc": vlc_info(), "dialogs": dialog_command("file") is not None,
+        return {"system": system(), "hosted": self.hosted, "home": str(Path.home()), "key": key_info(),
+                "backend": backend, "claude_code": claude_code, "opensubtitles": opensubtitles_info(),
+                "vlc": [] if self.hosted else vlc_info(),
+                "dialogs": False if self.hosted else dialog_command("file") is not None,
                 "speech": find_subs.have_whisper(),
                 "languages": [{"code": c, "name": n} for c, (n, _) in languages.LANGUAGES.items()],
                 "running": bool(self.job and self.job.running)}
@@ -578,6 +622,19 @@ class App:
         message = next((ln for ln in lines if ln.strip()), "")
         return {"ok": code == 0, "message": message.replace(key, "…"), "key": key_info()}
 
+    def set_claude_token(self, token):
+        """Save (or, when empty, remove) the sign-in token from `claude setup-token`. It is never sent back."""
+        token = str(token or "").strip()
+        try:
+            saved = claude_api.set_claude_token(token)
+        except ValueError as e:
+            return {"ok": False, "message": str(e)}
+        except OSError as e:
+            return {"ok": False, "message": f"Couldn't save it: {e.strerror or e}"}
+        message = ("Saved. Claude Code on this server will sign in with it. Press \"Check sign-in\" to make sure it works."
+                   if saved else "Removed. Claude Code on this server no longer has this token.")
+        return {"ok": True, "message": message, "claude_code": backend_info()[1]}
+
     def test_key(self):
         try:
             key = claude_api.load_key()
@@ -623,13 +680,30 @@ class Handler(BaseHTTPRequestHandler):
         port = self.server.server_address[1]
         return {f"127.0.0.1:{port}", f"localhost:{port}"}
 
+    def _public(self):
+        """(scheme, hostname) of --public-url, or None."""
+        if not self.app.public_url:
+            return None
+        u = urlparse(self.app.public_url)
+        return u.scheme, (u.hostname or "").lower()
+
+    def _host_ok(self, host):
+        if host in self._hosts():
+            return True
+        public = self._public()                      # the name a reverse proxy serves the page under, on any port
+        return bool(public) and bool(host) and urlparse(f"//{host}").hostname == public[1]
+
+    def _origin_ok(self, origin):
+        if origin is None or origin in {f"http://{h}" for h in self._hosts()}:
+            return True
+        public = self._public()
+        u = urlparse(origin)
+        return bool(public) and (u.scheme, (u.hostname or "").lower()) == public
+
     def _allowed(self):
-        """Only this computer, only this page: guards against other web pages and DNS rebinding."""
-        hosts = self._hosts()
-        if self.headers.get("Host") not in hosts:
-            return False
-        origin = self.headers.get("Origin")
-        return origin is None or origin in {f"http://{h}" for h in hosts}
+        """Only this computer (or the one public name given), only this page: guards against other web pages
+        and DNS rebinding."""
+        return self._host_ok(self.headers.get("Host")) and self._origin_ok(self.headers.get("Origin"))
 
     def _key_ok(self, given):
         return hmac.compare_digest(str(given or ""), self.app.token)
@@ -663,6 +737,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._page()
         if not url.path.startswith("/api/"):
             return self._send(404, {"error": "Not found."})
+        if url.path == "/api/vlc/extension":             # a download link: the key may be in the address
+            if not self._key_ok(self.headers.get("X-Key") or parse_qs(url.query).get("k", [""])[0]):
+                return self._send(403, {"error": "Not allowed."})
+            try:
+                data = (HERE / "vlc" / "context_notes.lua").read_bytes()
+            except OSError:
+                return self._send(404, {"error": "Not found."})
+            return self._send(200, data, "text/x-lua; charset=utf-8",
+                              {"Content-Disposition": 'attachment; filename="context_notes.lua"'})
         if not self._key_ok(self.headers.get("X-Key")):
             return self._send(403, {"error": "Not allowed."})
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
@@ -693,6 +776,8 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(o, dict):
             return self._send(400, {"error": "That wasn't a JSON object."})
         app, path = self.app, url.path
+        if app.hosted and path in HOSTED_REFUSES:
+            return self._send(400, {"error": HOSTED_MESSAGE})
         if path == "/api/status":
             return self._send(200, status(o))
         if path == "/api/run":
@@ -709,6 +794,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, app.set_key(o.get("key")))
         if path == "/api/backend":
             return self._send(200, app.set_backend(o.get("backend")))
+        if path == "/api/claude/token":
+            return self._send(200, app.set_claude_token(o.get("token")))
+        if path == "/api/claude/status":
+            return self._send(200, claude_status())
         if path == "/api/key/test":
             return self._send(200, app.test_key())
         if path == "/api/opensubtitles":
@@ -730,28 +819,60 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "Not found."})
 
 
-def make_server(port=0, api_url=None):
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+def make_server(port=0, api_url=None, host="127.0.0.1", token=None, public_url=None, hosted=False):
+    server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
-    server.app = App(api_url)
+    server.app = App(api_url, token=token, public_url=public_url, hosted=hosted)
     return server
 
 
 def address(server):
+    if server.app.public_url:
+        return f"{server.app.public_url}/?k={server.app.token}"
     host = "localhost" if system() == "wsl" else "127.0.0.1"          # WSL passes localhost through to Windows
     return f"http://{host}:{server.server_address[1]}/?k={server.app.token}"
+
+
+def load_or_make_key(path):
+    """The page's key from a file, so the address survives restarts (the Docker setup). A missing file is written,
+    readable only by you."""
+    path = Path(path).expanduser()
+    if path.exists():
+        key = path.read_text(encoding="utf-8").strip()
+        if key:
+            return key
+    key = secrets.token_urlsafe(24)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fileio.write_text_safely(path, key + "\n")
+    os.chmod(path, 0o600)
+    return key
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=0, help="port to listen on (default: any free one)")
     ap.add_argument("--no-browser", action="store_true", help="don't open the page; just print its address")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="address to listen on (default: 127.0.0.1, this computer only; 0.0.0.0 inside Docker)")
+    ap.add_argument("--public-url", metavar="URL",
+                    help="the address a reverse proxy serves the page under, e.g. https://films.example.com; "
+                         "requests for any other name are refused, as before")
+    ap.add_argument("--key-file", metavar="FILE",
+                    help="keep the page's key in this file, so the address stays the same across restarts "
+                         "(default: a new key every start)")
+    ap.add_argument("--hosted", action="store_true",
+                    help="the browser is on another computer: hide and refuse the things that only make sense on "
+                         "this one (installing the VLC extension, Open in VLC, Show in folder, file dialogs)")
     ap.add_argument("--api-url", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
     if not PAGE_SOURCES.exists():
         sys.exit(f"Can't find the page sources {PAGE_SOURCES}. Is the gui folder next to app.py?")
+    if a.host not in ("127.0.0.1", "localhost", "::1") and not a.public_url:
+        print(f"Note: listening on {a.host}, but without --public-url only requests addressed to 127.0.0.1 or "
+              "localhost are answered.", flush=True)
     try:
-        server = make_server(a.port, a.api_url)
+        server = make_server(a.port, a.api_url, host=a.host, public_url=a.public_url,
+                             hosted=a.hosted, token=load_or_make_key(a.key_file) if a.key_file else None)
     except OSError as e:
         sys.exit(f"Couldn't start on port {a.port}: {e.strerror or e}. Try another with --port, or leave it out.")
     url = address(server)

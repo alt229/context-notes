@@ -5,9 +5,16 @@
   for (const d of document.querySelectorAll("dialog")) {
     d.querySelector("[data-close]").addEventListener("click", () => d.close());
   }
-  $("settingsBtn").addEventListener("click", async () => { await CN.reloadInfo(); $("settings").showModal(); });
+  $("settingsBtn").addEventListener("click", async () => {
+    await CN.reloadInfo();
+    $("settings").showModal();
+    if (state.info.backend === "claude-code") CN.checkClaude();
+  });
   $("bannerKeyBtn").addEventListener("click", async () => { await CN.reloadInfo(); $("settings").showModal(); $("keyInput").focus(); });
   for (const r of document.querySelectorAll("input[name=backend]")) r.addEventListener("change", CN.saveBackend);
+  $("saveTokenBtn").addEventListener("click", CN.saveToken);
+  $("claudeToken").addEventListener("keydown", (e) => { if (e.key === "Enter") CN.saveToken(); });
+  $("checkSignInBtn").addEventListener("click", CN.checkClaude);
   $("saveKeyBtn").addEventListener("click", CN.saveKey);
   $("keyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") CN.saveKey(); });
   $("testKeyBtn").addEventListener("click", CN.testKey);
@@ -31,6 +38,7 @@
     if (!(await CN.reloadInfo())) return;
     CN.fillLanguages();
     CN.restore();
+    if (state.info.backend === "claude-code") CN.checkClaude();       // so "Before you start" can say if it isn't signed in
     if (state.info.running) {
       await CN.refresh();
       $("log").dataset.fresh = "yes";

@@ -118,6 +118,7 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 | `subs.download` | `context_notes.py` (y), `find_subs.py` (n) | y / n | Download subtitles from OpenSubtitles.com (uses a daily download) |
 | `subs.transcribe` | `context_notes.py`, `find_subs.py` | y / n (n) | Write subtitles from the soundtrack with speech recognition |
 | `api-key` | `make_ass.py --set-api-key` | input, hidden | Saved to `~/.config/context-notes/api-key`, mode 600 |
+| `claude-code-token` | `make_ass.py --set-claude-token` | input, hidden | Saved to `~/.config/context-notes/claude-code-token`, mode 600; empty removes it |
 | `opensubtitles.api-key` | `find_subs.py --set-opensubtitles` | input, hidden | |
 | `opensubtitles.username` | `find_subs.py --set-opensubtitles` | input | |
 | `opensubtitles.password` | `find_subs.py --set-opensubtitles` | input, hidden | |

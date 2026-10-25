@@ -341,7 +341,7 @@ def test_app_reports_and_saves_the_backend(server, home, fake_claude):
     from test_app import call
     status, info = call(server, "/api/info")
     assert status == 200 and info["backend"] == "api"
-    assert info["claude_code"] == {"installed": True, "path": str(fake_claude.exe)}
+    assert info["claude_code"] == {"installed": True, "path": str(fake_claude.exe), "token_saved": False}
     status, r = call(server, "/api/backend", {"backend": "claude-code"})
     assert status == 200 and r["ok"] and "subscription" in r["message"] and r["backend"] == "claude-code"
     assert (home / ".config" / "context-notes" / "backend").read_text() == "claude-code\n"
@@ -356,7 +356,7 @@ def test_app_reports_and_saves_the_backend(server, home, fake_claude):
 def test_app_says_when_claude_code_is_missing(server, home, monkeypatch):
     from test_app import call
     monkeypatch.setenv("PATH", str(home))
-    assert call(server, "/api/info")[1]["claude_code"] == {"installed": False, "path": None}
+    assert call(server, "/api/info")[1]["claude_code"] == {"installed": False, "path": None, "token_saved": False}
     _, r = call(server, "/api/backend", {"backend": "claude-code"})
     assert r["ok"] and "isn't installed" in r["message"] and not r["claude_code"]["installed"]
 

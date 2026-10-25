@@ -1,4 +1,5 @@
-// The list of videos: what each one's state is, how it's described, and its Open in VLC / Show in folder buttons.
+// The list of videos: what each one's state is, how it's described, and its Open in VLC / Show in folder buttons
+// (or, when the app runs on another computer, its path as text to copy).
 (() => {
   const { $, el, api, plural, clock, STATES, state } = CN;
 
@@ -24,7 +25,10 @@
     $("videosEmpty").hidden = videos.length > 0;
     for (const v of videos) {
       const acts = [];
-      if (v.state === "ready" || (v.ass && v.state !== "working")) {
+      const hosted = !!(state.info && state.info.hosted);
+      if (hosted) {
+        if (v.path) acts.push(el("span", { class: "path" }, v.path));
+      } else if (v.state === "ready" || (v.ass && v.state !== "working")) {
         acts.push(el("button", { type: "button", class: "btn", onclick: () => openVlc(v) }, "Open in VLC"));
         acts.push(el("button", { type: "button", class: "btn quiet", onclick: () => reveal(v) }, "Show in folder"));
       }

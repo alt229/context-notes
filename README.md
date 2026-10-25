@@ -121,13 +121,19 @@ python3 app.py
 - **Write the notes.** The cost appears on screen before anything is sent, along with any other question (picking up
   a stopped run, for example). Progress is shown as it goes, and Cancel stops it the way Ctrl-C does.
 - **Watch:** open a finished video in VLC from the list.
-- **Settings** has where Claude runs (Claude Code on your Claude subscription, or your Anthropic API key; see
-  "Running on your Claude subscription" below), the key itself (saved in the usual place), the OpenSubtitles login,
-  and a button that installs the VLC extension.
+- **Settings** has Claude (Claude Code on your Claude subscription, or your Anthropic API key; see
+  "Running on your Claude subscription" below), the OpenSubtitles login, and the VLC extension: a button that
+  installs it, or, if the app runs on another computer, a download link.
 
 Keep the Terminal window open while you use it; Ctrl-C there stops it. It runs the same scripts described below, so
 anything it does you can also do by hand. Only your computer can reach it: it listens on 127.0.0.1, and the page's
 address (printed when it starts) carries a random key.
+
+If the app runs on a server and your browser is on another computer (the Docker setup, `docs/docker.md`, starts it
+with `--hosted`), the things that only make sense on one computer are hidden: the file dialogs, "Open in VLC", "Show
+in folder" and the VLC installer. You download the VLC extension from Settings instead. Claude Code on the server
+can sign in with a token you paste into Settings → Claude (run `claude setup-token` on any computer that has Claude
+Code); see "Running on your Claude subscription".
 
 On Windows, run it inside WSL; the page opens in your Windows browser. You can paste Windows paths (`D:\Films\...`)
 as they are. Network drives (`Z:`) have to be mounted in WSL first: `sudo mkdir -p /mnt/z && sudo mount -t drvfs Z: /mnt/z`.
@@ -281,6 +287,12 @@ A notes file is JSON: a title, an audience, and a list of notes. A note attaches
 }
 ```
 
+## Running it in Docker
+
+`docker compose up -d --build` runs the app behind HTTPS on your own domain, with a Let's Encrypt certificate
+that renews itself (Caddy with a Cloudflare DNS token) and Claude Code inside for the subscription backend. Your
+domain, token and films folder go in `.env` (copy `.env.example`). Details in [docs/docker.md](docs/docker.md).
+
 ## Using it with Claude Code
 
 This folder is also a Claude Code project. Run `claude` in it and:
@@ -312,6 +324,8 @@ nothing you've paid for is sent twice. No file is ever left half-written.
 ## VLC extension
 
 Copy `vlc/context_notes.lua` into VLC's extensions folder, restart VLC, then choose **VLC → Extensions → Context Notes**.
+(If the app runs on another computer, Settings → VLC extension has a "Download the VLC extension" link. Put the file
+in the folder below on your own computer.)
 
 | OS | Folder |
 |---|---|
@@ -348,7 +362,14 @@ python3 make_ass.py --set-backend api              # back to your API key
 ```
 
 Or choose per run with `--backend claude-code` (or `--backend api`) on `make_ass.py` or `context_notes.py`. In the
-app, it's **Settings → Where Claude runs**, saved as soon as you pick it.
+app, it's **Settings → Claude**, saved as soon as you pick it.
+
+**Signing in on a server (no Terminal on it).** Where the app runs on another computer, such as in Docker, Claude
+Code there has no sign-in. On any computer that has Claude Code, run `claude setup-token`, sign in in the browser it
+opens, and copy the token it prints. Paste it in Settings → Claude → "Save the token" (or run
+`python3 make_ass.py --set-claude-token`). It's kept in `~/.config/context-notes/claude-code-token`, readable only
+by you, and passed to `claude` as `CLAUDE_CODE_OAUTH_TOKEN`; saving it empty removes it. "Check sign-in" shows
+whether it worked.
 
 What it costs: nothing on top of your plan. Each run counts against the plan's usage limit, like a conversation in
 Claude Code does; if the limit is reached, the run stops with Claude's message and the finished parts are kept, so

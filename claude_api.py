@@ -11,6 +11,10 @@ load_backend() picks one: --backend, else $CONTEXT_NOTES_BACKEND, else ~/.config
 set_backend(), make_ass.py --set-backend), else "api". send() dispatches a request to call_api() or
 call_claude_code(); the scripts call send() and nothing else.
 
+If a sign-in token from `claude setup-token` is saved (~/.config/context-notes/claude-code-token, written by
+set_claude_token(), make_ass.py --set-claude-token), it is passed to `claude` as CLAUDE_CODE_OAUTH_TOKEN, so a
+server with no sign-in folder can still use the subscription.
+
 The API key is read from (first match wins):
     1. --api-key-file PATH                    (load_key(explicit))
     2. ~/.config/context-notes/api-key        (or $XDG_CONFIG_HOME/context-notes/api-key)
@@ -100,6 +104,78 @@ def load_key(explicit=None):
         return key
     sys.exit("No API key found. Save one with:\n  python3 make_ass.py --set-api-key\n"
              f"(stored in {key_path()})")
+
+
+# ---------------------------------------------------------------- Claude Code sign-in token
+TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"     # what `claude` reads to sign in without a login folder
+
+
+def token_path():
+    return config_dir() / "claude-code-token"
+
+
+def set_claude_token(token):
+    """Save the sign-in token that `claude setup-token` prints, where only this user can read it. Written all at once.
+    An empty token removes the saved one (signs out). Returns True when saved, False when removed."""
+    token = (token or "").strip()
+    path = token_path()
+    if not token:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return False
+    if any(c.isspace() for c in token):
+        raise ValueError("That has spaces or line breaks in it. Paste just the token, as one piece.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass
+    with fileio.replacing(path) as tmp:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(token + "\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return True
+
+
+def load_claude_token():
+    """The saved Claude Code sign-in token, or None."""
+    try:
+        token = token_path().read_text().strip()
+    except OSError:
+        return None
+    return token or None
+
+
+def set_claude_token_interactive():
+    """make_ass.py --set-claude-token: ask (hidden), then save or, if left empty, remove."""
+    token = prompts.secret("Paste the token that `claude setup-token` printed (input is hidden), then press Return. "
+                           "Leave it empty to remove the saved one: ", id="claude-code-token")
+    try:
+        saved = set_claude_token(token)
+    except ValueError as e:
+        sys.exit(f"{e} Nothing saved.")
+    if saved:
+        print(f"Saved to {token_path()} (readable only by you). Claude Code will use it to sign in.")
+    else:
+        print("Removed the saved token (if there was one). Claude Code is signed in only as far as its own sign-in goes.")
+
+
+def claude_env():
+    """The environment `claude` is run in: the subscription, not a key, and the saved sign-in token unless the
+    environment already has one."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("ANTHROPIC_API_KEY", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")}
+    if not env.get(TOKEN_ENV):
+        token = load_claude_token()
+        if token:
+            env[TOKEN_ENV] = token
+    return env
 
 
 # ---------------------------------------------------------------- which backend
@@ -266,8 +342,7 @@ def call_claude_code(model, system, content, effort=None, timeout=CLAUDE_CODE_TI
         cmd += ["--tools", ""]
     if max_turns:
         cmd += ["--max-turns", str(max_turns)]
-    env = {k: v for k, v in os.environ.items()
-           if k not in ("ANTHROPIC_API_KEY", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")}   # the subscription, not a key
+    env = claude_env()                           # the subscription, not a key; plus the saved sign-in token
     try:
         r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=timeout, cwd=workdir or None, env=env)

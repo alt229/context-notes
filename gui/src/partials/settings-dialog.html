@@ -2,49 +2,80 @@
   <div class="dhead"><h2 id="settingsTitle">Settings</h2>
     <button type="button" class="btn quiet" data-close>Close</button></div>
   <div class="dbody">
-    <section>
-      <h2>Where Claude runs</h2>
+    <section id="claudeSection">
+      <h2>Claude</h2>
       <label class="choice"><input type="radio" name="backend" value="claude-code">
         <span>Claude Code, on my Claude subscription <small id="claudeCodeStatus"></small></span></label>
       <label class="choice"><input type="radio" name="backend" value="api">
         <span>My Anthropic API key <small>Billed per use as API credits, separately from a subscription.</small></span></label>
       <p class="msg" id="backendMsg" role="status"></p>
-      <p class="hint">Saved as soon as you choose. Claude Code is the <code>claude</code> command from
-        <a href="https://claude.com/claude-code" target="_blank" rel="noreferrer noopener">claude.com/claude-code</a>;
-        run it once in Terminal to sign in. The same models are used either way.</p>
-    </section>
-    <section>
-      <h2>Anthropic API key</h2>
-      <p id="keyStatus"></p>
-      <label class="field"><span>Paste a new key</span>
-        <input id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
-      <div class="row">
-        <button type="button" class="btn primary" id="saveKeyBtn">Save the key</button>
-        <button type="button" class="btn" id="testKeyBtn">Check the key</button>
+      <p class="hint">Saved as soon as you choose. The same models are used either way.</p>
+
+      <div id="claudeCodeBox" hidden>
+        <p id="claudeStatus" role="status"></p>
+        <button type="button" class="btn" id="checkSignInBtn">Check sign-in</button>
+        <p class="hint" id="claudeSharedNote" hidden>This server is already signed in another way, for example through a
+          shared sign-in folder. You can still paste a token below; if you do, the app uses it instead.</p>
+        <h3>Sign in</h3>
+        <ol class="steps-list">
+          <li>On any computer that has Claude Code, run <code>claude setup-token</code> in Terminal.</li>
+          <li>Sign in in the browser window it opens.</li>
+          <li>Copy the token it prints and paste it here.</li>
+        </ol>
+        <label class="field"><span>Token</span>
+          <input id="claudeToken" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the token"></label>
+        <button type="button" class="btn primary" id="saveTokenBtn">Save the token</button>
+        <p class="msg" id="tokenMsg" role="status"></p>
+        <p class="hint">The token is kept on the server, in a file only the app can read. Saving this box empty
+          removes it, which signs the app out.</p>
       </div>
-      <p class="msg" id="keyMsg" role="status"></p>
-      <p class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a>.
-        API use is billed to your Anthropic account, separately from a Claude subscription.</p>
+
+      <div id="apiKeyBox" hidden>
+        <p id="keyStatus"></p>
+        <label class="field"><span>Paste a new key</span>
+          <input id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
+        <div class="row">
+          <button type="button" class="btn primary" id="saveKeyBtn">Save the key</button>
+          <button type="button" class="btn" id="testKeyBtn">Check the key</button>
+        </div>
+        <p class="msg" id="keyMsg" role="status"></p>
+        <p class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a>.
+          API use is billed to your Anthropic account, separately from a Claude subscription.</p>
+      </div>
     </section>
     <section>
       <h2>OpenSubtitles.com</h2>
       <p>Optional. Used to find subtitles for videos that have none. You need a free account and an API key from
-        <a href="https://www.opensubtitles.com/consumers" target="_blank" rel="noreferrer noopener">opensubtitles.com/consumers</a>.</p>
+        <a href="https://www.opensubtitles.com/consumers" target="_blank" rel="noreferrer noopener">opensubtitles.com/consumers</a>.
+        Their service wants both the API key and your username and password, so fill in all three.</p>
       <p id="osStatus"></p>
       <label class="field"><span>API key</span><input id="osKey" type="password" autocomplete="off"></label>
       <label class="field"><span>Username</span><input id="osUser" type="text" autocomplete="off"></label>
       <label class="field"><span>Password</span><input id="osPass" type="password" autocomplete="off"></label>
       <button type="button" class="btn" id="saveOsBtn">Save and test the login</button>
       <p class="msg" id="osMsg" role="status"></p>
+      <p class="hint">These are kept in a file on the server, readable only by the app.</p>
     </section>
     <section>
       <h2>VLC extension</h2>
       <p>Loads the notes when you play a video in VLC, with a checkbox for each kind of note.</p>
-      <p id="vlcStatus"></p>
-      <button type="button" class="btn" id="installVlcBtn">Install the VLC extension</button>
-      <p class="msg" id="vlcMsg" role="status"></p>
+      <div id="vlcLocal">
+        <p id="vlcStatus"></p>
+        <button type="button" class="btn" id="installVlcBtn">Install the VLC extension</button>
+        <p class="msg" id="vlcMsg" role="status"></p>
+      </div>
+      <div id="vlcHosted" hidden>
+        <p><a class="btn" id="vlcDownload" href="#">Download the VLC extension</a></p>
+        <p>Put the file in VLC's extensions folder on your own computer:</p>
+        <div class="table-wrap"><table class="where">
+          <tr><th scope="row">macOS</th><td><code>~/Library/Application Support/org.videolan.vlc/lua/extensions/</code></td></tr>
+          <tr><th scope="row">Linux</th><td><code>~/.local/share/vlc/lua/extensions/</code></td></tr>
+          <tr><th scope="row">Windows</th><td><code>%APPDATA%\vlc\lua\extensions\</code></td></tr>
+        </table></div>
+        <p>Then restart VLC and choose <strong>VLC → Extensions → Context Notes</strong>.</p>
+      </div>
     </section>
-    <section>
+    <section id="aboutSection">
       <h2>This computer</h2>
       <p id="aboutText"></p>
     </section>

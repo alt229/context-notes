@@ -118,6 +118,8 @@ def _claude_runs_where_the_test_says(monkeypatch):
     monkeypatch.delenv("CONTEXT_NOTES_BACKEND", raising=False)
     monkeypatch.delenv("CONTEXT_NOTES_CLAUDE_BIN", raising=False)
     monkeypatch.delenv("FAKE_CLAUDE_FAIL", raising=False)
+    monkeypatch.delenv("FAKE_CLAUDE_LOGGED_IN", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
 
 
 class FakeClaude:

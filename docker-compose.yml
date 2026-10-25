@@ -1,0 +1,41 @@
+# Context Notes behind HTTPS. Copy .env.example to .env, fill it in, then:  docker compose up -d --build
+# The page's address (with its key) is in the app's log:  docker compose logs app
+services:
+  app:
+    build:
+      context: .
+      args:
+        PUID: ${PUID:-1000}
+        PGID: ${PGID:-1000}
+        WITH_WHISPER: ${WITH_WHISPER:-0}
+    command: ["python3", "app.py", "--host", "0.0.0.0", "--port", "8080", "--no-browser", "--hosted",
+              "--public-url", "${PUBLIC_URL:-https://${DOMAIN}}",
+              "--key-file", "/home/app/.config/context-notes/app-key"]
+    volumes:
+      - cn_config:/home/app/.config/context-notes      # API key, backend choice, OpenSubtitles login, page key
+      - ${CLAUDE_DIR:-claude_config}:/home/app/.claude  # Claude Code's sign-in (a folder of yours, or a volume)
+      - ${MEDIA_DIR:-./media}:/media                    # your films; notes and .ass files are written beside them
+    restart: unless-stopped
+
+  caddy:
+    build: deploy/caddy
+    ports:
+      - "${HTTP_PORT:-80}:80"        # only redirects to HTTPS; move it if another service needs 80
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data                                # certificates; keep this volume so renewals carry on
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  cn_config:
+  claude_config:
+  caddy_data:
+  caddy_config:

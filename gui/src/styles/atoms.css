@@ -1,6 +1,7 @@
 /* Atoms: buttons, inputs, the progress bar, state badges, hints and messages. */
 .btn { font-weight: 600; font-size: 15px; padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--line);
   background: var(--surface); color: var(--ink); cursor: pointer; }
+a.btn { display: inline-block; text-decoration: none; }
 .btn:hover:not(:disabled) { border-color: var(--muted); }
 .btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
 .btn.quiet { background: transparent; border-color: transparent; padding-left: 6px; padding-right: 6px;

@@ -11,7 +11,10 @@ answers with the JSON object the real CLI prints. The reply is the same fabricat
 gives: a few notes for the lines being annotated, or an add/revise/drop set for the frame pass.
 
 Environment:
-    FAKE_CLAUDE_LOG      a file; one JSON line per call is appended: {"argv", "prompt", "cwd"}
+    FAKE_CLAUDE_LOG      a file; one JSON line per call is appended: {"argv", "prompt", "cwd", "oauth_token"}
+                         (oauth_token is the CLAUDE_CODE_OAUTH_TOKEN it was given, or null)
+    FAKE_CLAUDE_LOGGED_IN  "1": `claude auth status --json` says loggedIn true (it also does when CLAUDE_CODE_OAUTH_TOKEN
+                         is set); otherwise it says false
     FAKE_CLAUDE_FAIL     "limit": fail like a plan whose usage limit is reached; "login": fail like a signed-out CLI;
                          "limit-after-N": succeed for the first N calls (counted in FAKE_CLAUDE_LOG), then "limit"
 A flag it doesn't expect, or a call shaped wrongly, exits 3 with the reason on stderr, so the test fails loudly.
@@ -86,7 +89,23 @@ def parse(argv):
     return opts, add_dirs
 
 
+def auth_status(argv):
+    """`claude auth status --json`: the sign-in state, as the real command prints it."""
+    if argv != ["auth", "status", "--json"]:
+        fail(f"unexpected auth arguments {argv!r}")
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") == "invalid":
+        print(json.dumps({"loggedIn": False, "authMethod": "none"}))
+        sys.exit(1)
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("FAKE_CLAUDE_LOGGED_IN") == "1":
+        print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty"}))
+    else:
+        print(json.dumps({"loggedIn": False, "authMethod": "none"}))
+        sys.exit(1)
+
+
 def main():
+    if sys.argv[1:2] == ["auth"]:
+        return auth_status(sys.argv[1:])
     opts, add_dirs = parse(sys.argv[1:])
     for flag in ("-p", "--output-format", "--model", "--system-prompt", "--no-session-persistence", "--tools"):
         if flag not in opts:
@@ -127,7 +146,8 @@ def main():
         if path.exists():
             n += sum(1 for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip())
         with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"argv": sys.argv[1:], "prompt": prompt, "cwd": os.getcwd(), "n": n}) + "\n")
+            f.write(json.dumps({"argv": sys.argv[1:], "prompt": prompt, "cwd": os.getcwd(), "n": n,
+                                "oauth_token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")}) + "\n")
 
     mode = os.environ.get("FAKE_CLAUDE_FAIL", "")
     m = re.fullmatch(r"limit-after-(\d+)", mode)
