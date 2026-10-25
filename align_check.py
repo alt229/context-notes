@@ -7,10 +7,11 @@ note it takes the subtitle lines in the WINDOW seconds before it (default 10) an
 are from the speech in the soundtrack. That catches the stretches where a different cut, a missing scene or a
 sloppy subtitle file puts lines - and so the notes that follow them - early or late.
 
-    python3 align_check.py film.mkv film.en.srt                     notes-<film>.json beside the film
+    python3 align_check.py film.mkv film.en.srt                     the film's notes file, as context_notes.py finds it
     python3 align_check.py film.mkv film.en.srt --original-subs film.de.srt --film-language de
-    python3 align_check.py film.mkv film.srt --fix                   also write <name>.aligned.srt with the
-                                                                     stretches that are out corrected
+    python3 align_check.py film.mkv film.srt --fix                   also write <name>.aligned.srt (in the film's
+                                                                     context-notes folder) with the stretches that
+                                                                     are out corrected
     python3 align_check.py film.mkv film.srt --window 5              look only 5 s back from each note
 
 How: the soundtrack is transcribed once with speech recognition (local, free; cached, and shared with
@@ -20,7 +21,7 @@ language ones with --original-subs, and each line is measured through the origin
 (Plain speech detection - where speech starts, without the words - was tried and dropped: on Amélie, which is in
 sync, it reported eight stretches out of step. Narration and music fool it.)
 Subtitles are never timed to the frame by their makers: lines a few tenths early or late are normal and
-left alone. Results go to "<video> analysis/alignment.txt".
+left alone. Results go to context-notes/<video file name>/analysis/alignment.txt (see workfiles.py).
 """
 import argparse
 import difflib
@@ -36,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import analyze  # noqa: E402
 import languages  # noqa: E402
 import make_ass  # noqa: E402
+import workfiles  # noqa: E402
 
 TOLERANCE = 0.7       # seconds out before a stretch is reported. Lines are timed loosely by their makers: on
                       # Amélie's in-sync subtitles, half of all 10 s windows were within 0.3 s, 3 in 4 within 0.6 s
@@ -170,13 +172,15 @@ def corrections(cues, offset, runs, window):
     return out
 
 
-def fixed_path(srt):
-    """film.en.srt -> film.en.aligned.srt; film.en.aligned.srt stays film.en.aligned.srt (a backup is kept), and
-    film.en.aligned.first600s.srt stays that, so a fix to part of a film never passes for a whole-film one."""
+def fixed_path(srt, video=None):
+    """film.en.srt -> film.en.aligned.srt in the video's working folder; film.en.aligned.srt stays film.en.aligned.srt
+    where it is (a backup is kept), and film.en.aligned.first600s.srt stays that, so a fix to part of a film never
+    passes for a whole-film one."""
     srt = Path(srt)
     m = re.search(r"\.aligned(\.first\d+s)?$", srt.stem)
-    base, tag = (srt.stem[:m.start()], m.group(1) or "") if m else (srt.stem, "")
-    return srt.with_name(base + ".aligned" + tag + ".srt")       # a --limit file keeps its .firstNNNs tag
+    if m:
+        return srt                                               # a --limit file keeps its .firstNNNs tag
+    return workfiles.folder_for(srt, video) / (srt.stem + ".aligned.srt")
 
 
 # ---------------------------------------------------------------- putting it together
@@ -229,8 +233,8 @@ def run_check(video, srt, notes_path, original=None, film_lang=None, window=10.0
                  f"--original-subs and the lines are measured through them.")
 
     analyze.need_ffmpeg()
-    folder = video.parent / f"{video.stem} analysis"
-    folder.mkdir(exist_ok=True)
+    folder = workfiles.analysis(video)
+    workfiles.make_dirs(folder)
     duration, astream, _ = analyze.probe(video)
     if limit and limit >= duration:
         limit = None
@@ -274,7 +278,7 @@ def run_check(video, srt, notes_path, original=None, film_lang=None, window=10.0
 
     fixed = None
     if runs and fix:
-        fixed = fixed_path(srt)
+        fixed = fixed_path(srt, video)
         if fixed.exists():
             backup = analyze_backup(fixed)
             summary.append(f"  Kept the previous {fixed.name} as {backup.name}.")
@@ -313,7 +317,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("video")
     ap.add_argument("srt", help="the subtitles the notes are placed on")
-    ap.add_argument("notes", nargs="?", help="notes file (default: the one beside the video, as context_notes.py finds it)")
+    ap.add_argument("notes", nargs="?", help="notes file (default: the video's, as context_notes.py finds it)")
     ap.add_argument("--original-subs", metavar="SRT",
                     help="for subtitles not in the spoken language: the original-language subtitles to measure through")
     ap.add_argument("--film-language", metavar="LANG", help="language spoken (default: the notes file's, else en)")
@@ -323,7 +327,8 @@ def main(argv=None):
     ap.add_argument("--model", help="speech model for transcribing (default: base.en, or small for other languages)")
     ap.add_argument("--limit", type=make_ass.duration_arg, metavar="TIME", help="only the first part, e.g. 20:00")
     ap.add_argument("--fix", action="store_true",
-                    help="write <subtitles>.aligned.srt with the out-of-step stretches moved (original untouched)")
+                    help="write <subtitles>.aligned.srt (in the video's context-notes folder) with the out-of-step "
+                         "stretches moved (original untouched)")
     a = ap.parse_args(argv)
     video, srt = Path(a.video), Path(a.srt)
     for p in (video, srt) + ((Path(a.original_subs),) if a.original_subs else ()):

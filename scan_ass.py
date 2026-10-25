@@ -28,6 +28,7 @@ from pathlib import Path
 
 import dedupe
 import make_ass
+import workfiles
 
 FLOOR = make_ass.DEFAULT_TIMING["min"]
 TOLERANCE = 0.25
@@ -113,10 +114,14 @@ def scan(path):
 
 
 def notes_file(path):
-    """The notes file this .ass was built from (notes-<stem>.json, or a variant such as .aligned.json), newest first."""
+    """The notes file this .ass was built from (notes-<stem>.json, or a variant such as .aligned.json), in the
+    video's working folder (context-notes/<video file name>/) or beside it, newest first."""
     stem = path.name[:-len(".notes.ass")]
     names = {stem, stem.split()[0]}                       # "S01E01 Yesterdays Jam" also matches "notes-S01E01.json"
-    found = [p for name in names for p in path.parent.glob(f"notes-{name}*.json") if not p.name.endswith(".bak")]
+    work = path.parent / workfiles.FOLDER
+    dirs = [path.parent] + ([d for d in sorted(work.iterdir()) if d.is_dir() and d.name.startswith(stem + ".")]
+                            if work.is_dir() else [])
+    found = [p for d in dirs for name in names for p in d.glob(f"notes-{name}*.json") if not p.name.endswith(".bak")]
     return max(found, key=lambda p: p.stat().st_mtime) if found else None
 
 

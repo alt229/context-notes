@@ -543,27 +543,79 @@ def subtitle_setup(cues, film_language=None, original_srt=None, say=print):
 def pick_up_choice(partial, srt_path, cues, film_language, limit, auto):
     """Notes from a run that stopped part-way are kept in <notes>.partial.json. If there is one for these subtitles,
     ask whether to pick up where it left off (the default: only the rest is sent) or start again.
-    Returns (the notes already written, the last subtitle line they cover); ([], 0) to start from the beginning."""
+    Returns (the notes already written, the last subtitle line they cover, the parts whose replies couldn't be
+    read); ([], 0, []) to start from the beginning."""
     if not partial.exists():
-        return [], 0
+        return [], 0, []
     try:
         kept = json.loads(partial.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return [], 0
+        return [], 0, []
     if not isinstance(kept, dict) or not kept.get("through_line") or not kept.get("notes"):
         print(f"(Not picking up from {partial.name}: it doesn't record where the last run stopped.)")
-        return [], 0
+        return [], 0, []
     same = (kept.get("subtitles") == Path(srt_path).name and kept.get("limit") == (round(limit, 1) if limit else None)
             and languages.code(kept.get("film_language") or "en") == languages.code(film_language or "en"))
     if not same:
         print(f"(Not picking up from {partial.name}: it was written from other subtitles or settings.)")
-        return [], 0
+        return [], 0, []
     notes, through = kept["notes"], int(kept["through_line"])
     pick = prompts.ask(f"The last run stopped after Claude had written {len(notes)} notes, up to line {through} of "
                        f"{cues[-1]['n']} (kept in {partial.name}). Pick up where it left off?",
                        {"p": "pick up where it left off (sends only the rest)", "s": "start again (sends everything)"},
                        "p", auto, id="generate.resume")
-    return (notes, through) if pick == "p" else ([], 0)
+    return (notes, through, list(kept.get("unreadable") or [])) if pick == "p" else ([], 0, [])
+
+
+def failed_reply_path(notes_path, k):
+    """Where a reply that couldn't be read is kept: <notes>.part<k>.failed.txt, or .failed2.txt and so on, so an
+    earlier one is never overwritten."""
+    n = 1
+    while True:
+        p = Path(notes_path).with_suffix(f".part{k}.failed{'' if n == 1 else n}.txt")
+        if not p.exists():
+            return p
+        n += 1
+
+
+def unreadable_parts(spec, cues):
+    """The stretches of lines whose replies couldn't be read when the notes were written ("unreadable" in the notes
+    file: [{"lines": [first, last], "reply": the reply, saved}]), as (first, last) within these subtitles."""
+    have = {c["n"] for c in cues}
+    out = []
+    for u in (spec or {}).get("unreadable") or []:
+        try:
+            lo, hi = int(u["lines"][0]), int(u["lines"][1])
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+        if lo in have:
+            out.append((lo, hi))
+    return out
+
+
+def note_lines(cues, notes):
+    """The subtitle line (from 1) each note is placed on, worked out as the build does (make_ass.place_notes): in
+    order, each quote looked for from the line before. None for a note timed by the clock or not found."""
+    out, last = [], 0
+    for n in notes:
+        idx = None
+        if "at_video" not in n and "at" not in n:
+            if "cue" in n:
+                idx = int(n["cue"]) - 1 if 0 < int(n["cue"]) <= len(cues) else None
+            elif "match" in n:
+                idx = make_ass.find_cue(cues, n["match"], last, int(n.get("occurrence", 1)))
+        if idx is not None:
+            last = idx
+        out.append(None if idx is None else cues[idx]["n"])
+    return out
+
+
+def insert_in_order(cues, notes, new, hi):
+    """`new` (notes for lines up to `hi`) put before the first note placed on a later line. The order matters: the
+    build looks for each quote from the line of the note before it."""
+    lines = note_lines(cues, notes)
+    at = next((i for i, line in enumerate(lines) if line is not None and line > hi), len(notes))
+    return notes[:at] + new + notes[at:]
 
 
 def same_subtitles(name):
@@ -573,8 +625,9 @@ def same_subtitles(name):
 
 def notes_to_extend(notes_path, srt_path, cues, film_language, limit):
     """Notes written for only the first part of a film (--limit), now wanted for more of it: the existing notes file
-    to keep and add to. Returns (its spec, its notes without the intro, the last subtitle line they cover); exits if
-    they can't be added to; (spec, [], None) if they already cover what's asked."""
+    to keep and add to; also notes whose replies couldn't be read ("unreadable"), to send those lines again.
+    Returns (its spec, its notes without the intro, the last subtitle line they cover, or None when they cover what's
+    asked); exits if they can't be added to."""
     try:
         spec = json.loads(make_ass.read_text(notes_path))
     except (OSError, ValueError):
@@ -582,7 +635,8 @@ def notes_to_extend(notes_path, srt_path, cues, film_language, limit):
     if not isinstance(spec, dict) or not spec.get("notes"):
         sys.exit(f"{Path(notes_path).name} has no notes to add to; leave off --extend to write them.")
     had = spec.get("limit")
-    if not had or (limit and limit <= had + 1):
+    more = bool(had) and not (limit and limit <= had + 1)
+    if not more and not spec.get("unreadable"):
         return spec, [], None
     if languages.code(spec.get("film_language") or "en") != languages.code(film_language or "en"):
         sys.exit(f"Can't add to {Path(notes_path).name}: it was written for a film in another language. "
@@ -590,10 +644,12 @@ def notes_to_extend(notes_path, srt_path, cues, film_language, limit):
     if spec.get("subtitles") and same_subtitles(spec["subtitles"]) != same_subtitles(Path(srt_path).name):
         sys.exit(f"Can't add to {Path(notes_path).name}: it was written from {spec['subtitles']}, not "
                  f"{Path(srt_path).name}. Use --force to start again.")
+    kept = [n for n in spec["notes"] if str(n.get("category", "")).lower() != "about these notes"]
+    if not more:
+        return spec, kept, None
     covered = make_ass.limit_cues(cues, had)
     if not covered:
         sys.exit(f"{Path(notes_path).name} covers none of these subtitles. Use --force to start again.")
-    kept = [n for n in spec["notes"] if str(n.get("category", "")).lower() != "about these notes"]
     return spec, kept, covered[-1]["n"]
 
 
@@ -612,9 +668,11 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     if not cues:
         sys.exit(f"No subtitle lines start in the first {make_ass.fmt_limit(limit)} of {srt_path}.")
     base = None                                  # with extend: the notes file being added to
+    gaps = []                                    # with extend: (first, last) lines whose replies couldn't be read
     if extend and Path(notes_path).exists():
         base, kept_notes, kept_through = notes_to_extend(notes_path, srt_path, cues, film_language, limit)
-        if kept_through is None:
+        gaps = unreadable_parts(base, cues)
+        if kept_through is None and not gaps:
             print(f"{Path(notes_path).name} already covers "
                   f"{('the first ' + make_ass.fmt_limit(limit)) if limit else 'the whole video'}: nothing to add, "
                   f"nothing sent.")
@@ -626,11 +684,20 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     if limit:
         print(f"Limited to the first {make_ass.fmt_limit(limit)}: {len(cues)} of {len(all_cues)} lines.")
     partial = Path(notes_path).with_suffix(".partial.json")
-    earlier, through = pick_up_choice(partial, srt_path, cues, film_language, limit, assume_yes or estimate_only)
+    earlier, through, unread = pick_up_choice(partial, srt_path, cues, film_language, limit,
+                                              assume_yes or estimate_only)
+    if through:
+        gaps = []                                # picking up: they stay recorded (unread) for the next run to offer
     if base is not None and not through:
-        earlier, through = kept_notes, kept_through
-        print(f"Keeping the {len(earlier)} notes for the first {make_ass.fmt_limit(base['limit'])} (up to line "
-              f"{through}); only the lines after them are sent.")
+        earlier, through = kept_notes, kept_through or cues[-1]["n"]
+        unread = [u for u in base.get("unreadable") or []      # outside what's asked (--limit): still recorded
+                  if not isinstance(u, dict) or tuple((u.get("lines") or [None, None])[:2]) not in gaps]
+        if kept_through:
+            print(f"Keeping the {len(earlier)} notes for the first {make_ass.fmt_limit(base['limit'])} (up to line "
+                  f"{through}); only the lines after them are sent.")
+        if gaps:
+            print(f"Sending again only the lines whose replies couldn't be read last time: "
+                  f"{', '.join(f'{lo} to {hi}' for lo, hi in gaps)}.")
     # Parts are made from the lines not yet covered, so a pick-up or an addition never sends a line twice. (For a
     # stopped run that's the same split as the first time: a new part starts from nothing either way.)
     rest = [c for c in cues if c["n"] > through]
@@ -638,10 +705,12 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     first = 1 + sum(1 for p in all_parts if p[-1]["n"] <= through)
     todo = chunks(rest, extra)
     parts = first - 1 + len(todo)
-    send = rest
+    again = [p for lo, hi in gaps for p in chunks([c for c in cues if lo <= c["n"] <= hi], extra)]
+    send = [c for p in again for c in p] + rest
     if first > 1 and base is None:
         print(f"Picking up where the last run stopped: {len(earlier)} notes kept; part {first} of {parts} is next.")
-    n_send, est_in, est_out = estimate(send, extra) if send else (0, 0, 0)
+    pieces = [estimate(p, extra) for p in again] + ([estimate(rest, extra)] if rest else [])
+    n_send, est_in, est_out = [sum(x[i] for x in pieces) for i in range(3)] if pieces else (0, 0, 0)
     c = cost(model, est_in, est_out)
     print(f"Plan: {len(send)} lines in {n_send} request(s) to {model}; about {est_in:,} tokens in and "
           f"{est_out:,} out" + (f", roughly ${c:.2f} in API credits." if c is not None else "."))
@@ -671,14 +740,17 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     prev_tail = [c for c in cues if c["n"] <= through][-CONTEXT_LINES:]
     done_line = through                          # the last subtitle line whose part is finished
     done_parts = first - 1
+    pending = [[p[0]["n"], p[-1]["n"]] for p in again]       # to send again, and not sent yet
 
     def save_partial():
         """After every part, so even a run that ends without warning (the window closed, the computer lost power)
         leaves what was paid for, and the next run can pick up there."""
         if notes:
+            missing = unread + [{"lines": g} for g in pending]
             make_ass.write_text_safely(partial, json.dumps(
                 {"notes": notes, "through_line": done_line, "subtitles": Path(srt_path).name,
-                 "film_language": film_language, "limit": round(limit, 1) if limit else None, "model": model},
+                 "film_language": film_language, "limit": round(limit, 1) if limit else None, "model": model,
+                 **({"unreadable": missing} if missing else {})},
                 indent=1, ensure_ascii=False))
 
     def keep_partial():
@@ -687,14 +759,25 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
             print(f"\n  Stopped after part {done_parts} of {parts}. The {len(notes)} notes written so far "
                   f"were saved to {partial.name}; the next run offers to pick up from there.", flush=True)
 
+    jobs = [(None, p) for p in again] + list(enumerate(todo, first))       # (part number, or None: sent again)
+    done_before = first - 1 if todo else 0
+    total = done_before + len(jobs)
     try:
-        for k, part in enumerate(todo, first):
+        for i, (k, part) in enumerate(jobs):
             lo, hi = part[0]["n"], part[-1]["n"]
-            prompts.progress("generate", k - 1, parts, "requests")     # before the line below, which stays open
-            print(f"  part {k}/{parts}: lines {lo}-{hi} ...", end=" ", flush=True)
+            prompts.progress("generate", done_before + i, total, "requests")    # before the line below (stays open)
+            if k is None:                        # lines whose reply couldn't be read before: only earlier context
+                number = next((j for j, p in enumerate(all_parts, 1) if p[0]["n"] <= lo <= p[-1]["n"]), 1)
+                print(f"  part {number}/{len(all_parts)} again: lines {lo}-{hi} ...", end=" ", flush=True)
+                before = [n for n, line in zip(notes, note_lines(cues, notes)) if line is not None and line < lo]
+                message = user_message(title, part, [c for c in cues if c["n"] < lo][-CONTEXT_LINES:], before,
+                                       number, len(all_parts), extra)
+            else:
+                number = k
+                print(f"  part {k}/{parts}: lines {lo}-{hi} ...", end=" ", flush=True)
+                message = user_message(title, part, prev_tail, notes, k, parts, extra)
             try:
-                reply = call_api(key, model, system, user_message(title, part, prev_tail, notes, k, parts, extra), api_url,
-                                 max_tokens=max_tokens, effort=effort)
+                reply = call_api(key, model, system, message, api_url, max_tokens=max_tokens, effort=effort)
             except SystemExit:                               # an API error: keep what was paid for
                 keep_partial()
                 raise
@@ -702,26 +785,32 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
             tin += usage.get("input_tokens", 0)
             tout += usage.get("output_tokens", 0)
             if reply.get("stop_reason") == "refusal":
-                problems.append(f"part {k}: the model declined to write notes for these lines")
+                problems.append(f"part {number}: the model declined to write notes for these lines")
             text = "".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text")
             raw_notes = extract_objects(text)
             kept, part_notes = 0, []
             for r in raw_notes:
                 note, why = check_note(r, cues, lo, hi)
                 if note is None:
-                    problems.append(f"part {k}: dropped a note ({why})")
+                    problems.append(f"part {number}: dropped a note ({why})")
                     continue
                 if why:
-                    problems.append(f"part {k}: {why}")
+                    problems.append(f"part {number}: {why}")
                 part_notes.append(note)
                 kept += 1
             if reply.get("stop_reason") == "max_tokens":
-                problems.append(f"part {k}: reply was cut off, so later notes in this part may be missing")
+                problems.append(f"part {number}: reply was cut off, so later notes in this part may be missing")
             if not raw_notes and text.strip() not in ("[]", ""):
-                bad = Path(notes_path).with_suffix(f".part{k}.failed.txt")
+                bad = failed_reply_path(notes_path, number)
                 bad.write_text(text, encoding="utf-8")
-                problems.append(f"part {k}: couldn't read the reply; saved it to {bad.name}")
+                problems.append(f"part {number}: couldn't read the reply; saved it to {bad.name}")
+                unread.append({"lines": [lo, hi], "reply": bad.name})       # the next run offers to send it again
             print(f"{kept} notes")
+            if k is None:
+                notes = insert_in_order(cues, notes, part_notes, hi)      # in film order: the build relies on it
+                pending.remove([lo, hi])
+                save_partial()
+                continue
             prev_tail = part[-CONTEXT_LINES:]
             notes.extend(part_notes)             # a part counts once all of it is in, so a stop never splits one
             done_line, done_parts = hi, k
@@ -730,7 +819,7 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     except KeyboardInterrupt:                    # Ctrl-C, or a GUI's Cancel, at any point: keep what was paid for
         keep_partial()
         raise
-    prompts.progress("generate", parts, parts, "requests")
+    prompts.progress("generate", total, total, "requests")
 
     ms = int(round(cues[0]["start"] * 1000))
     earlier_model = (base or {}).get("generated_by")
@@ -757,6 +846,9 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     if year:
         spec["year"] = int(year)
     spec.pop("notes", None)
+    spec.pop("unreadable", None)
+    if unread:
+        spec["unreadable"] = unread              # lines with no notes yet: the next run offers to send them again
     spec["notes"] = [intro] + notes
     make_ass.write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
     try:
@@ -769,6 +861,9 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     print(f"Used {tin:,} input and {tout:,} output tokens" + (f" (about ${actual:.2f})." if actual is not None else "."))
     for p in problems:
         print("  ! " + p)
+    if unread:
+        print(f"  The lines of {len(unread)} part(s) have no notes yet. The next run offers to send just those again "
+              f"(by hand: the same make_ass.py command with --generate --extend).")
     if not notes:
         sys.exit("No usable notes came back.")
     return spec

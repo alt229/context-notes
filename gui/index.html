@@ -178,6 +178,8 @@ ul.entries button { display: block; width: 100%; text-align: left; padding: 8px 
 ul.entries button:hover { background: var(--bg); }
 ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
 .dfoot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
+.tidyvideo { margin: 8px 0 2px; font-weight: 600; overflow-wrap: anywhere; }
+.tidyfiles { margin: 0 0 8px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 
 @media (max-width: 820px) {
   .columns { grid-template-columns: 1fr; gap: 26px; }
@@ -215,6 +217,7 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
     <div class="note right" id="noteRight" hidden>
       <div><span class="label"></span></div>
       <div class="text"></div>
+      <div class="acts" hidden></div>
       <div class="bar"><span></span></div>
     </div>
     <div class="titlecard">
@@ -342,6 +345,20 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
   <div class="dfoot">
     <button type="button" class="btn" id="upBtn">Up one folder</button>
     <button type="button" class="btn primary" id="useFolderBtn">Use this folder</button>
+  </div>
+</dialog>
+
+<dialog id="tidy" aria-labelledby="tidyTitle">
+  <div class="dhead"><h2 id="tidyTitle">Tidy up</h2>
+    <button type="button" class="btn quiet" data-close>Close</button></div>
+  <div class="dbody">
+    <p id="tidyIntro"></p>
+    <ul class="entries" id="tidyList"></ul>
+    <p class="msg" id="tidyMsg" role="status"></p>
+  </div>
+  <div class="dfoot">
+    <button type="button" class="btn" id="tidyNo">Not now</button>
+    <button type="button" class="btn primary" id="tidyBtn">Move them</button>
   </div>
 </dialog>
 
@@ -569,7 +586,9 @@ function describe(v) {
     notes = plural(v.notes, "note") + (v.limit ? ` for the first ${clock(v.limit)}` : "");
     if (v.refined === "yes") notes += ", with the frames looked at";
     if (v.refined === "stopped") notes += "; looking at the frames stopped part-way";
+    if (v.refine_unreadable) notes += `; Claude's reply about ${v.refine_unreadable} ${v.refine_unreadable === 1 ? "stretch" : "stretches"} of frames couldn't be read, so the next run sends just those again`;
   } else notes = v.notes_stopped ? "Writing the notes stopped part-way" : "No notes yet";
+  if (v.unreadable) notes += `. Claude's reply for ${plural(v.unreadable, "part")} couldn't be read, so those lines have no notes yet; the next run sends just those again`;
   if (v.rebuild) notes += ". The subtitle file needs a rebuild for these settings (free)";
   const subs = v.subtitles ? `Subtitles: ${v.subtitles}` : "No subtitles beside it yet; it will look inside the video, then online";
   return `${notes}. ${subs}.`;
@@ -627,6 +646,10 @@ function readyScreen() {
     + `${videos.length - ready - rebuild} to do.`;
   title(name, sub);
   hideNote("right");
+  const old = videos.filter((v) => v.tidy > 0).length;
+  if (old) note("right", "Tidy up", (one ? "This film still has its" : `${plural(old, "film")} here still have their`)
+    + " working files beside the video, where an earlier version left them. They work there; Tidy moves them into a "
+    + "context-notes folder.", [el("button", { type: "button", class: "primary", onclick: openTidy }, "Tidy…")]);
   if (!keepNote) {
     if (info && !info.key.found) note("left", "Before you start", "Add your Anthropic API key in Settings. It's only needed when Claude writes notes.");
     else if (videos.length && ready === videos.length) note("left", "Ready", "Everything here has notes. Open a video in VLC from the list.");
@@ -883,6 +906,48 @@ async function loadDir(path) {
   $("entries").replaceChildren(...items);
 }
 
+// ---------------------------------------------------------------- tidy (tidy.py)
+function tidyTarget() { return { path: $("path").value.trim(), recursive: $("recursive").checked }; }
+async function openTidy() {
+  $("tidyIntro").textContent = "Looking…";
+  $("tidyList").replaceChildren();
+  $("tidyMsg").textContent = "";
+  $("tidyMsg").className = "msg";
+  $("tidyBtn").hidden = false;
+  $("tidyBtn").disabled = true;
+  $("tidyNo").textContent = "Not now";
+  $("tidy").showModal();
+  const r = await api("/api/tidy", tidyTarget());
+  if (r.error) { $("tidyIntro").textContent = r.error; $("tidyBtn").hidden = true; return; }
+  const items = r.videos.reduce((n, v) => n + v.items.length, 0);
+  if (!items) { $("tidyIntro").textContent = "Nothing to tidy here."; $("tidyBtn").hidden = true; return; }
+  $("tidyIntro").textContent = `${plural(items, "item")} for ${plural(r.videos.length, "video")} move into a `
+    + "context-notes folder beside the videos, one folder for each video. They're moved as they are: nothing is "
+    + "changed or deleted, and the notes keep working. Beside each video stay the notes for VLC and Plex and its "
+    + "subtitles.";
+  $("tidyList").replaceChildren(...r.videos.map((v) => el("li", {},
+    el("p", { class: "tidyvideo" }, baseName(v.video)),
+    el("p", { class: "tidyfiles" }, v.items.map((i) => i.folder ? `${i.from}/ (becomes ${i.to}/)` : i.from).join(" · ")))));
+  if (r.skipped.length) $("tidyMsg").textContent = "Staying where they are: "
+    + r.skipped.map((s) => `${baseName(s.path)} (${s.reason})`).join("; ");
+  $("tidyBtn").disabled = false;
+  $("tidyBtn").focus();
+}
+async function doTidy() {
+  $("tidyBtn").disabled = true;
+  $("tidyMsg").className = "msg";
+  $("tidyMsg").textContent = "Moving…";
+  const r = await api("/api/tidy", { ...tidyTarget(), move: true });
+  const d = r.done || { moved: 0, problems: [] };
+  if (r.error) { $("tidyMsg").textContent = r.error; $("tidyMsg").className = "msg bad"; $("tidyBtn").disabled = false; return; }
+  $("tidyMsg").textContent = `Moved ${plural(d.moved, "item")}.` + (d.problems.length ? " Left where they are: "
+    + d.problems.map((p) => `${baseName(p.path)} (${p.reason})`).join("; ") : "");
+  $("tidyMsg").className = d.problems.length ? "msg bad" : "msg ok";
+  $("tidyBtn").hidden = true;
+  $("tidyNo").textContent = "Done";
+  refresh();
+}
+
 // ---------------------------------------------------------------- VLC and folders
 async function openVlc(v) {
   const r = await api("/api/vlc/open", { path: v.path });
@@ -967,6 +1032,8 @@ $("keyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") saveKe
 $("testKeyBtn").addEventListener("click", testKey);
 $("saveOsBtn").addEventListener("click", saveOs);
 $("installVlcBtn").addEventListener("click", installVlc);
+$("tidyBtn").addEventListener("click", doTidy);
+$("tidyNo").addEventListener("click", () => $("tidy").close());
 $("pickFile").addEventListener("click", () => pick("file"));
 $("pickFolder").addEventListener("click", () => pick("folder"));
 $("browseBtn").addEventListener("click", openBrowser);
@@ -974,11 +1041,11 @@ $("useFolderBtn").addEventListener("click", () => { $("browser").close(); setPat
 $("path").addEventListener("change", () => { remember(); refresh(); });
 $("path").addEventListener("keydown", (e) => { if (e.key === "Enter") { remember(); refresh(); } });
 $("note_background").addEventListener("change", showOpacity);
-for (const id of ["recursive", "film_language", "subs_language", "limit", "refine", "redo", "spw", "note_background",
-                  "opacity"]) {
+for (const id of ["recursive", "film_language", "subs_language", "show_subs", "limit", "refine", "redo", "spw",
+                  "note_background", "opacity"]) {
   $(id).addEventListener("change", () => { remember(); refresh(); });
 }
-for (const id of ["show_subs", "notes_language", "show", "check_alignment", "dense", "autoSend"]) $(id).addEventListener("change", remember);
+for (const id of ["notes_language", "show", "check_alignment", "dense", "autoSend"]) $(id).addEventListener("change", remember);
 for (const r of document.querySelectorAll("input[name=quality]")) r.addEventListener("change", remember);
 $("runBtn").addEventListener("click", run);
 $("cancelBtn").addEventListener("click", cancel);

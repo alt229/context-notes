@@ -42,6 +42,7 @@ import generate_notes  # noqa: E402  (where the API key lives)
 import languages  # noqa: E402
 import make_ass  # noqa: E402
 import prompts  # noqa: E402
+import workfiles  # noqa: E402
 
 PAGE = HERE / "gui" / "index.html"
 QUALITY = {"best": ["--model", "claude-opus-5-5", "--effort", "high"],
@@ -187,7 +188,7 @@ def browse(text):
                 "error": f"Can't open this folder: {e.strerror or e}"}
     dirs, videos = [], []
     for e in entries:
-        if e.name.startswith("."):
+        if e.name.startswith(".") or e.name == workfiles.FOLDER:        # working files: nothing to choose in there
             continue
         try:
             if e.is_dir():
@@ -604,6 +605,23 @@ class App:
             self.job = Job(script("context_notes.py", *args))
             return 200, {"ok": True}
 
+    def tidy(self, o):
+        """What earlier versions left beside the videos (tidy.py): listed, or with o["move"] moved into their
+        context-notes folders. Not while a run is going: it may be using those files."""
+        with self.lock:
+            if self.job and self.job.running:
+                return 409, {"error": "Something is running. Wait for it to finish, or cancel it, then tidy."}
+            p = clean_path(o.get("path"))
+            if p is None or not p.exists():
+                return 400, {"error": "Choose a film or a folder first."}
+            args = [p, *(["--recursive"] if o.get("recursive") and p.is_dir() else []),
+                    "--yes" if o.get("move") else "--dry-run"]
+            code, lines, events = run_quietly(script("tidy.py", *args), timeout=600)
+        return 200, {"videos": [e for e in events if e.get("type") == "tidy"],
+                     "skipped": [e for e in events if e.get("type") == "tidy-skip"],
+                     "done": next((e for e in events if e.get("type") == "tidy-done"), None),
+                     "ok": code == 0, "lines": lines}
+
     def set_key(self, key):
         key = str(key or "").strip()
         if not key:
@@ -731,6 +749,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, status(o))
         if path == "/api/run":
             return self._send(*app.run(o))
+        if path == "/api/tidy":
+            return self._send(*app.tidy(o))
         if path == "/api/answer":
             ok = bool(app.job and app.job.answer(o.get("answer", "")))
             return self._send(200 if ok else 409, {"ok": ok})

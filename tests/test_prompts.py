@@ -278,4 +278,4 @@ def test_a_gui_can_drive_the_whole_wrapper(tmp_path, clip, api, api_key_file, ho
     finished = {e["task"] for e in evs if e["type"] == "progress" and e["total"] and e["done"] == e["total"]}
     assert {"soundtrack", "generate", "frames", "refine"} <= finished
     assert (tmp_path / "ep.notes.ass").exists() and "Ready: play ep.mp4" in out
-    assert json.loads((tmp_path / "notes-ep.json").read_text())["refined"]
+    assert json.loads((tmp_path / "context-notes" / "ep.mp4" / "notes-ep.json").read_text())["refined"]

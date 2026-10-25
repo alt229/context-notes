@@ -4,19 +4,22 @@
 The chat sees exactly what the API step would: the same instructions, the same numbered lines, the same parts.
 
   1. python3 chat_notes.py prepare film.mkv film.srt [--film-language de --original-subs film.de.srt] [--title "..."]
-        -> film.chat-upload.txt   upload this file to a chat in the Project and say "go all"; if a reply ends with
+        -> context-notes/film.mkv/film.chat-upload.txt
+                                  upload this file to a chat in the Project and say "go all"; if a reply ends with
                                   "CONTINUE FROM PART k", say "go all" again
   2. paste every reply, one after another, into one text file, e.g. film.chat-replies.txt
      (to improve a thin part, say "redo k" in the chat and paste that reply at the end: the last PART k wins)
   3. python3 chat_notes.py collect film.mkv film.srt film.chat-replies.txt [same --film-language/--original-subs]
-        -> notes-<video name>.json beside the video (checked: every quote is looked up in the subtitles)
+        -> the video's notes file, context-notes/film.mkv/notes-film.json (checked: every quote is looked up in
+           the subtitles). An older one beside the video is replaced where it is (with --force).
   4. either build the subtitles with no API use at all:
-        python3 make_ass.py film.srt notes-film.json --video film.mkv
+        python3 make_ass.py film.srt --video film.mkv
      or let the API add the on-screen notes (the refine step only; generate is skipped because the notes exist):
         python3 context_notes.py film.mkv --model claude-opus-5-5 --effort high
 
 Or let Claude Code write them on your subscription: /notes in this project folder runs the note-writer agent once
 per part (chat_notes.py show prints a part for it), each reply saved as <folder>/part-<k>.txt; collect takes the folder.
+(Everything this writes goes in the video's working folder: see workfiles.py.)
 
 For a film not in English that you watch with English subtitles: give the English file as SRT and the original as
 --original-subs, with --film-language (e.g. de). Use the same files and options in both steps.
@@ -32,6 +35,7 @@ sys.path.insert(0, str(HERE))
 import dedupe  # noqa: E402
 import generate_notes as gn  # noqa: E402
 import make_ass  # noqa: E402
+import workfiles  # noqa: E402
 
 MARK = "CONTEXT-NOTES UPLOAD v1"
 
@@ -66,8 +70,9 @@ def prepare(a):
         out.append(f"=== PART {k} OF {len(parts)} (lines {part[0]['n']} to {part[-1]['n']}) ===")
         out += [gn.fmt_line(c, extra) for c in part]
         out.append("")
-    dest = Path(a.out or Path(a.video).with_suffix("").as_posix() + ".chat-upload.txt")
-    dest.write_text("\n".join(out), encoding="utf-8")
+    video = Path(a.video)
+    dest = Path(a.out) if a.out else workfiles.place(video) / f"{video.stem}.chat-upload.txt"
+    make_ass.write_text_safely(dest, "\n".join(out))
     print(f"Wrote {dest} ({len(cues)} lines in {len(parts)} parts, about {sum(map(len, out)) // 4:,} tokens).")
     print("Upload it to a chat in the Project and say \"go all\" (again if a reply ends \"CONTINUE FROM PART k\"). "
           "Paste every reply into one text file.")
@@ -192,7 +197,7 @@ def collect(a):
     notes.sort(key=lambda x: x[0])
     empty = [k for k, p in enumerate(parts, 1) if not any(p[0]["n"] <= c <= p[-1]["n"] for c, _ in notes)]
     video = Path(a.video)
-    dest = Path(a.out) if a.out else video.parent / f"notes-{video.stem}.json"
+    dest = Path(a.out) if a.out else workfiles.notes_path(video, a.srt)
     if dest.exists() and not a.force:
         sys.exit(f"{dest} already exists. Add --force to replace it (the old one is kept as .bak).")
     if dest.exists():

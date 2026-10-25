@@ -47,6 +47,8 @@ Notes appear as small boxed overlays while you watch, in VLC (or any player that
 | `dedupe.py` | Lists notes that explain something an earlier note already did (the build leaves those out). |
 | `chat_notes.py` | Write the dialogue notes in a claude.ai chat or with Claude Code (your subscription) instead of the API. |
 | `languages.py` | Language codes and names shared by the scripts (`fr`, `fre`, `French` are all French). |
+| `tidy.py` | Moves the working files earlier versions left beside your videos into their `context-notes` folders (see [Where the files go](#where-the-files-go)). |
+| `workfiles.py` | Where each script puts a video's working files, and finds them again. |
 | `prompts.py` | How the scripts ask questions: in Terminal as usual, or answered by another program such as a GUI ([docs/gui-protocol.md](docs/gui-protocol.md)). |
 
 ## Requirements
@@ -144,6 +146,9 @@ python3 app.py
   a stopped run, for example). It's sent after 10 seconds unless you press Wait or Don't send, so a whole season can
   run on its own; untick "Send 10 seconds after showing the cost" to always decide yourself. Progress is shown as it
   goes, and Cancel stops it the way Ctrl-C does.
+- **Tidy up.** Films that an earlier version worked on may still have their working files beside the video. The page
+  says so, and Tidy lists what would move into the `context-notes` folder, then moves it when you say (see
+  [Where the files go](#where-the-files-go)).
 - **Watch:** open a finished video in VLC from the list.
 - **Settings** has your Anthropic API key (saved in the usual place), the OpenSubtitles login, and a button that
   installs the VLC extension.
@@ -157,6 +162,42 @@ work as they are. It also runs inside WSL, but there a network drive has to be m
 (`sudo mkdir -p /mnt/y && sudo mount -t drvfs Y: /mnt/y`), and reading from it is slower.
 
 ## Using it
+
+### Where the files go
+
+Beside each video stays only what players use: `<video>.notes.ass` for VLC, its Plex copy `<video>.en.ass`, and real
+subtitles (yours, or ones `find_subs.py` found or downloaded). Everything else goes in one `context-notes` folder
+beside the videos, with a folder for each video:
+
+```
+Parasite.mkv
+Parasite.notes.ass
+Parasite.en.ass
+Parasite.en.srt
+context-notes/
+    Parasite.mkv/
+        notes-Parasite.json          the notes, with their .bak backups, refine report and pick-up files
+        Parasite.embedded.en.srt     subtitles pulled out of the video, re-timed (.aligned) or written by
+                                     speech recognition (.transcribed)
+        Parasite.en.transcript.txt   the numbered transcript
+        analysis/                    sync report, contact sheets, soundtrack and speech-recognition caches
+```
+
+The `context-notes` folder also gets `.plexignore`, `.ignore` and `.embyignore` files, which tell Plex, Jellyfin and
+Emby to skip it when they scan your library (there are no videos in it, only notes and thousands of frames). One
+that's already there is left alone.
+
+Earlier versions left these files beside the video, with the analysis in `<video> analysis/`. A film like that
+carries on exactly as before, and `context_notes.py --status` points it out. `tidy.py` moves its files in:
+
+```bash
+tidy.py "/Volumes/Movies" --recursive --dry-run   # list what would move, and move nothing
+tidy.py "/Volumes/Movies" --recursive             # move it (it asks first; --yes doesn't)
+tidy.py film.mkv                                  # one video
+```
+
+Files are moved as they are, never changed or overwritten. A file whose name is already taken in the folder, or that
+could belong to two videos (`film.mkv` and `film.mp4`), stays where it is and is listed.
 
 ### `context_notes.py`
 
@@ -176,7 +217,7 @@ context_notes.py PATH --note-opacity 50        # a more solid see-through box (0
 
 What it decides for you:
 
-- **Which subtitles.** `<video>.srt`, `<video>.en.srt`, `<video>.English.srt` and so on beside the video; a re-timed `<video>.aligned.srt` if you made one; otherwise the text track inside the video.
+- **Which subtitles.** `<video>.srt`, `<video>.en.srt`, `<video>.English.srt` and so on beside the video; a re-timed `<video>.aligned.srt` (in its `context-notes` folder) if one was made; otherwise the text track inside the video.
 - **Sync.** If the subtitles are early or late by a constant amount, the offset goes into the notes file. If the timing drifts (a different cut or release), it offers to re-time them with `analyze.py --align`, carry on, or skip.
 - **Title.** `IT Crowd/Season 1/S01E03 Fifty Fifty.mp4` becomes "IT Crowd - S01E03 Fifty Fifty", so the title always matches the file.
 - **What's left.** Notes written? Refined? `.ass` older than the notes, or built with a different look? Notes made with `--limit` when you now want the whole thing? It runs only what's missing. When only the `.ass` is behind, it's rebuilt for free; nothing is sent to Claude and no API key is needed.
@@ -209,14 +250,14 @@ analyze.py film.fr.srt --shift -2.5                      # you know the offset: 
 analyze.py film.fr.srt --video film.mkv --shift -2.5     # ...and check the result against the video
 ```
 
-The corrected copy is `<name>.aligned.srt`; your original is never changed, and `context_notes.py` picks the corrected copy up automatically (it also runs `--shift auto` itself when it finds a constant offset). If the offset changes through the film (a different cut), a single shift can't fix it: use `--align`.
+The corrected copy is `<name>.aligned.srt`, in the video's `context-notes` folder; your original is never changed, and `context_notes.py` picks the corrected copy up automatically (it also runs `--shift auto` itself when it finds a constant offset). If the offset changes through the film (a different cut), a single shift can't fix it: use `--align`.
 
 `analyze.py --align --film-language fr` re-times French subtitles with French speech recognition (multilingual `small` model by default). Re-timing only works for subtitles in the language being spoken, so English subtitles for a French film can't be re-timed this way; look for a set made for your release.
 
 ### `make_ass.py`
 
 ```bash
-make_ass.py episode.srt                        # first run: creates a blank notes-<name>.json to fill in
+make_ass.py episode.srt                        # first run: creates a blank notes file to fill in
 make_ass.py episode.srt notes.json --video episode.mp4     # -> episode.notes.ass
                                                             #    and episode.en.ass, the same file named so Plex lists it as
                                                             #    'English (ASS)' instead of 'Unknown' (--no-plex-copy: skip)
@@ -252,7 +293,7 @@ analyze.py film.mkv --sub-lang fr              # extract the French track -> fil
 analyze.py film.fr.srt --video film.mkv --align --film-language fr --limit 5:00
 ```
 
-The soundtrack measurement is cached in the `<video> analysis` folder, so `--refine` after a sync check doesn't decode the audio a second time.
+The soundtrack measurement is cached in the video's `analysis` folder (`context-notes/<video>/analysis/`), so `--refine` after a sync check doesn't decode the audio a second time.
 
 ### No subtitles?
 
@@ -262,7 +303,8 @@ The soundtrack measurement is cached in the `<video> analysis` folder, so `--ref
 OpenSubtitles.com, once you've saved a free login with `find_subs.py --set-opensubtitles` (stored in
 `~/.config/context-notes/opensubtitles.json`, mode 600); a file uploaded for your exact release comes first, since
 its timing will match. Last, it offers to write subtitles from the soundtrack with speech recognition
-(`<film>.<lang>.transcribed.srt`). Whatever it finds is copied beside the video; nothing is moved.
+(`<film>.<lang>.transcribed.srt`, in the video's `context-notes` folder). Whatever it finds is copied beside the
+video, where your player finds it too; nothing is moved.
 
 ### Repeated notes
 
@@ -297,7 +339,7 @@ each finished video once, for free. Options given only to `make_ass.py` by hand 
 
 ```bash
 context_notes.py film.mkv --check-alignment                 # also works on a film that's already done
-align_check.py film.mkv film.de.srt                         # by hand; notes found beside the film
+align_check.py film.mkv film.de.srt                         # by hand; the film's notes file is found for you
 align_check.py film.mkv film.en.srt --original-subs film.de.srt --film-language de
 align_check.py film.mkv film.de.srt --fix                   # -> film.de.aligned.srt, stretches that were out moved
 ```
@@ -306,7 +348,7 @@ The sync check fixes one offset for the whole film. This goes note by note: it f
 10 s before each note (`--window 5` for less) in a speech-recognition transcript of the soundtrack, and reports the
 stretches where those lines are more than 0.7 s early or late. English subtitles on a German film are measured
 through the German ones. The transcript is made once (slow: very roughly a tenth of the running time) and shared with
-`analyze.py --align`. The note-by-note table is in `<video> analysis/alignment.txt`.
+`analyze.py --align`. The note-by-note table is in `context-notes/<video>/analysis/alignment.txt`.
 
 ### Notes file format
 

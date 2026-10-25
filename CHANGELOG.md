@@ -7,6 +7,11 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- `tidy.py FOLDER [--recursive] [--dry-run] [--yes]` moves the working files earlier versions left beside the
+  videos into their `context-notes` folders. It lists them first and asks (`tidy.move`); files are moved as they
+  are, never overwritten, and one that could belong to two videos stays put. `context_notes.py --status` says
+  which videos have such files, and the `status` event has `tidy` (how many). The app shows a Tidy button for
+  them: it lists what would move, then moves it (`/api/tidy`; `tidy`, `tidy-skip` and `tidy-done` events).
 - `context_notes.py --reading-speed WPM`, `--note-background` and `--note-opacity`, passed to every build.
 - The app has "On screen": how long notes stay up, in seconds a word (sent as `--reading-speed`; empty keeps each
   film's own), what's behind the notes, and how solid the see-through box is. A finished film whose `.ass` needs only a rebuild shows "Needs a
@@ -56,6 +61,21 @@ All notable changes to this project are recorded here. The format follows
   (`/notes`, `/check`).
 
 ### Changed
+- A reply Claude sends that can't be read no longer loses that part's notes for good. Its lines are recorded in the
+  notes file (`unreadable`, with the saved reply); the next run asks (`notes.unreadable`) and sends just those lines
+  again, with the lines before them for context and only the notes before them, and puts the new notes in film
+  order. No sync check or frames step is repeated. By hand: `make_ass.py ... --generate --extend`. `--status` and
+  the app say so, and such a video isn't "done". A saved reply is never overwritten (`.part<k>.failed2.txt`).
+  The frames step does the same: a stretch whose reply can't be read is recorded (`refined.unreadable`, with the
+  times), and the next refine asks (`refine.unreadable`) and sends just that stretch, keeping the rest of the
+  record; declining sends nothing.
+- Working files no longer litter the video's folder. Beside the video stay only the `.notes.ass`, its Plex copy and
+  real subtitles; the notes file and its backups, reports, pulled-out and re-timed subtitles, transcripts, chat
+  files and the analysis go in `context-notes/<video file name>/` (`workfiles.py`), with the analysis in
+  `analysis/` there. A film an earlier version started carries on beside the video as before until `tidy.py`
+  moves its files in, and every script finds files in either place. Each `context-notes` folder gets `.plexignore`,
+  `.ignore` (Jellyfin, Emby 4.8) and `.embyignore` (Emby 4.9+), so media servers skip it; one already there is kept. Commands are printed with paths relative to
+  the video's folder. The app's folder browser doesn't list `context-notes` folders.
 - What's done is saved after every request, not only when a run is stopped: a run that ends with no warning (the
   window closed, a crash, a power cut) can pick up after the last request that finished, so what was paid for
   isn't sent again.
@@ -94,6 +114,10 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- Choosing other subtitles to show at the bottom (`--show-subs`, "Subtitles shown at the bottom" in the app) on a
+  finished film did nothing in the app: the film counted as done, so the button was off. `--status` now counts
+  it as a free rebuild ("needs rebuilding (free) to show the English subtitles"), and the page checks again
+  when that choice changes.
 - The app's "Full title (one film only)" field is hidden when a folder is chosen, as it was meant to be.
 - Stopping speech recognition part-way (Ctrl-C) left half a transcript in the `<video> analysis` folder, and the
   next run used it as if it were the whole film. The transcript is now saved only once it's complete. If you ever

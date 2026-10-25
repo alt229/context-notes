@@ -96,6 +96,33 @@ Read `README.md` for the full command reference. This file holds what we've lear
   settings), gets a fresh intro note and a backup, and only the lines after the old limit are sent. Notes files now
   record their `subtitles`; a re-timed `.aligned` copy counts as the same. Refine then sees `refined.limit` short of
   what's asked and looks at only the rest, starting its parts at the old limit.
+- **Unreadable replies are sent again, alone** (Erin, 2026-10-24). A part whose reply has no readable JSON is
+  recorded in the notes file as `unreadable: [{lines: [first, last], reply}]` and its reply kept
+  (`.part<k>.failed.txt`, never overwritten). `context_notes.py` then isn't "done": it asks `notes.unreadable` and
+  runs `--generate --extend`, which sends only those lines (`generate_notes.unreadable_parts`), with the lines just
+  before them as context and only earlier notes listed, and puts the new notes in film order
+  (`insert_in_order`; the build looks for each quote from the note before it, so order matters). No sync check and
+  no frames step for this. The partial file carries the list too.
+  - The frames step records them as `refined.unreadable: [{from, to, reply}]` (video seconds). The next refine
+    asks `refine.unreadable` and sends only the windows that overlap them; the refined record is kept as it was
+    (`_save(record=...)`), and a stop then leaves no `stopped_after` (it would mean "pick up from 0:00"), only the
+    stretches still to send. Declining sends nothing. Notes refine adds are pinned to a time or a line number, so
+    their order doesn't matter.
+- **Working files go in `context-notes/<video file name>/`** (Erin, 2026-10-24: working files "litter the movie
+  folders"; she chose one shared `context-notes` folder per media folder, with a folder per video in it).
+  - Beside the video stay only what players use: `.notes.ass`, the Plex `.en.ass` and real subtitles (hers, or ones
+    `find_subs.py` found or downloaded). Everything else moves: the notes file and its `.bak`, report, partial and
+    failed files; `.embedded`, `.aligned` and `.transcribed` subtitles; transcripts; chat files; `.ass.bak`; and the
+    analysis, as `analysis/`.
+  - `workfiles.py` decides. `folder()` is the new place. `place()` is where new files go: beside the video for a film
+    an earlier version started (`started_before`), so such a film carries on exactly as before until `tidy.py`
+    moves its files (Erin chose a tidy command over moving them on the next run). Reads look in both places
+    (`notes_path`, `find`, `find_near`, `subtitle_files`); a name in both is the folder's copy.
+  - New code that writes a working file uses `workfiles.place()` or `folder_for()`, never `video.parent`, and makes
+    folders with `workfiles.make_dirs()`: the first time, it writes `IGNORE_FILES` into the context-notes folder
+    (Plex `.plexignore`, Jellyfin/Emby 4.8 `.ignore`, Emby 4.9+ `.embyignore`; from their docs, 2026-10-24).
+  - Checked by running the old and new code side by side on synthetic films (13 wrapper runs: same output,
+    requests and files once the paths are mapped), and on films the old code started, untidied and tidied.
 
 ## Known pitfalls
 
@@ -127,8 +154,8 @@ Read `README.md` for the full command reference. This file holds what we've lear
    not the API.
 3. **API keys** live in `~/.config/context-notes/api-key` (mode 600). Erin prefers config files to environment
    variables. Never print a key.
-4. **Originals are never changed.** Scripts write `.aligned.srt`, `.bak` and new files beside the original. Keep it
-   that way in new code.
+4. **Originals are never changed.** Scripts write `.aligned.srt`, `.bak` and other new files into the video's
+   working folder (`workfiles.place()`), never over the original. Keep it that way in new code.
 5. **Test before saying it works.**
    - Run `python3 -m pytest -q` (no network, no API, synthetic clips) and `ruff check` on the files you touched.
    - For anything that measures audio or timing, also try it on real media and report the numbers.

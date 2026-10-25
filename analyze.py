@@ -2,14 +2,17 @@
 """
 analyze.py - prepare a show or film for annotation.
 
+What it writes goes in context-notes/<video file name>/ beside the video (see workfiles.py); below, "W/" is
+that folder. A subtitle file with no video of the same name beside it gets its files beside it instead.
+
 Fast by default (subtitles only, no extra installs):
     python3 analyze.py episode.srt
-        -> episode.transcript.txt     numbered, timestamped dialogue to write notes from
+        -> W/episode.transcript.txt     numbered, timestamped dialogue to write notes from
 
 Video with subtitles built in (mp4, m4v, mov, mkv...): no SRT needed (needs ffmpeg):
     python3 analyze.py episode.mp4
-        -> episode.embedded.srt       the subtitle track, pulled out of the video
-        -> episode.embedded.transcript.txt
+        -> W/episode.embedded.srt       the subtitle track, pulled out of the video
+        -> W/episode.embedded.transcript.txt
     python3 analyze.py episode.mp4 --list-tracks      show the subtitle tracks and stop
     python3 analyze.py episode.mp4 --sub-track 2      pick a track (number from --list-tracks)
     python3 analyze.py episode.mp4 --strip-sdh        drop [laughter], (phone rings), speaker labels
@@ -18,21 +21,21 @@ Video with subtitles built in (mp4, m4v, mov, mkv...): no SRT needed (needs ffmp
 
 Add the video for the slower checks (needs ffmpeg, numpy, pillow):
     python3 analyze.py episode.srt --video episode.mp4
-        -> <video> analysis/report.txt     do the subtitles match this video? how far off?
-                                           loud moments with no dialogue (laughs, sight gags, action)
-        -> <video> analysis/sheets/*.jpg   contact sheets: frames + timestamps + the line being spoken
+        -> W/analysis/report.txt     do the subtitles match this video? how far off?
+                                     loud moments with no dialogue (laughs, sight gags, action)
+        -> W/analysis/sheets/*.jpg   contact sheets: frames + timestamps + the line being spoken
 
     python3 analyze.py episode.srt --video episode.mp4 --frames dense
         -> 4 frames a second instead of keyframes only (more detail, much slower)
 
 Subtitles from a different release or cut (needs: pip3 install faster-whisper):
     python3 analyze.py episode.srt --video episode.mp4 --align
-        -> episode.aligned.srt   subtitles re-timed to THIS video using speech recognition;
-                                 lines for scenes this cut doesn't have are dropped
+        -> W/episode.aligned.srt   subtitles re-timed to THIS video using speech recognition;
+                                   lines for scenes this cut doesn't have are dropped
 
 Subtitles early or late by the same amount all the way through:
     python3 analyze.py film.fr.srt --video film.mkv --shift auto
-        -> film.fr.aligned.srt   measured against the soundtrack and shifted to match
+        -> W/film.fr.aligned.srt   measured against the soundtrack and shifted to match
     python3 analyze.py film.fr.srt --shift -2.5        you know the offset: show every line 2.5 s earlier
     python3 analyze.py film.fr.srt --video film.mkv --shift -2.5    ...and check the result against the video
 (If the offset changes through the film, a single shift can't fix it: use --align.)
@@ -41,7 +44,7 @@ Only the first part of a long film (for testing; applies to the soundtrack, fram
     python3 analyze.py film.srt --video film.mp4 --limit 5:00
 
 Films not in English:
-    python3 analyze.py film.mkv --sub-lang fr          pull out the French subtitle track -> film.embedded.fr.srt
+    python3 analyze.py film.mkv --sub-lang fr          pull out the French subtitle track -> W/film.embedded.fr.srt
     python3 analyze.py film.fr.srt --video film.mkv --align --film-language fr
                                                        speech recognition in French (model: small)
 
@@ -63,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import languages  # noqa: E402
 import make_ass  # noqa: E402  (SRT parsing and time formatting)
 import prompts  # noqa: E402
+import workfiles  # noqa: E402
 
 SR = 16000          # audio sample rate used for analysis
 FPS_A = 50          # audio analysis frames per second (20 ms)
@@ -103,6 +107,7 @@ def need_ffmpeg():
 
 # ---------------------------------------------------------------- subtitles only
 def write_transcript(cues, out):
+    workfiles.make_dirs(Path(out).parent)
     with open(out, "w", encoding="utf-8") as f:
         for c in cues:
             f.write(f"{c['n']} [{hms(c['start'])}] {clean(c['text'])}\n")
@@ -110,7 +115,7 @@ def write_transcript(cues, out):
 
 
 # ---------------------------------------------------------------- embedded subtitles
-VIDEO_EXTS = {".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".ts", ".m2ts", ".mpg", ".mpeg", ".wmv", ".flv"}
+VIDEO_EXTS = workfiles.VIDEO_EXTS
 TEXT_SUB_CODECS = {"mov_text", "subrip", "srt", "ass", "ssa", "webvtt", "text", "ttml", "microdvd", "subviewer"}
 IMAGE_SUB_CODECS = {"dvd_subtitle", "hdmv_pgs_subtitle", "dvb_subtitle", "xsub", "dvb_teletext"}
 
@@ -588,11 +593,11 @@ def transcript_cache(folder, model, film_language=None, limit=None, task="transc
     return Path(folder) / f"transcript-{model}{'' if lang == 'en' else '-' + lang}{kind}{limit_tag(limit)}.jsonl"
 
 
-def aligned_path(srt, limit=None):
-    """Where --align writes the re-timed subtitles. A --limit run gets its own name, so it is never mistaken
-    for a full alignment later."""
+def aligned_path(srt, limit=None, video=None):
+    """Where --align and --shift write the re-timed subtitles: the video's working folder (workfiles.folder_for).
+    A --limit run gets its own name, so it is never mistaken for a full alignment later."""
     srt = Path(srt)
-    return srt.with_name(f"{srt.stem}.aligned{'.first' + str(int(round(limit))) + 's' if limit else ''}.srt")
+    return workfiles.folder_for(srt, video) / f"{srt.stem}.aligned{'.first' + str(int(round(limit))) + 's' if limit else ''}.srt"
 
 
 def transcribe(video, astream, model_name, cache, language="en", limit=None, task="transcribe"):
@@ -799,8 +804,7 @@ def analyze_video(cues, video, frames_mode="keyframes", fallback_offset=0.0, say
     """
     need_ffmpeg()
     video = Path(video)
-    out = video.parent / f"{video.stem} analysis"
-    out.mkdir(exist_ok=True)
+    out = workfiles.make_dirs(workfiles.analysis(video))
     duration, astream, vstream = probe(video)
     say(f"  video {hms(duration)}, audio {astream.get('channels') if astream else 0} ch")
     if limit and limit < duration:
@@ -906,7 +910,7 @@ def main():
             sys.exit(f"Track {track['n']} is picture-based ({track['codec']}) and can't be read as text."
                      + ("\nText tracks you could use instead:\n" + "\n".join(others) if others else ""))
         lang_part = f".{languages.code(a.sub_lang)}" if a.sub_lang else ""
-        srt = src.with_name(f"{src.stem}.embedded{lang_part}.srt")
+        srt = workfiles.place(src) / f"{src.stem}.embedded{lang_part}.srt"
         print(f"Using embedded subtitle track {describe_track(track).strip()}")
         if len(tracks) > 1 and a.sub_track is None:
             print(f"  ({len(tracks)} tracks found; pick another with --sub-track N, see --list-tracks)")
@@ -916,12 +920,13 @@ def main():
         cues = make_ass.parse_srt(srt)
     if not cues:
         sys.exit(f"No subtitles found in {srt}")
-    tr = write_transcript(cues, srt.with_suffix(".transcript.txt"))
+    video_given = Path(a.video) if a.video else None
+    tr = write_transcript(cues, workfiles.folder_for(srt, video_given) / f"{srt.stem}.transcript.txt")
     print(f"{len(cues)} subtitle lines, {hms(cues[0]['start'])} to {hms(cues[-1]['end'])}")
     print(f"  -> {tr}")
     shifted = None
     if isinstance(a.shift, float):
-        shifted = aligned_path(srt)
+        shifted = aligned_path(srt, video=video_given)
         dropped = shift_srt(cues, a.shift, shifted)
         print(f"Shifted every line {abs(a.shift):.2f} s {'later' if a.shift > 0 else 'earlier'} -> {shifted}"
               + dropped_msg(dropped))
@@ -937,8 +942,7 @@ def main():
 
     need_ffmpeg()
     video = Path(a.video)
-    out = video.parent / f"{video.stem} analysis"
-    out.mkdir(exist_ok=True)
+    out = workfiles.make_dirs(workfiles.analysis(video))
     duration, astream, vstream = probe(video)
     size = f"{vstream.get('width')}x{vstream.get('height')}" if vstream else "audio only"
     print(f"video {hms(duration)}, {size}, audio {astream.get('channels') if astream else 0} ch")
@@ -962,7 +966,7 @@ def main():
         asr = transcribe(video, astream, model, transcript_cache(out, model, a.film_language, limit, task),
                          language=a.film_language or "en", limit=limit, task=task)
         assigned, segments, stats = align(cues, asr)
-        aligned = aligned_path(srt, limit)
+        aligned = aligned_path(srt, limit, video)
         write_srt(cues, assigned, aligned)
         report["alignment"] = {**stats, "segments": segments, "file": aligned.name}
         print(f"  kept {stats['kept']} of {stats['lines']} lines, {len(segments)} stretch(es) "
@@ -981,7 +985,7 @@ def main():
         elif abs(sync["offset"]) < 0.25:
             print("  Already in sync; nothing to fix.")
         else:
-            fixed = aligned_path(srt, limit)
+            fixed = aligned_path(srt, limit, video)
             dropped = shift_srt(all_cues, sync["offset"], fixed)
             report["shift"] = {"seconds": sync["offset"], "file": fixed.name}
             print(f"  Fixed: every line shifted {sync['offset']:+.2f} s -> {fixed}" + dropped_msg(dropped))

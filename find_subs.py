@@ -20,8 +20,10 @@ Where it looks, in order (context_notes.py does the same when a video has no sub
      The timing is right by construction; the words are whatever the recogniser heard, so names and mumbled
      lines can be wrong. Good enough to hang notes on; real subtitles are better.
 
-Whatever it finds is COPIED beside the video as <video name>.<lang>.srt (downloads and transcripts are written
-there directly), so every other script picks it up. Nothing is moved or changed where it was found.
+Whatever it finds is COPIED beside the video as <video name>.<lang>.srt (downloads are written there directly),
+so every other script, and your player, picks it up. Nothing is moved or changed where it was found. Subtitles
+written by speech recognition go in the video's working folder (context-notes/<video file name>/, see
+workfiles.py) as <video name>.<lang>.transcribed.srt: the scripts find them there.
 """
 import argparse
 import json
@@ -42,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import languages  # noqa: E402
 import make_ass  # noqa: E402
 import prompts  # noqa: E402
+import workfiles  # noqa: E402
 
 SUB_DIRS = re.compile(r"^(subs?|subtitles?|untertitel|sous[- ]titres|subtitulos)$", re.I)
 JUNK = re.compile(r"\b(2160p|1080p|720p|576p|480p|bluray|blu-ray|brrip|bdrip|web-?dl|webrip|web|hdtv|dvdrip|remux|x264|"
@@ -400,12 +403,13 @@ def search_online(video, lang, cfg, api=OS_API, ask=None):
     dest = video.with_name(f"{video.stem}.{lang}.srt")
     if dest.exists():
         dest = video.with_name(f"{video.stem}.{lang}.opensubtitles.srt")
-    check = video.with_name(f"{video.stem}.{lang}.download-unchecked")
+    check = workfiles.place(video) / f"{video.stem}.{lang}.download-unchecked"
+    workfiles.make_dirs(check.parent)
     check.write_bytes(data)
     if not make_ass.parse_srt(check):
         bad = check.with_name(check.name.replace("-unchecked", "-unreadable"))
         check.replace(bad)
-        say(f"  ! The download isn't a readable .srt file; left it as {bad.name} for you to look at.")
+        say(f"  ! The download isn't a readable .srt file; left it as {bad} for you to look at.")
         return None
     check.replace(dest)
     say(f"  Saved {dest.name}" + (f" ({remaining} downloads left today)" if remaining is not None else ""))
@@ -451,12 +455,12 @@ def wrap(text, width=42):
 
 
 def transcribe_subs(video, lang, model=None, limit=None):
-    """Write <video>.<lang>.transcribed.srt from speech recognition (reusing analyze.py's cached transcript)."""
+    """Write <video>.<lang>.transcribed.srt in the video's working folder from speech recognition (reusing
+    analyze.py's cached transcript)."""
     import analyze
     video = Path(video)
     analyze.need_ffmpeg()
-    folder = video.parent / f"{video.stem} analysis"
-    folder.mkdir(exist_ok=True)
+    folder = workfiles.make_dirs(workfiles.analysis(video))
     _, astream, _ = analyze.probe(video)
     name = analyze.whisper_model(lang, model)
     cache = analyze.transcript_cache(folder, name, lang, limit)
@@ -466,7 +470,8 @@ def transcribe_subs(video, lang, model=None, limit=None):
     cues = transcript_to_cues(asr)
     if not cues:
         return None
-    dest = video.with_name(f"{video.stem}.{lang}.transcribed{'.first' + str(int(round(limit))) + 's' if limit else ''}.srt")
+    tag = f".first{int(round(limit))}s" if limit else ""
+    dest = workfiles.place(video) / f"{video.stem}.{lang}.transcribed{tag}.srt"
     analyze.write_srt(cues, {i: 0.0 for i in range(len(cues))}, dest)
     say(f"  Wrote {dest.name}: {len(cues)} lines heard in the soundtrack (names and mumbled lines may be wrong).")
     return dest
@@ -484,7 +489,7 @@ def have_whisper():
 def find(video, lang, online=None, transcribe=None, ask=None, model=None, limit=None):
     """Try nearby files, then OpenSubtitles (if a login is saved and `online` isn't False), then speech recognition
     (if `transcribe` isn't False). `ask(question) -> 'y'/'n'` is asked before downloading or transcribing; with
-    online/transcribe True those steps run without asking. Returns the .srt beside the video, or None."""
+    online/transcribe True those steps run without asking. Returns the .srt it found or made, or None."""
     video = Path(video)
     name = languages.name(lang)
     p, why = pick_nearby(video, lang)

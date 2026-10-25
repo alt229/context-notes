@@ -19,6 +19,8 @@ For each video it:
   3. has Claude write the notes from the dialogue        (make_ass.py --generate: shows the cost, asks first)
   4. has Claude improve them using the video's frames    (make_ass.py --refine: shows the cost, asks first)
   5. leaves <video>.notes.ass beside the video for VLC
+Working files (the notes file, re-timed subtitles, reports, frames) go in context-notes/<video file name>/ beside
+the video (see workfiles.py). Files earlier versions left beside the video still work; tidy.py moves them in.
 Steps already done are skipped (the notes file records them), so it is safe to stop and run it again. A finished
 video whose .ass is out of date (a new look, or the notes file was edited) just has its .ass rebuilt, for free.
 Every command is printed before it runs, so you can rerun any single step by hand.
@@ -30,7 +32,6 @@ import re
 import shlex
 import subprocess
 import sys
-import unicodedata
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -40,9 +41,10 @@ import analyze  # noqa: E402
 import languages  # noqa: E402
 import make_ass  # noqa: E402
 import prompts  # noqa: E402
+import workfiles  # noqa: E402
 
 SEASON_DIR = re.compile(r"^(season|series|saison|staffel|temporada|stagione|seizoen)\s*\d+$|^s\d{1,2}$", re.I)
-DERIVED_SUFFIX = re.compile(r"(\.embedded(\.[a-z]{2})?)?(\.aligned(\.first\d+s)?)?$")
+DERIVED_SUFFIX = workfiles.DERIVED_SUFFIX
 RELEASE_JUNK = re.compile(r"\b(2160p|1080p|720p|480p|bluray|blu-ray|brrip|bdrip|web-?dl|webrip|web|hdtv|dvdrip|"
                           r"x264|x265|h\.?264|h\.?265|hevc|aac|ac3|dts|remux|proper|repack|yts|rarbg)\b.*$", re.I)
 
@@ -53,12 +55,13 @@ def say(msg=""):
 
 
 def show_cmd(cmd, cwd=None):
-    """How the command looks typed by hand: scripts as "$CN/name.py", files in the video's folder by name only."""
+    """How the command looks typed by hand: scripts as "$CN/name.py", files in the video's folder (and its
+    context-notes folder) relative to it."""
     def short(a):
         a = str(a)
         if a.startswith(str(HERE) + os.sep):
             return '"$CN/' + a[len(str(HERE)) + 1:].replace(os.sep, "/") + '"'
-        if cwd and a.startswith(str(cwd) + os.sep) and os.sep not in a[len(str(cwd)) + 1:]:
+        if cwd and a.startswith(str(cwd) + os.sep):
             a = a[len(str(cwd)) + 1:]
         return shlex.quote(a)
     return "$ " + " ".join(["python3"] + [short(c) for c in cmd[1:]])
@@ -112,21 +115,22 @@ def find_videos(path, recursive=False):
         return [path]
     pattern = "**/*" if recursive else "*"
     return sorted(p for p in path.glob(pattern)
-                  if p.is_file() and p.suffix.lower() in analyze.VIDEO_EXTS and not p.name.startswith("."))
+                  if p.is_file() and p.suffix.lower() in analyze.VIDEO_EXTS and not p.name.startswith(".")
+                  and workfiles.FOLDER not in p.relative_to(path).parts)
 
 
-def nfc(name):
-    """One spelling for accented names. 'é' can be stored as one character or as 'e' plus an accent mark; macOS
-    treats both as the same file, but as text they differ (seen with a downloaded Amélie.2001.mp4)."""
-    return unicodedata.normalize("NFC", str(name))
+nfc = workfiles.nfc
 
 
 def subtitle_files(video):
-    """Subtitle files beside a video: [{path, lang, tags, aligned, embedded}]. Language comes from the file name
-    (film.fr.srt, film.French.srt) or, if the name doesn't say, from the text itself."""
-    stem, out = nfc(video.stem), []
-    for p in sorted(video.parent.glob("*.srt")):
-        name = nfc(p.name)
+    """Subtitle files for a video, beside it or in its working folder (pulled out of it, re-timed):
+    [{path, lang, tags, aligned, embedded}]. Language comes from the file name (film.fr.srt, film.French.srt) or,
+    if the name doesn't say, from the text itself. A name in both places is the working folder's copy."""
+    stem, out, found = nfc(video.stem), [], {}
+    for d in workfiles.subtitle_dirs(video):
+        for p in sorted(d.glob("*.srt")) if d.is_dir() else []:
+            found.setdefault(nfc(p.name), p)
+    for name, p in sorted(found.items()):
         if name.startswith(".") or not (name == stem + ".srt" or name.startswith(stem + ".")):
             continue
         aligned = re.search(r"\.aligned(\.first(\d+)s)?\.srt$", name)
@@ -178,16 +182,8 @@ def audio_language(video):
 
 def notes_path_for(video, srt):
     """An existing notes file for this video (by video name, subtitle name, or the aligned subtitle name),
-    else notes-<video name>.json beside the video."""
-    names = [f"notes-{video.stem}.json"]
-    if srt:
-        names.append(f"notes-{Path(srt).stem}.json")
-        names.append(f"notes-{DERIVED_SUFFIX.sub('', Path(srt).stem)}.json")
-    on_disk = {nfc(p.name): p for p in video.parent.glob("notes-*.json")}
-    for n in names:
-        if nfc(n) in on_disk:
-            return on_disk[nfc(n)]
-    return video.parent / names[0]
+    else notes-<video name>.json in its working folder (context-notes/<video>/)."""
+    return workfiles.notes_path(video, srt)
 
 
 def ass_path_for(video):
@@ -254,6 +250,15 @@ def ass_current(ass, notes, spec, opts):
     return abs(have["wpm"] - want["wpm"]) < 0.05
 
 
+def shown_language(spec, subs):
+    """The language of the subtitles a finished film's .ass shows at the bottom: those in the notes file's
+    "display_subtitles", else the ones the notes are placed on ("subtitles"). None if it can't be told."""
+    name = (spec or {}).get("display_subtitles") or (spec or {}).get("subtitles")
+    if not name:
+        return None
+    return next((s["lang"] for s in subs if nfc(s["path"].name) == nfc(name)), None)
+
+
 def inspect(video, opts):
     subs = subtitle_files(video)
     film, how = film_language(video, opts)
@@ -269,12 +274,21 @@ def inspect(video, opts):
     st = {"video": video, "subs": subs, "srt": srt, "aligned": aligned, "notes": notes, "spec": spec, "have": have,
           "film_language": film, "film_language_from": how, "ass": ass, "display_lang": display}
     st["notes_ok"] = have > 0 and covers((spec or {}).get("limit"), opts.limit) and not opts.redo
+    # parts whose replies couldn't be read: their lines have no notes until they're sent again (asked about)
+    st["unreadable"] = len((spec or {}).get("unreadable") or []) if st["notes_ok"] else 0
     st["refined_ok"] = (bool(refined) and not refined.get("stopped_after")       # a refine that stopped part-way
+                        and not refined.get("unreadable")                         # or has stretches to send again
                         and covers((refined or {}).get("limit"), opts.limit) and st["notes_ok"])   # isn't finished
     st["ass_ok"] = ass_current(ass, notes, spec, opts)
-    st["done"] = st["notes_ok"] and st["ass_ok"] and (st["refined_ok"] or opts.no_refine)
+    # --show-subs asks for subtitles in another language at the bottom than the .ass shows: a rebuild
+    want = getattr(opts, "show_subs", None)
+    shown = shown_language(spec, subs) if want and spec else None
+    st["show_change"] = want if shown is not None and not languages.same(shown, want) else None
+    st["done"] = (st["notes_ok"] and st["ass_ok"] and (st["refined_ok"] or opts.no_refine) and not st["unreadable"]
+                  and not st["show_change"])
     # only the .ass is behind: a free rebuild, no Claude
-    st["rebuild"] = st["notes_ok"] and (st["refined_ok"] or opts.no_refine) and not st["ass_ok"]
+    st["rebuild"] = (st["notes_ok"] and (st["refined_ok"] or opts.no_refine) and not st["unreadable"]
+                     and (not st["ass_ok"] or st["show_change"]))
     return st
 
 
@@ -297,8 +311,9 @@ def no_subtitles_message(video, lang):
     return msg
 
 
-def status_fields(st):
-    """What --status shows about one video, as data for a GUI (the `status` event)."""
+def status_fields(st, tidy=0):
+    """What --status shows about one video, as data for a GUI (the `status` event). `tidy`: how many files an
+    earlier version left beside it (tidy.py moves them into its working folder)."""
     spec = st["spec"] or {}
     refined = spec.get("refined") or {}
     return {"path": str(st["video"]), "name": st["video"].name, "done": st["done"],
@@ -306,7 +321,8 @@ def status_fields(st):
             "notes": st["have"], "limit": spec.get("limit"),
             "notes_stopped": st["notes"].with_suffix(".partial.json").exists(),
             "refined": "stopped" if refined.get("stopped_after") else ("yes" if refined else "no"),
-            "ass": st["ass"].name if st["ass"].exists() else None, "rebuild": st["rebuild"]}
+            "ass": st["ass"].name if st["ass"].exists() else None, "rebuild": st["rebuild"],
+            "unreadable": st["unreadable"], "refine_unreadable": len(refined.get("unreadable") or []), "tidy": tidy}
 
 
 def status_line(st):
@@ -319,10 +335,17 @@ def status_line(st):
         refined = (st["spec"] or {}).get("refined")
         notes += ((", refine stopped part-way" if refined.get("stopped_after") else ", refined") if refined
                   else ", not refined")
+        if refined and refined.get("unreadable"):
+            notes += (f" ({len(refined['unreadable'])} stretch(es) of frames came back unreadable; the next run offers "
+                      f"to send just those again)")
     else:
         notes = "no notes yet"
+    if st["unreadable"]:
+        notes += f"; {st['unreadable']} part(s) came back unreadable (the next run offers to send just those again)"
     if st["rebuild"]:
         notes += f"; {st['ass'].name if st['ass'].exists() else 'the .ass'} needs rebuilding (free)"
+        if st["show_change"]:
+            notes += f" to show the {languages.name(st['show_change'])} subtitles"
     state = "done" if st["done"] else "to do"
     return f"  [{state:>5}] {st['video'].name}\n          subtitles: {subs}; {notes}"
 
@@ -442,12 +465,14 @@ def _look_further(video, lang, opts, find_subs, film=None):
 
 
 def report_shift_file(video):
-    """The corrected subtitle file the last analyze.py --shift auto wrote, if any ('' if none)."""
+    """The corrected subtitle file the last analyze.py --shift auto wrote, if it's there (None if not)."""
     try:
-        report = json.loads((video.parent / f"{video.stem} analysis" / "analysis.json").read_text(encoding="utf-8"))
-        return (report.get("shift") or {}).get("file", "")
+        report = json.loads((workfiles.analysis(video) / "analysis.json").read_text(encoding="utf-8"))
+        name = (report.get("shift") or {}).get("file", "")
     except (OSError, ValueError):
-        return ""
+        return None
+    found = workfiles.find(video, name) if name else None
+    return found if found is not None and found.is_file() else None
 
 
 def sync_original(video, original, opts):
@@ -458,11 +483,11 @@ def sync_original(video, original, opts):
            video.parent):
         return original
     fixed = report_shift_file(video)
-    if fixed and (video.parent / fixed).exists():
-        say(f"Using {fixed} (shifted to match the video).")
-        return video.parent / fixed
+    if fixed:
+        say(f"Using {fixed.name} (shifted to match the video).")
+        return fixed
     try:
-        sync = json.loads((video.parent / f"{video.stem} analysis" / "analysis.json").read_text(encoding="utf-8"))["sync"]
+        sync = json.loads((workfiles.analysis(video) / "analysis.json").read_text(encoding="utf-8"))["sync"]
         if sync_decision(sync) == "align":
             say(f"  ! {original.name} drifts against this video, so fewer of its lines will line up. "
                 f"analyze.py --align --film-language ... can re-time it.")
@@ -516,15 +541,15 @@ def check_sync(video, srt, film, display_lang, embedded, opts):
            video.parent):
         raise Stop("The sync check failed.")
     try:
-        sync = json.loads((video.parent / f"{video.stem} analysis" / "analysis.json").read_text(encoding="utf-8"))["sync"]
+        sync = json.loads((workfiles.analysis(video) / "analysis.json").read_text(encoding="utf-8"))["sync"]
     except (OSError, ValueError, KeyError):
         raise Stop("The sync check didn't leave a report to read.")
     decision = sync_decision(sync)
     if decision == "ok":
         return srt, False, 0.0
     if decision == "offset":
-        fixed = video.parent / report_shift_file(video)
-        if not fixed.name or not fixed.exists():
+        fixed = report_shift_file(video)
+        if fixed is None:
             raise Stop("The timing could be fixed with a constant shift, but no corrected file was written.")
         say(f"Fixed the timing: {fixed.name} is {srt.name} shifted {sync['offset']:+.2f} s (your original is untouched).")
         return fixed, True, 0.0
@@ -564,7 +589,7 @@ def check_sync(video, srt, film, display_lang, embedded, opts):
         cmd += ["--model", opts.align_model]
     if run(cmd, video.parent):
         raise Stop("Re-timing failed.")
-    aligned = analyze.aligned_path(srt, opts.limit if opts.limit else None)
+    aligned = analyze.aligned_path(srt, opts.limit if opts.limit else None, video)
     if not aligned.exists():
         raise Stop(f"Re-timing ran but {aligned.name} wasn't written.")
     kept, total = len(make_ass.parse_srt(aligned)), len(make_ass.limit_cues(make_ass.parse_srt(srt), opts.limit))
@@ -585,7 +610,7 @@ def alignment_step(video, srt, notes, film, display_lang, original, opts):
     import align_check
     if opts.no_alignment_check or not notes.exists():
         return srt
-    folder = video.parent / f"{video.stem} analysis"
+    folder = workfiles.analysis(video)
     cached = align_check.find_transcript(folder, film, opts.limit) if folder.exists() else None
     if not (opts.check_alignment or cached):
         if opts.yes or not prompts.interactive():
@@ -621,7 +646,7 @@ def alignment_step(video, srt, notes, film, display_lang, original, opts):
         return srt
     if run(script("align_check.py", *args, "--fix"), video.parent):
         return srt
-    fixed = align_check.fixed_path(srt)
+    fixed = align_check.fixed_path(srt, video)
     if not fixed.exists():
         return srt
     if run(script("make_ass.py", fixed, notes, "--video", video, *look_args(opts)), video.parent):
@@ -716,11 +741,21 @@ def process(video, opts):
         need_generate, extend = pick in ("a", "s"), pick == "a"
     refined = (spec or {}).get("refined")
     need_refine = not opts.no_refine and (need_generate or not refined or not covers(refined.get("limit"), opts.limit)
-                                          or bool(refined.get("stopped_after")))     # refine_notes asks to pick up
+                                          or bool(refined.get("stopped_after"))      # refine_notes asks to pick up
+                                          or bool(refined.get("unreadable")))        # ...or to send those again
+    unread = (spec or {}).get("unreadable") or []
+    retry_only = False                           # send again just the lines whose replies couldn't be read
+    if unread and have and not opts.redo and not need_generate:
+        where = ", ".join(f"{u['lines'][0]} to {u['lines'][1]}" for u in unread if isinstance(u, dict) and
+                          len(u.get("lines") or []) == 2)
+        if ask(f"Claude's reply for {len(unread)} part(s) of {notes.name} couldn't be read last time, so lines "
+               f"{where} have no notes. Send just those lines again?",
+               {"y": "yes, send just those lines", "n": "no, not now"}, "y", opts.yes, id="notes.unreadable") == "y":
+            need_generate, extend, retry_only = True, True, True     # the frames step isn't needed for this
 
     # 2. sync (only before writing notes: re-timing afterwards could break notes anchored by line number)
     assume_synced, offset = aligned or embedded, None
-    if need_generate and not aligned:
+    if need_generate and not aligned and not retry_only:
         prompts.event("step", step="sync")
         srt, assume_synced, offset = check_sync(video, srt, film, display_lang, embedded, opts)
         notes = notes_path_for(video, srt) if not have else notes
@@ -777,6 +812,17 @@ def process(video, opts):
     alignment_step(video, srt, notes, film, display_lang, original, opts)
     say(f"Ready: play {video.name} in VLC; {ass.name} is beside it.")
     return "ready"
+
+
+def left_beside(videos):
+    """{video: [(file, where it goes)]} for the files earlier versions left beside these videos (tidy.py)."""
+    out, folders = {}, {}
+    for v in videos:
+        folders.setdefault(v.parent, []).append(v)
+    for d in folders:
+        plan, _ = workfiles.old_files(d)
+        out.update({v: moves for v, moves in plan.items() if v in folders[d]})
+    return out
 
 
 # ---------------------------------------------------------------- main
@@ -847,10 +893,16 @@ def main(argv=None):
         sys.exit("--title is for a single video. For a folder, use --show and the file names do the rest.")
 
     say(f"{len(videos)} video(s)" + (f", first {make_ass.fmt_limit(opts.limit)} of each" if opts.limit else "") + ":")
+    old = left_beside(videos)
     for v in videos:
         st = inspect(v, opts)
         say(status_line(st))
-        prompts.event("status", **status_fields(st))
+        prompts.event("status", **status_fields(st, len(old.get(v, []))))
+    if old:
+        say(f"\n{len(old)} of these video(s) still have working files beside them, from an earlier version. They "
+            f"work where they are; to move them into the {workfiles.FOLDER} folder:\n"
+            f"  python3 {shlex.quote(str(HERE / 'tidy.py'))} {shlex.quote(str(path))}"
+            + (" --recursive" if opts.recursive and path.is_dir() else ""))
     if opts.status:
         return 0
     if not all(st["done"] or st["rebuild"] for st in (inspect(v, opts) for v in videos)):    # a rebuild needs no key

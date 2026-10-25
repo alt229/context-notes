@@ -275,7 +275,8 @@ def test_cancel_in_the_wrapper_then_run_it_again(tmp_path, clip, api, api_key_fi
     assert cancel.sent and code == 130, out
     assert "Stopped after part 1 of" in out                       # the step had time to keep its notes...
     assert "Stopped. Rerun the same command" in out               # ...and the wrapper says what to do next
-    assert (tmp_path / "notes-ep.partial.json").exists() and not (tmp_path / "notes-ep.json").exists()
+    w = tmp_path / "context-notes" / "ep.mp4"                     # the video's working folder
+    assert (w / "notes-ep.partial.json").exists() and not (w / "notes-ep.json").exists()
     assert not (tmp_path / "ep.notes.ass").exists() and not leftovers(tmp_path)
     assert not [e for e in evs if e["type"] == "video-result"]    # it never finished the video
 
@@ -287,6 +288,6 @@ def test_cancel_in_the_wrapper_then_run_it_again(tmp_path, clip, api, api_key_fi
     assert [e["id"] for e in evs if e["type"] == "question"][0] == "generate.resume"       # picked up (the default)...
     sent = [c["body"]["messages"][0]["content"] for c in api.calls[before:] if "You refine" not in c["body"]["system"]]
     assert "Lines to annotate (1 to" not in sent[0]                                        # ...so part 1 wasn't resent
-    assert not (tmp_path / "notes-ep.partial.json").exists()
+    assert not (w / "notes-ep.partial.json").exists()
     assert [e["result"] for e in evs if e["type"] == "video-result"] == ["ready"]
-    assert (tmp_path / "ep.notes.ass").exists() and json.loads((tmp_path / "notes-ep.json").read_text())["refined"]
+    assert (tmp_path / "ep.notes.ass").exists() and json.loads((w / "notes-ep.json").read_text())["refined"]

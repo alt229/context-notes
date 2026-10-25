@@ -309,5 +309,21 @@ def test_cancel_from_the_page(server, api, api_key_file, episode):
     finally:
         gate.set()
     assert sent == [{"ok": True}] and state["cancelled"] and state["returncode"] == 130, log
-    assert (episode / "notes-S01E01 Pilot.partial.json").exists()
+    assert (episode / "context-notes" / "S01E01 Pilot.mp4" / "notes-S01E01 Pilot.partial.json").exists()
     assert {c["body"]["model"] for c in api.calls} == {"claude-opus-5-5"}               # "Best" is the default
+
+
+def test_tidy_lists_then_moves(server, tmp_path):
+    from test_workfiles import old_film
+    films = tmp_path / "Films"
+    old_film(films)
+    code, r = call(server, "/api/tidy", {"path": str(films)})
+    assert code == 200 and r["ok"] and r["done"] is None, r
+    assert [v["video"] for v in r["videos"]] == [str(films / "Film.mkv")] and len(r["videos"][0]["items"]) == 7
+    assert {"from": "Film analysis", "to": "analysis", "folder": True} in r["videos"][0]["items"]
+    assert (films / "notes-Film.json").exists()                                    # listing moves nothing
+    code, r = call(server, "/api/tidy", {"path": str(films), "move": True})
+    assert code == 200 and r["done"] == {"type": "tidy-done", "v": 1, "moved": 7, "problems": []}, r
+    assert (films / "context-notes" / "Film.mkv" / "notes-Film.json").exists()
+    code, r = call(server, "/api/tidy", {"path": str(films / "nowhere")})
+    assert code == 400 and "Choose a film or a folder" in r["error"]

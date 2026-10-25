@@ -1,5 +1,6 @@
 """The all-in-one wrapper: finding files, deciding what to run, and whole runs on synthetic videos."""
 import json
+import os
 import re
 import subprocess
 
@@ -7,6 +8,7 @@ import pytest
 from conftest import make_srt, needs_ffmpeg, place, run_cli
 
 import context_notes as cn
+import workfiles
 
 
 # ---------------------------------------------------------------- finding things
@@ -112,13 +114,18 @@ def test_wrapper_runs_everything_then_skips_what_is_done(tmp_path, clips, api, a
     assert r.returncode == 0, r.stdout + r.stderr
     assert re.search(r"Fixed the timing: S01E01 Pilot.aligned.srt is S01E01 Pilot.srt shifted \+0\.[89]", r.stdout)
     assert "Ready: play S01E01 Pilot.mp4" in r.stdout
-    assert '$ python3 "$CN/make_ass.py" \'S01E01 Pilot.aligned.srt\' \'notes-S01E01 Pilot.json\' --generate' in r.stdout
-    fixed = season / "S01E01 Pilot.aligned.srt"
+    w = workfiles.folder(season / "S01E01 Pilot.mp4")                          # context-notes/S01E01 Pilot.mp4
+    shown = os.path.join("context-notes", "S01E01 Pilot.mp4", "")
+    assert (f'$ python3 "$CN/make_ass.py" \'{shown}S01E01 Pilot.aligned.srt\' \'{shown}notes-S01E01 Pilot.json\' '
+            f'--generate') in r.stdout
+    fixed = w / "S01E01 Pilot.aligned.srt"
     assert fixed.exists() and "00:00:03,8" in fixed.read_text()                # 3.0 s + the measured 0.88
-    spec = json.loads((season / "notes-S01E01 Pilot.json").read_text())
+    spec = json.loads((w / "notes-S01E01 Pilot.json").read_text())
     assert spec["refined"] and abs(spec.get("video_offset", 0)) < 0.25            # the file is fixed, not the notes
     assert (season / "S01E01 Pilot.notes.ass").exists()
-    assert (season / "S01E01 Pilot analysis" / "soundtrack.npy").exists()       # measured once, reused by --refine
+    assert (w / "analysis" / "soundtrack.npy").exists()                         # measured once, reused by --refine
+    assert sorted(p.name for p in season.iterdir()) == [                         # beside it: only what players use
+        "S01E01 Pilot.en.ass", "S01E01 Pilot.mp4", "S01E01 Pilot.notes.ass", "S01E01 Pilot.srt", "context-notes"]
     first = api.calls[0]["body"]["messages"][0]["content"]
     assert "Title: Test Show - S01E01 Pilot" in first
     calls = len(api.calls)
@@ -136,7 +143,8 @@ def test_wrapper_limit_then_full_run(tmp_path, clips, api, api_key_file, home):
     api.responder = both
     r = wrapper(tmp_path / "ep.mp4", "--yes", "--limit", "1:00", "--api-url", api.url, home=home, cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    spec = json.loads((tmp_path / "notes-ep.json").read_text())
+    w = workfiles.folder(tmp_path / "ep.mp4")
+    spec = json.loads((w / "notes-ep.json").read_text())
     assert spec["limit"] == 60 and spec["refined"]["limit"] == 60
     gen = [c for c in api.calls if "You refine" not in c["body"]["system"]]
     assert all("Line 11 of" not in c["body"]["messages"][0]["content"] for c in gen)
@@ -149,8 +157,8 @@ def test_wrapper_limit_then_full_run(tmp_path, clips, api, api_key_file, home):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "only covers the first 1:00" in r.stdout and "-> add the rest (automatic)" in r.stdout
     assert "--generate" in r.stdout and "--extend" in r.stdout
-    spec = json.loads((tmp_path / "notes-ep.json").read_text())
-    assert "limit" not in spec and (tmp_path / "notes-ep.json.bak").exists()
+    spec = json.loads((w / "notes-ep.json").read_text())
+    assert "limit" not in spec and (w / "notes-ep.json.bak").exists()
     assert spec["refined"]["limit"] == 60                                          # the frames step's record is kept
     firsts = [int(re.search(r"Lines to annotate \((\d+) to", c["body"]["messages"][0]["content"]).group(1))
               for c in api.calls[sent:]]
@@ -163,7 +171,7 @@ def test_wrapper_limit_then_full_run(tmp_path, clips, api, api_key_file, home):
     starts = [re.search(r"This stretch: (\S+) to", [b for b in c["body"]["messages"][0]["content"]
                                                      if b["type"] == "text"][-1]["text"]).group(1) for c in api.calls[sent:]]
     assert starts and starts[0] == "0:01:00", starts                               # the first minute isn't sent again
-    assert "limit" not in json.loads((tmp_path / "notes-ep.json").read_text())["refined"]
+    assert "limit" not in json.loads((w / "notes-ep.json").read_text())["refined"]
 
 
 @needs_ffmpeg
@@ -196,7 +204,7 @@ def test_wrapper_french_film_reads_french_subtitles_with_english_notes(tmp_path,
     assert "The subtitles are in French too" in body["system"] and "never translate the quote" in body["system"]
     assert "Write every note in English" in body["system"] and "Poser un lapin" in body["system"]
     assert "Je ne sais pas" in body["messages"][0]["content"] and "‹fr:" not in body["messages"][0]["content"]
-    spec = json.loads((tmp_path / "notes-Le Film.json").read_text())
+    spec = json.loads((workfiles.folder(tmp_path / "Le Film.mp4") / "notes-Le Film.json").read_text())
     assert spec["film_language"] == "fr" and "original French subtitles" in spec["audience"]
     ass = (tmp_path / "Le Film.notes.ass").read_text(encoding="utf-8-sig")
     assert "Je ne sais pas" in ass and "English line" not in ass
@@ -267,7 +275,8 @@ def test_wrapper_show_subs_swaps_the_subtitles_on_screen_without_new_api_calls(t
     notes_before = [line for line in before.splitlines() if ",speech/" in line]
     notes_after = [line for line in after.splitlines() if ",speech/" in line]
     assert notes_after == notes_before                                        # same notes, same times
-    spec = json.loads((tmp_path / "notes-Le Film.json").read_text())
+    notes = workfiles.folder(tmp_path / "Le Film.mp4") / "notes-Le Film.json"
+    spec = json.loads(notes.read_text())
     assert spec["display_subtitles"].startswith("Le Film.en")
 
     # remembered: a plain run (no --show-subs) leaves it alone; --show-subs fr switches back
@@ -277,7 +286,27 @@ def test_wrapper_show_subs_swaps_the_subtitles_on_screen_without_new_api_calls(t
     assert r.returncode == 0, r.stdout + r.stderr
     assert "Je ne sais pas" in [line for line in ass_path.read_text(encoding="utf-8-sig").splitlines()
                                 if line.startswith("Dialogue: 0,")][0]
-    assert "display_subtitles" not in json.loads((tmp_path / "notes-Le Film.json").read_text())
+    assert "display_subtitles" not in json.loads(notes.read_text())
+
+
+@needs_ffmpeg
+def test_other_subtitles_on_screen_count_as_a_free_rebuild(tmp_path, clips, api, api_key_file, home):
+    french_film(tmp_path, clips)
+    api.responder = both
+    film = tmp_path / "Le Film.mp4"
+    r = wrapper(film, "--yes", "--no-refine", "--api-url", api.url, home=home, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    r = wrapper(film, "--status", "--no-refine", "--show-subs", "fr", home=home, cwd=tmp_path)
+    assert "[ done] Le Film.mp4" in r.stdout                                  # French is what it shows already
+    r = wrapper(film, "--status", "--no-refine", "--show-subs", "en", home=home, cwd=tmp_path)
+    assert "[to do] Le Film.mp4" in r.stdout and "needs rebuilding (free) to show the English subtitles" in r.stdout
+    calls = len(api.calls)
+    r = wrapper(film, "--yes", "--no-refine", "--show-subs", "en", home=home, cwd=tmp_path)    # no API key needed
+    assert r.returncode == 0 and len(api.calls) == calls and "On screen: Le Film.en" in r.stdout, r.stdout + r.stderr
+    r = wrapper(film, "--status", "--no-refine", "--show-subs", "en", home=home, cwd=tmp_path)
+    assert "[ done] Le Film.mp4" in r.stdout
+    r = wrapper(film, "--status", "--no-refine", home=home, cwd=tmp_path)    # no choice given: whatever it shows
+    assert "[ done] Le Film.mp4" in r.stdout
 
 
 def test_subtitles_in_another_language_are_named_in_the_message(tmp_path):

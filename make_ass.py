@@ -10,7 +10,7 @@ a distinctive bit of the line, not by cue number, so the same notes work with
 different releases of the same episode (different cue numbers and timings).
 
 Usage:
-    python3 make_ass.py episode.srt                                      # first run: creates a blank notes-<name>.json
+    python3 make_ass.py episode.srt                                      # first run: creates a blank notes file
     python3 make_ass.py episode.srt --generate --video episode.mp4       # Claude writes the notes (API credits), then builds
     python3 make_ass.py episode.srt --refine --video episode.mp4         # Claude improves the notes using the video's
                                                                          # frames and soundtrack; backs up notes + old .ass
@@ -43,6 +43,9 @@ notes.json:
         {"at": "00:01:23,500", ...}       # or by an explicit timestamp
       ]
     }
+Without a notes file named, it's the video's (context-notes/<video file name>/notes-<video name>.json, see
+workfiles.py; an older one beside the video, or in the current folder, is used where it is).
+
 Visual notes: {"at_video": "00:14:33,000", "kind": "visual", ...} are timed to the
 video itself, so the subtitle offset is not applied to them.
 Optional per-note keys: "duration" (seconds), "occurrence" (match the Nth hit),
@@ -62,6 +65,7 @@ from pathlib import Path
 
 import languages
 import prompts  # noqa: F401  (on Windows, lets a GUI's Cancel stop this script cleanly)
+import workfiles
 
 PLAY_X, PLAY_Y = 1920, 1080
 
@@ -109,6 +113,10 @@ def replacing(path):
     path = Path(path)
     if path.is_symlink():                                  # write the file the link points to; keep the link
         path = path.resolve()
+    try:
+        workfiles.make_dirs(path.parent)                  # a video's context-notes folder, the first time
+    except OSError:                                        # (writing the file then says what's wrong)
+        pass
     tmp = path.with_name(f".{path.name}.part{os.getpid()}")
     try:
         yield tmp
@@ -718,6 +726,17 @@ def build(srt_path, notes_path, out_path, offset=0.0, layout="split", display_sr
     return placed, missing
 
 
+def default_notes(srt, video=None):
+    """The notes file when none is named: the video's (workfiles.notes_path), when there is a video, given or named
+    like the subtitles; else, or when one from before is there, notes-<subtitles name>.json in the current folder."""
+    here = Path(f"notes-{Path(srt).stem}.json")
+    video = Path(video) if video else workfiles.video_for(srt)
+    if video is None:
+        return here
+    found = workfiles.notes_path(video, srt)
+    return here if not found.exists() and here.exists() else found
+
+
 def create_blank_notes(path, srt):
     """Start a notes file for a subtitle file that doesn't have one yet."""
     stem = Path(srt).stem
@@ -740,8 +759,8 @@ def create_blank_notes(path, srt):
 
 
 def display_choice(a, spec, notes_path):
-    """Which subtitles to show, from --display-subs or the notes file's 'display_subtitles' (a file name beside the
-    subtitle file). A new --display-subs is saved in the notes file so later rebuilds (e.g. after --refine) keep it;
+    """Which subtitles to show, from --display-subs or the notes file's 'display_subtitles' (a file name: beside the
+    subtitle file, in the video's working folder, or beside the video). A new --display-subs is saved in the notes file so later rebuilds (e.g. after --refine) keep it;
     --display-subs <the main subtitle file> switches back. Returns (path or None, offset)."""
     if not isinstance(spec, dict):
         return (a.display_subs if a.display_subs and Path(a.display_subs).resolve() != Path(a.srt).resolve()
@@ -764,10 +783,10 @@ def display_choice(a, spec, notes_path):
     name = spec.get("display_subtitles")
     if not name:
         return None, 0.0
-    path = Path(a.display_subs) if a.display_subs else Path(a.srt).parent / name
-    if not path.exists():
-        print(f"  ! The notes file says to show {name}, but it isn't beside {Path(a.srt).name}; showing "
-              f"{Path(a.srt).name} instead.")
+    path = Path(a.display_subs) if a.display_subs else workfiles.find_near(a.srt, name, a.video)
+    if path is None or not path.exists():
+        print(f"  ! The notes file says to show {name}, but it isn't beside {Path(a.srt).name} or the video; "
+              f"showing {Path(a.srt).name} instead.")
         return None, 0.0
     return path, float(spec.get("display_offset", 0) or 0)
 
@@ -918,7 +937,7 @@ def main():
     if not Path(a.srt).exists():
         sys.exit(f"Can't find {a.srt}")
     if not a.notes:
-        a.notes = f"notes-{Path(a.srt).stem}.json"          # current folder
+        a.notes = str(default_notes(a.srt, a.video))
     notes_path = Path(a.notes)
     if a.original_subs and not Path(a.original_subs).exists():
         sys.exit(f"Can't find the original-language subtitles {a.original_subs}")

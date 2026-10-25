@@ -103,13 +103,30 @@ These come from `context_notes.py`, so a GUI can show which video and which step
 `context_notes.py --status` sends one per video, with what `--status` prints:
 
 ```
-@context-notes {"v": 1, "type": "status", "path": "/Movies/Amelie.mkv", "name": "Amelie.mkv", "done": false, "subtitles": "Amelie.srt", "film_language": "fr", "notes": 100, "limit": null, "notes_stopped": false, "refined": "yes", "ass": "Amelie.notes.ass", "rebuild": true}
+@context-notes {"v": 1, "type": "status", "path": "/Movies/Amelie.mkv", "name": "Amelie.mkv", "done": false, "subtitles": "Amelie.srt", "film_language": "fr", "notes": 100, "limit": null, "notes_stopped": false, "refined": "yes", "ass": "Amelie.notes.ass", "rebuild": true, "unreadable": 0, "refine_unreadable": 0, "tidy": 0}
 ```
 
 - `refined`: `yes`, `no` or `stopped` (part-way).
 - `rebuild`: the notes are finished and only the `.ass` is out of date (older than the notes, or built with a
   different look from the `--reading-speed` / `--note-background` / `--note-opacity` given, or by an older
-  `make_ass.py`). A run rebuilds it for free: nothing is sent to Claude, and no API key is needed.
+  `make_ass.py`, or showing subtitles at the bottom in another language than `--show-subs` asks for). A run rebuilds it for free: nothing is sent to Claude, and no API key is needed.
+- `unreadable`: how many parts of the notes came back as replies that couldn't be read, so their lines have no
+  notes yet. The next run asks `notes.unreadable` and sends just those lines again. A video with any isn't `done`.
+- `refine_unreadable`: the same for the frames step: stretches of the film whose replies couldn't be read. The next
+  refine asks `refine.unreadable` and sends just those.
+- `tidy`: how many working files an earlier version left beside this video. They work where they are; `tidy.py`
+  moves them into its `context-notes` folder (README, "Where the files go"). 0 when there are none.
+
+### `tidy`, `tidy-skip` and `tidy-done`
+
+`tidy.py` lists what it would move, one `tidy` per video, and one `tidy-skip` per file it leaves where it is. After
+moving, `tidy-done` says how it went (the app's Tidy button runs it with `--dry-run`, then `--yes`):
+
+```
+@context-notes {"v": 1, "type": "tidy", "video": "/Movies/Amelie.mkv", "folder": "/Movies/context-notes/Amelie.mkv", "items": [{"from": "notes-Amelie.json", "to": "notes-Amelie.json", "folder": false}, {"from": "Amelie analysis", "to": "analysis", "folder": true}]}
+@context-notes {"v": 1, "type": "tidy-skip", "path": "/Movies/notes-Film.json", "reason": "it could belong to Film.mkv or Film.mp4"}
+@context-notes {"v": 1, "type": "tidy-done", "moved": 2, "problems": []}
+```
 
 ## Question and input ids
 
@@ -120,13 +137,16 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 | `generate.send` | `generate_notes.py` | y / n (**n**) | Send the subtitles to the API |
 | `refine.send` | `refine_notes.py` | y / n (**n**) | Send frames and subtitles to the API |
 | `generate.resume` | `generate_notes.py` | p / s (p) | The last run stopped part-way: pick up where it left off, or start again |
+| `refine.unreadable` | `refine_notes.py` | y / n (y) | The frames step couldn't read the reply for some stretches last time: send just those again (n sends nothing) |
 | `refine.resume` | `refine_notes.py` | p / s (p) | The last refine stopped part-way: pick up, or start again from the notes as they were before it |
 | `sync.unmeasured` | `context_notes.py` | y / n (y) | The sync couldn't be measured: treat as in sync? |
 | `sync.drift` | `context_notes.py` | a / c / s (a, or c when re-timing isn't possible) | The timing drifts: re-time, carry on, or skip |
 | `alignment.check` | `context_notes.py` | y / n (y) | Check every note's timing with speech recognition (slow) |
 | `alignment.fix` | `context_notes.py` | y / n (y) | Move the stretches that are out, and rebuild |
 | `notes.limited` | `context_notes.py` | a / s / n (a) | Notes cover only part of the video: add the rest (keeps them; sends only the rest), start again (sends everything), or keep them as they are |
+| `notes.unreadable` | `context_notes.py` | y / n (y) | Claude's reply for some parts couldn't be read last time: send just those lines again (no frames step) |
 | `folder.next` | `context_notes.py` | y / n (y) | One video stopped: go on to the next? |
+| `tidy.move` | `tidy.py` | y / n (y) | Move the working files listed above into their `context-notes` folders |
 | `subs.download` | `context_notes.py` (y), `find_subs.py` (n) | y / n | Download subtitles from OpenSubtitles.com (uses a daily download) |
 | `subs.transcribe` | `context_notes.py`, `find_subs.py` | y / n (n) | Write subtitles from the soundtrack with speech recognition |
 | `api-key` | `make_ass.py --set-api-key` | input, hidden | Saved to `~/.config/context-notes/api-key`, mode 600 |

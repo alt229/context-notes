@@ -35,8 +35,10 @@ Read `CLAUDE.md` first; its rules bind you. Keep your messages short.
    to the **subtitle-prep** agent first. If anything is unclear, ask Erin with AskUserQuestion.
 2. **Check sync before writing.** Delegate to **subtitle-prep** (sync only, there are no notes yet). If the timing
    drifts, ask Erin whether to re-time first (`analyze.py --align`, slow and local).
-3. **Prepare.** Run `python3 chat_notes.py prepare "<video>" "<srt>" [options] -o "<video folder>/<stem>.chat-upload.txt"`.
-   Note the number of parts N. Replies go in `"<video folder>/<stem> chat-replies/"`.
+3. **Prepare.** Run `python3 chat_notes.py prepare "<video>" "<srt>" [options]`. It writes `<stem>.chat-upload.txt`
+   where the video's working files go and prints the path: `context-notes/<video file name>/` beside the video, or
+   beside the video itself for a film an earlier version started. Note the number of parts N. Replies go in
+   `"<that folder>/<stem> chat-replies/"`.
 4. **Write.**
    - Tell Erin N, and that each part is one Opus agent run on her plan's usage.
    - Run the **note-writer** agent once per part. Do parts in order, two at a time at most (K and K+1 together),
