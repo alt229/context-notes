@@ -9,6 +9,9 @@ venv/
 build/
 dist/
 
+# Notes from one Claude session to the next (personal paths)
+HANDOFF.md
+
 # OS / editor
 .DS_Store
 Thumbs.db

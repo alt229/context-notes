@@ -17,6 +17,7 @@ Standard library only.
 import getpass
 import json
 import os
+import signal
 import sys
 import time
 
@@ -28,6 +29,19 @@ VERSION = 1
 def machine():
     """True when a program, not a person at a terminal, is answering (CONTEXT_NOTES_UI=json)."""
     return os.environ.get(ENV, "").strip().lower() == "json"
+
+
+def _stop_on_break(signum, frame):
+    raise KeyboardInterrupt
+
+
+# Windows has no Ctrl-C a program can send to a group of others, so a GUI's Cancel arrives as Ctrl-Break, which would
+# end a script on the spot. Treat it like Ctrl-C instead, so a stopped run keeps what it can (docs/gui-protocol.md).
+if os.name == "nt" and machine() and hasattr(signal, "SIGBREAK"):
+    try:
+        signal.signal(signal.SIGBREAK, _stop_on_break)
+    except ValueError:                                     # not the main thread: nothing to do
+        pass
 
 
 def interactive():

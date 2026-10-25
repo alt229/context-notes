@@ -1,11 +1,10 @@
 """The all-in-one wrapper: finding files, deciding what to run, and whole runs on synthetic videos."""
 import json
-import os
 import re
 import subprocess
 
 import pytest
-from conftest import make_srt, needs_ffmpeg, run_cli
+from conftest import make_srt, needs_ffmpeg, place, run_cli
 
 import context_notes as cn
 
@@ -105,7 +104,7 @@ def wrapper(*args, home, cwd):
 def test_wrapper_runs_everything_then_skips_what_is_done(tmp_path, clips, api, api_key_file, home):
     season = tmp_path / "Test Show" / "Season 1"
     season.mkdir(parents=True)
-    os.symlink(clips / "synced.mp4", season / "S01E01 Pilot.mp4")
+    place(clips / "synced.mp4", season / "S01E01 Pilot.mp4")
     make_srt(season / "S01E01 Pilot.srt", n=24)
     api.responder = both
 
@@ -132,7 +131,7 @@ def test_wrapper_runs_everything_then_skips_what_is_done(tmp_path, clips, api, a
 
 @needs_ffmpeg
 def test_wrapper_limit_then_full_run(tmp_path, clips, api, api_key_file, home):
-    os.symlink(clips / "synced.mp4", tmp_path / "ep.mp4")
+    place(clips / "synced.mp4", tmp_path / "ep.mp4")
     make_srt(tmp_path / "ep.srt", n=24)
     api.responder = both
     r = wrapper(tmp_path / "ep.mp4", "--yes", "--limit", "1:00", "--api-url", api.url, home=home, cwd=tmp_path)
@@ -145,17 +144,32 @@ def test_wrapper_limit_then_full_run(tmp_path, clips, api, api_key_file, home):
     assert ref and all("to 0:01:01 (video time)" in [b for b in c["body"]["messages"][0]["content"]
                                                      if b["type"] == "text"][-1]["text"] for c in ref[-1:])
 
+    sent = len(api.calls)
     r = wrapper(tmp_path / "ep.mp4", "--yes", "--no-refine", "--api-url", api.url, home=home, cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "only covers the first 1:00" in r.stdout
+    assert "only covers the first 1:00" in r.stdout and "-> add the rest (automatic)" in r.stdout
+    assert "--generate" in r.stdout and "--extend" in r.stdout
     spec = json.loads((tmp_path / "notes-ep.json").read_text())
     assert "limit" not in spec and (tmp_path / "notes-ep.json.bak").exists()
+    assert spec["refined"]["limit"] == 60                                          # the frames step's record is kept
+    firsts = [int(re.search(r"Lines to annotate \((\d+) to", c["body"]["messages"][0]["content"]).group(1))
+              for c in api.calls[sent:]]
+    assert firsts and min(firsts) == 11                                            # lines 1-10 aren't sent again
+
+    sent = len(api.calls)
+    r = wrapper(tmp_path / "ep.mp4", "--yes", "--api-url", api.url, home=home, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "The frames were looked at for the first 1:00 before, so only the rest is sent now." in r.stdout
+    starts = [re.search(r"This stretch: (\S+) to", [b for b in c["body"]["messages"][0]["content"]
+                                                     if b["type"] == "text"][-1]["text"]).group(1) for c in api.calls[sent:]]
+    assert starts and starts[0] == "0:01:00", starts                               # the first minute isn't sent again
+    assert "limit" not in json.loads((tmp_path / "notes-ep.json").read_text())["refined"]
 
 
 @needs_ffmpeg
 def test_wrapper_with_drifting_subtitles_carries_on_with_on_screen_notes(tmp_path, clips, api, api_key_file, home,
                                                                           monkeypatch):
-    os.symlink(clips / "drift.mp4", tmp_path / "ep.mp4")
+    place(clips / "drift.mp4", tmp_path / "ep.mp4")
     make_srt(tmp_path / "ep.srt", n=24)
     api.responder = both
     r = wrapper(tmp_path / "ep.mp4", "--yes", "--api-url", api.url, home=home, cwd=tmp_path)
@@ -165,7 +179,7 @@ def test_wrapper_with_drifting_subtitles_carries_on_with_on_screen_notes(tmp_pat
 
 
 def french_film(tmp_path, clips):
-    os.symlink(clips / "french.mp4", tmp_path / "Le Film.mp4")
+    place(clips / "french.mp4", tmp_path / "Le Film.mp4")
     make_srt(tmp_path / "Le Film.en.srt", n=24)
     make_srt(tmp_path / "Le Film.fr.srt", n=24, text="Je ne sais pas ce que tu veux dire, réplique {i}")
 
@@ -202,7 +216,7 @@ def test_wrapper_french_film_with_english_subtitles_compares_both(tmp_path, clip
 
 @needs_ffmpeg
 def test_wrapper_says_when_there_are_no_subtitles(tmp_path, clips, api_key_file, home):
-    os.symlink(clips / "synced.mp4", tmp_path / "bare.mp4")
+    place(clips / "synced.mp4", tmp_path / "bare.mp4")
     r = wrapper(tmp_path, "--yes", home=home, cwd=tmp_path)
     assert r.returncode == 1 and "No English subtitles for bare.mp4" in r.stdout
 

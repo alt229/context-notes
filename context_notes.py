@@ -7,6 +7,7 @@ context_notes.py - the whole workflow, for one video or a folder of them.
     python3 context_notes.py "Season 1" --status               what's done and what's left; runs nothing
     python3 context_notes.py film.mkv --limit 5:00             try it on the first 5 minutes
     python3 context_notes.py film.mkv --film-language fr       a French film (often detected from the audio track)
+    python3 context_notes.py "Season 1" --reading-speed 120    notes stay up longer (free: only rebuilds the .ass)
 
 For each video it:
   1. finds the subtitles: an .srt beside the video (film.srt, film.en.srt, ...) or a track inside it;
@@ -18,7 +19,8 @@ For each video it:
   3. has Claude write the notes from the dialogue        (make_ass.py --generate: shows the cost, asks first)
   4. has Claude improve them using the video's frames    (make_ass.py --refine: shows the cost, asks first)
   5. leaves <video>.notes.ass beside the video for VLC
-Steps already done are skipped (the notes file records them), so it is safe to stop and run it again.
+Steps already done are skipped (the notes file records them), so it is safe to stop and run it again. A finished
+video whose .ass is out of date (a new look, or the notes file was edited) just has its .ass rebuilt, for free.
 Every command is printed before it runs, so you can rerun any single step by hand.
 """
 import argparse
@@ -54,9 +56,9 @@ def show_cmd(cmd, cwd=None):
     """How the command looks typed by hand: scripts as "$CN/name.py", files in the video's folder by name only."""
     def short(a):
         a = str(a)
-        if a.startswith(str(HERE) + "/"):
-            return '"$CN/' + a[len(str(HERE)) + 1:] + '"'
-        if cwd and a.startswith(str(cwd) + "/") and "/" not in a[len(str(cwd)) + 1:]:
+        if a.startswith(str(HERE) + os.sep):
+            return '"$CN/' + a[len(str(HERE)) + 1:].replace(os.sep, "/") + '"'
+        if cwd and a.startswith(str(cwd) + os.sep) and os.sep not in a[len(str(cwd)) + 1:]:
             a = a[len(str(cwd)) + 1:]
         return shlex.quote(a)
     return "$ " + " ".join(["python3"] + [short(c) for c in cmd[1:]])
@@ -205,6 +207,53 @@ def film_language(video, opts, spec=None):
     return "en", "default"
 
 
+def ass_look(ass):
+    """What a built .ass says it was built with (its "; Look:" line): {"build", "background", "opacity", "wpm"},
+    or None for one built before 0.2.0."""
+    try:
+        with open(ass, encoding="utf-8-sig", errors="replace") as f:
+            m = make_ass.LOOK_LINE.search(f.read(2000))
+    except OSError:
+        return None
+    if not m:
+        return None
+    return {"build": int(m["build"]), "background": m["background"], "wpm": float(m["wpm"]),
+            "opacity": float(m["opacity"]) if m["opacity"] else None}
+
+
+def wanted_look(spec, opts):
+    """The look a build would give now: the options given, else the notes file's own, else the defaults."""
+    timing = (spec or {}).get("timing")
+    saved = timing.get("wpm") if isinstance(timing, dict) else None
+    try:
+        wpm = float(getattr(opts, "reading_speed", None) or saved or make_ass.DEFAULT_TIMING["wpm"])
+    except (TypeError, ValueError):
+        wpm = None                                   # a bad value in the notes file: the rebuild says what's wrong
+    background = (getattr(opts, "note_background", None) or (spec or {}).get("note_background")
+                  or make_ass.DEFAULT_BACKGROUND)
+    opacity = getattr(opts, "note_opacity", None)
+    if opacity is None:
+        opacity = (spec or {}).get("note_opacity", make_ass.DEFAULT_OPACITY)
+    try:
+        opacity = float(opacity)
+    except (TypeError, ValueError):
+        opacity = None
+    return {"build": make_ass.BUILD, "background": background, "wpm": wpm, "opacity": opacity}
+
+
+def ass_current(ass, notes, spec, opts):
+    """Is the .ass newer than the notes, and built the way it would be built now?"""
+    if not (ass.exists() and notes.exists() and ass.stat().st_mtime >= notes.stat().st_mtime):
+        return False
+    have, want = ass_look(ass), wanted_look(spec, opts)
+    if have is None or want["wpm"] is None or have["build"] < want["build"] or have["background"] != want["background"]:
+        return False
+    if want["background"] == "see-through" and (want["opacity"] is None or have["opacity"] is None
+                                                 or abs(have["opacity"] - want["opacity"]) > 0.05):
+        return False
+    return abs(have["wpm"] - want["wpm"]) < 0.05
+
+
 def inspect(video, opts):
     subs = subtitle_files(video)
     film, how = film_language(video, opts)
@@ -222,8 +271,10 @@ def inspect(video, opts):
     st["notes_ok"] = have > 0 and covers((spec or {}).get("limit"), opts.limit) and not opts.redo
     st["refined_ok"] = (bool(refined) and not refined.get("stopped_after")       # a refine that stopped part-way
                         and covers((refined or {}).get("limit"), opts.limit) and st["notes_ok"])   # isn't finished
-    st["ass_ok"] = ass.exists() and notes.exists() and ass.stat().st_mtime >= notes.stat().st_mtime
+    st["ass_ok"] = ass_current(ass, notes, spec, opts)
     st["done"] = st["notes_ok"] and st["ass_ok"] and (st["refined_ok"] or opts.no_refine)
+    # only the .ass is behind: a free rebuild, no Claude
+    st["rebuild"] = st["notes_ok"] and (st["refined_ok"] or opts.no_refine) and not st["ass_ok"]
     return st
 
 
@@ -255,7 +306,7 @@ def status_fields(st):
             "notes": st["have"], "limit": spec.get("limit"),
             "notes_stopped": st["notes"].with_suffix(".partial.json").exists(),
             "refined": "stopped" if refined.get("stopped_after") else ("yes" if refined else "no"),
-            "ass": st["ass"].name if st["ass"].exists() else None}
+            "ass": st["ass"].name if st["ass"].exists() else None, "rebuild": st["rebuild"]}
 
 
 def status_line(st):
@@ -270,6 +321,8 @@ def status_line(st):
                   else ", not refined")
     else:
         notes = "no notes yet"
+    if st["rebuild"]:
+        notes += f"; {st['ass'].name if st['ass'].exists() else 'the .ass'} needs rebuilding (free)"
     state = "done" if st["done"] else "to do"
     return f"  [{state:>5}] {st['video'].name}\n          subtitles: {subs}; {notes}"
 
@@ -312,6 +365,27 @@ def common_api_args(opts):
 
 def limit_args(opts):
     return ["--limit", f"{opts.limit:g}"] if opts.limit else []
+
+
+def rebuild_subtitles(st, opts):
+    """The subtitles a finished video's notes were placed on, for a rebuild: what inspect() found, else (a film not
+    in English) the other language's, as process() falls back to when writing the notes."""
+    if st["srt"] or st["film_language"] == "en":
+        return st["srt"]
+    other = "en" if languages.same(st["display_lang"], st["film_language"]) else st["film_language"]
+    return pick_subtitles(st["subs"], other, opts.limit)[0]
+
+
+def look_args(opts):
+    """How the notes look on screen. Given to every build, which remembers them in the notes file."""
+    out = []
+    if getattr(opts, "reading_speed", None):
+        out += ["--reading-speed", f"{opts.reading_speed:g}"]
+    if getattr(opts, "note_background", None):
+        out += ["--note-background", opts.note_background]
+    if getattr(opts, "note_opacity", None) is not None:
+        out += ["--note-opacity", f"{opts.note_opacity:g}"]
+    return out
 
 
 def get_subtitles(video, lang, opts, required=True, accept_unknown=False):
@@ -370,7 +444,7 @@ def _look_further(video, lang, opts, find_subs, film=None):
 def report_shift_file(video):
     """The corrected subtitle file the last analyze.py --shift auto wrote, if any ('' if none)."""
     try:
-        report = json.loads((video.parent / f"{video.stem} analysis" / "analysis.json").read_text())
+        report = json.loads((video.parent / f"{video.stem} analysis" / "analysis.json").read_text(encoding="utf-8"))
         return (report.get("shift") or {}).get("file", "")
     except (OSError, ValueError):
         return ""
@@ -388,7 +462,7 @@ def sync_original(video, original, opts):
         say(f"Using {fixed} (shifted to match the video).")
         return video.parent / fixed
     try:
-        sync = json.loads((video.parent / f"{video.stem} analysis" / "analysis.json").read_text())["sync"]
+        sync = json.loads((video.parent / f"{video.stem} analysis" / "analysis.json").read_text(encoding="utf-8"))["sync"]
         if sync_decision(sync) == "align":
             say(f"  ! {original.name} drifts against this video, so fewer of its lines will line up. "
                 f"analyze.py --align --film-language ... can re-time it.")
@@ -442,7 +516,7 @@ def check_sync(video, srt, film, display_lang, embedded, opts):
            video.parent):
         raise Stop("The sync check failed.")
     try:
-        sync = json.loads((video.parent / f"{video.stem} analysis" / "analysis.json").read_text())["sync"]
+        sync = json.loads((video.parent / f"{video.stem} analysis" / "analysis.json").read_text(encoding="utf-8"))["sync"]
     except (OSError, ValueError, KeyError):
         raise Stop("The sync check didn't leave a report to read.")
     decision = sync_decision(sync)
@@ -536,7 +610,7 @@ def alignment_step(video, srt, notes, film, display_lang, original, opts):
         say("  (The alignment check couldn't finish; the notes are built as they are.)")
         return srt
     try:
-        runs = json.loads((folder / "alignment.json").read_text())["stretches"]
+        runs = json.loads((folder / "alignment.json").read_text(encoding="utf-8"))["stretches"]
     except (OSError, ValueError, KeyError):
         return srt
     if not runs:
@@ -550,7 +624,7 @@ def alignment_step(video, srt, notes, film, display_lang, original, opts):
     fixed = align_check.fixed_path(srt)
     if not fixed.exists():
         return srt
-    if run(script("make_ass.py", fixed, notes, "--video", video), video.parent):
+    if run(script("make_ass.py", fixed, notes, "--video", video, *look_args(opts)), video.parent):
         raise Stop("Rebuilding the .ass from the corrected subtitles failed.")
     say(f"Rebuilt {ass_path_for(video).name} from {fixed.name}.")
     return fixed
@@ -576,6 +650,15 @@ def process(video, opts):
             alignment_step(video, st["srt"], st["notes"], st["film_language"], st["display_lang"],
                            original_for(video, st["film_language"], st["display_lang"], opts), opts)
         return "done"
+    placed_on = rebuild_subtitles(st, opts) if st["rebuild"] else None
+    if placed_on and not opts.show_subs and not opts.check_alignment:
+        say(f"The notes are done; rebuilding {st['ass'].name} (free: nothing is sent to Claude).")
+        say(f"$ cd {shlex.quote(str(video.absolute().parent))}")
+        prompts.event("step", step="build")
+        if run(script("make_ass.py", placed_on, st["notes"], "--video", video, *look_args(opts)), video.parent):
+            raise Stop("Building the .ass failed.")
+        say(f"Ready: play {video.name} in VLC; {st['ass'].name} is beside it.")
+        return "ready"
     say(f"$ cd {shlex.quote(str(video.absolute().parent))}")
     prompts.event("step", step="subtitles")
 
@@ -621,12 +704,16 @@ def process(video, opts):
     have = len((spec or {}).get("notes", []))
 
     need_generate = opts.redo or not have
+    extend = False                               # keep the notes there are and write only the rest
     if have and not opts.redo and not covers(spec.get("limit"), opts.limit):
         lim = make_ass.fmt_limit(spec["limit"])
         want = "the whole video" if not opts.limit else f"the first {make_ass.fmt_limit(opts.limit)}"
-        pick = ask(f"{notes.name} only covers the first {lim}. Write new notes for {want}? (the old file is kept as .bak)",
-                   {"y": "yes, write new notes", "n": "no, keep these"}, "y", opts.yes, id="notes.limited")
-        need_generate = pick == "y"
+        pick = ask(f"{notes.name} only covers the first {lim}. Write notes for {want}? Adding to them keeps these "
+                   f"{have} notes and sends only what comes after {lim}; starting again sends everything (the old "
+                   f"file is kept as .bak).",
+                   {"a": "add the rest", "s": "start again", "n": "no, keep these"}, "a", opts.yes,
+                   id="notes.limited")
+        need_generate, extend = pick in ("a", "s"), pick == "a"
     refined = (spec or {}).get("refined")
     need_refine = not opts.no_refine and (need_generate or not refined or not covers(refined.get("limit"), opts.limit)
                                           or bool(refined.get("stopped_after")))     # refine_notes asks to pick up
@@ -661,11 +748,11 @@ def process(video, opts):
         say(f"Writing the notes for “{title}”...")
         prompts.event("step", step="generate")
         cmd = script("make_ass.py", srt, notes, "--generate", "--video", video, "--title", title,
-                     *limit_args(opts), *lang_args, *common_api_args(opts))
+                     *limit_args(opts), *lang_args, *common_api_args(opts), *look_args(opts))
         if offset:
             cmd += ["--offset", f"{offset:+.2f}"]
         if have:
-            cmd.append("--force")
+            cmd.append("--extend" if extend else "--force")
         if run(cmd, video.parent):
             raise Stop("Stopped at the note-writing step (nothing more was sent).")
 
@@ -674,7 +761,7 @@ def process(video, opts):
         say("Improving the notes using the video's frames...")
         prompts.event("step", step="refine")
         cmd = script("make_ass.py", srt, notes, "--refine", "--video", video, "--frames", opts.frames,
-                     *limit_args(opts), *lang_args, *common_api_args(opts))
+                     *limit_args(opts), *lang_args, *common_api_args(opts), *look_args(opts))
         if assume_synced:
             cmd.append("--assume-synced")
         if run(cmd, video.parent):
@@ -682,10 +769,10 @@ def process(video, opts):
 
     # 5. make sure the .ass is current
     ass = ass_path_for(video)
-    stale = not (ass.exists() and ass.stat().st_mtime >= notes.stat().st_mtime)
+    stale = not ass_current(ass, notes, load_notes(notes), opts)
     if not need_generate and not need_refine and (stale or display_args):
         prompts.event("step", step="build")
-        if run(script("make_ass.py", srt, notes, "--video", video, *display_args), video.parent):
+        if run(script("make_ass.py", srt, notes, "--video", video, *display_args, *look_args(opts)), video.parent):
             raise Stop("Building the .ass failed.")
     alignment_step(video, srt, notes, film, display_lang, original, opts)
     say(f"Ready: play {video.name} in VLC; {ass.name} is beside it.")
@@ -730,9 +817,21 @@ def main(argv=None):
     ap.add_argument("--offline", action="store_true",
                     help="when a video has no subtitles, don't search OpenSubtitles.com for them")
     ap.add_argument("--align-model", help="speech model for re-timing (default: base.en, or small for other languages)")
+    look = ap.add_argument_group("how the notes look (free to change later: the .ass is rebuilt; remembered per video)")
+    look.add_argument("--reading-speed", type=float, metavar="WPM",
+                      help=f"words a minute each note is timed for (default {make_ass.DEFAULT_TIMING['wpm']:g}, "
+                           "0.4 s a word; lower keeps notes up longer)")
+    look.add_argument("--note-background", choices=list(make_ass.BACKGROUNDS),
+                      help=f"the box behind each note (default {make_ass.DEFAULT_BACKGROUND}; dark is the look "
+                           "before 0.2.0; none outlines the text instead)")
+    look.add_argument("--note-opacity", type=make_ass.percent_arg, metavar="PERCENT",
+                      help=f"how solid the see-through box is, from 0 (invisible) to 100 (solid); default "
+                           f"{make_ass.DEFAULT_OPACITY}")
     ap.add_argument("--api-key-file", help=argparse.SUPPRESS)
     ap.add_argument("--api-url", help=argparse.SUPPRESS)
     opts = ap.parse_args(argv)
+    if opts.reading_speed is not None and opts.reading_speed <= 0:
+        ap.error("--reading-speed is words a minute, a number above 0 (the default, 150, is 0.4 s a word)")
     opts.subs_language = languages.code(opts.subs_language) if opts.subs_language else None
     opts.show_subs = languages.code(opts.show_subs) if opts.show_subs else None
 
@@ -754,7 +853,7 @@ def main(argv=None):
         prompts.event("status", **status_fields(st))
     if opts.status:
         return 0
-    if not all(inspect(v, opts)["done"] for v in videos):
+    if not all(st["done"] or st["rebuild"] for st in (inspect(v, opts) for v in videos)):    # a rebuild needs no key
         import generate_notes
         try:
             generate_notes.load_key(opts.api_key_file)          # stop now, not after minutes of local work

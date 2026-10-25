@@ -1,15 +1,15 @@
 """Progress reports, and stopping part-way (Ctrl-C, or a GUI's Cancel): nothing half-written, nothing paid for lost."""
 import json
 import os
-import signal
 import stat
 import subprocess
 import sys
 import threading
+import time
 import types
 
 import pytest
-from conftest import ROOT, make_srt, needs_ffmpeg, run_cli
+from conftest import INTERRUPTED, NEW_GROUP, ROOT, WINDOWS, interrupt, make_srt, needs_ffmpeg, place, run_cli
 from test_prompts import GUI, drive, events
 
 import analyze
@@ -25,7 +25,7 @@ def cancel_when(test):
     def on_event(ev, p):
         if not on_event.sent and test(ev):
             on_event.sent = True
-            os.killpg(p.pid, signal.SIGINT)
+            interrupt(p)
     on_event.sent = False
     return on_event
 
@@ -50,10 +50,13 @@ def test_write_text_safely_writes_and_keeps_permissions(tmp_path):
     new = tmp_path / "new.txt"
     make_ass.write_text_safely(new, "héllo\n")
     assert new.read_text(encoding="utf-8") == "héllo\n"
-    assert stat.S_IMODE(new.stat().st_mode) == stat.S_IMODE(plain.stat().st_mode)     # a new file: the usual mode
-    plain.chmod(0o640)
+    if not WINDOWS:                                 # (mode bits mean little on Windows)
+        assert stat.S_IMODE(new.stat().st_mode) == stat.S_IMODE(plain.stat().st_mode)  # a new file: the usual mode
+        plain.chmod(0o640)
     make_ass.write_text_safely(plain, "y")
-    assert plain.read_text() == "y" and stat.S_IMODE(plain.stat().st_mode) == 0o640   # an old file keeps its own
+    assert plain.read_text() == "y"
+    if not WINDOWS:
+        assert stat.S_IMODE(plain.stat().st_mode) == 0o640                              # an old file keeps its own
     assert not leftovers(tmp_path)
 
 
@@ -61,7 +64,10 @@ def test_write_text_safely_writes_through_a_symlink(tmp_path):
     real = tmp_path / "real.json"
     real.write_text("old")
     link = tmp_path / "link.json"
-    link.symlink_to(real)
+    try:
+        link.symlink_to(real)
+    except OSError:
+        pytest.skip("this system doesn't allow symlinks (Windows without Developer Mode)")
     make_ass.write_text_safely(link, "new")
     assert link.is_symlink() and real.read_text() == "new"
 
@@ -89,6 +95,39 @@ def test_a_folder_that_takes_no_new_files_is_written_in_place_as_before(tmp_path
         assert path.read_text() == "new"
     finally:
         folder.chmod(0o700)
+
+
+# ---------------------------------------------------------------- Windows: Ctrl-Break, and waiting awake
+def test_ctrl_break_stops_a_script_like_ctrl_c():
+    with pytest.raises(KeyboardInterrupt):
+        prompts._stop_on_break(None, None)
+
+
+def test_waiting_for_the_api_stays_awake(api, monkeypatch):
+    """On Windows a request waits in a helper thread, so Ctrl-C (or Cancel) lands at once instead of when the reply
+    comes. Forced on here, so it's tried on every system."""
+    import _thread
+
+    import generate_notes as gn
+    from conftest import message
+    monkeypatch.setattr(gn, "WAIT_IN_THREAD", True)
+    gate = threading.Event()
+    api.responder = lambda n, body, h: (gate.wait(20), (200, message("[]")))[1]
+    timer = threading.Timer(0.5, _thread.interrupt_main)
+    timer.start()
+    started = time.time()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            gn.call_api("sk-ant-x", "m", "s", "hi", url=api.url)
+        assert time.time() - started < 5                                   # it didn't wait for the reply
+    finally:
+        gate.set()
+        timer.cancel()
+    api.responder = lambda n, body, h: (400, {"error": {"message": "nope"}})
+    with pytest.raises(SystemExit, match="API error 400: nope"):                  # errors still come through
+        gn.call_api("sk-ant-x", "m", "s", "hi", url=api.url)
+    api.responder = lambda n, body, h: (200, message("[]"))
+    assert gn.call_api("sk-ant-x", "m", "s", "hi", url=api.url)["content"][0]["text"] == "[]"
 
 
 # ---------------------------------------------------------------- the speech-recognition transcript cache
@@ -173,13 +212,15 @@ def test_cancel_while_writing_notes_keeps_what_was_paid_for(tmp_path, api, api_k
                              script="make_ass.py", on_event=cancel)
     finally:
         gate.set()
-    assert cancel.sent and code == -signal.SIGINT, out
+    assert cancel.sent and code in INTERRUPTED, out
     assert "Stopped after part 1 of" in out
     assert json.loads((tmp_path / "notes-ep.partial.json").read_text())["notes"]      # part 1's notes, kept
     assert not (tmp_path / "notes-ep.json").exists() and not (tmp_path / "ep.ass").exists()
     assert not leftovers(tmp_path)
 
 
+@pytest.mark.skipif(WINDOWS, reason="Windows can't send Ctrl-C to one program from another; the GUI's Ctrl-Break "
+                                     "is tested above")
 def test_ctrl_c_in_a_terminal_keeps_the_notes_too(tmp_path, api, api_key_file, home):
     """No GUI: the same signal a Ctrl-C sends, after the first part's line is finished."""
     from test_generate_notes import notes_for_each_part
@@ -191,18 +232,18 @@ def test_ctrl_c_in_a_terminal_keeps_the_notes_too(tmp_path, api, api_key_file, h
         env.pop(name, None)
     p = subprocess.Popen([sys.executable, str(ROOT / "make_ass.py"), str(srt), "--generate", "--yes", "--api-url",
                           api.url], cwd=tmp_path, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                         text=True, start_new_session=True)
+                         text=True, **NEW_GROUP)
     out = []
     try:
         for line in p.stdout:
             out.append(line)
             if line.startswith("  part 1/") and line.rstrip().endswith("notes"):
-                os.killpg(p.pid, signal.SIGINT)
+                interrupt(p)
         code = p.wait(timeout=30)
     finally:
         gate.set()
     text = "".join(out)
-    assert code == -signal.SIGINT and "Stopped after part 1 of" in text and "@context-notes" not in text, text
+    assert code in INTERRUPTED and "Stopped after part 1 of" in text and "@context-notes" not in text, text
     assert (tmp_path / "notes-ep.partial.json").exists() and not (tmp_path / "notes-ep.json").exists()
 
 
@@ -221,7 +262,7 @@ def clip(tmp_path_factory):
 @needs_ffmpeg
 def test_cancel_in_the_wrapper_then_run_it_again(tmp_path, clip, api, api_key_file, home):
     from test_context_notes import both
-    os.symlink(clip, tmp_path / "ep.mp4")
+    place(clip, tmp_path / "ep.mp4")
     make_srt(tmp_path / "ep.srt", n=24, text=LONG)
     gate = threading.Event()
     api.responder = held_after_first(both, gate)

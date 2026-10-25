@@ -2,10 +2,9 @@ import getpass
 import json
 import os
 import re
-import stat
 
 import pytest
-from conftest import make_srt, message, run_cli
+from conftest import WINDOWS, assert_private, make_srt, message, run_cli
 
 import generate_notes as gn
 import make_ass
@@ -85,8 +84,8 @@ def test_set_key_writes_a_private_file(home, monkeypatch):
     gn.set_key()
     path = home / ".config" / "context-notes" / "api-key"
     assert path.read_text() == "sk-ant-abc123456\n"
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert_private(path)
+    assert_private(path.parent, 0o700)
     assert gn.load_key() == "sk-ant-abc123456"
 
 
@@ -97,6 +96,7 @@ def test_set_key_rejects_things_that_are_not_keys(home, monkeypatch):
     assert not (home / ".config" / "context-notes" / "api-key").exists()
 
 
+@pytest.mark.skipif(WINDOWS, reason="Windows keeps the key private through your user folder, not mode bits")
 def test_load_key_refuses_a_world_readable_file(api_key_file):
     api_key_file.chmod(0o644)
     with pytest.raises(SystemExit) as e:
@@ -221,6 +221,7 @@ def test_cli_generate_then_build(tmp_path, api, home):
     assert api.calls[0]["headers"]["x-api-key"] == "sk-ant-test"
 
 
+@pytest.mark.skipif(WINDOWS, reason="on Windows a hidden prompt reads the keyboard, never stdin")
 def test_cli_set_api_key_reads_from_stdin(tmp_path, home):
     r = run_cli("make_ass.py", "--set-api-key", cwd=tmp_path, home_dir=home, stdin="sk-ant-xyz-9876\n")
     assert r.returncode == 0 and "9876" in r.stdout and "sk-ant-xyz" not in r.stdout

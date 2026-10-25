@@ -86,10 +86,19 @@ def need(module, hint):
         sys.exit(f"This step needs '{module}'. Install it with:  {hint}")
 
 
+def ffmpeg_hint():
+    """How to install ffmpeg on this computer."""
+    if sys.platform == "darwin":
+        return "brew install ffmpeg"
+    if os.name == "nt":
+        return "winget install Gyan.FFmpeg  (then open a new window)"
+    return "sudo apt install ffmpeg  (or your system's package manager)"
+
+
 def need_ffmpeg():
     for tool in ("ffmpeg", "ffprobe"):
         if not shutil.which(tool):
-            sys.exit(f"This step needs {tool}. Install it with:  brew install ffmpeg")
+            sys.exit(f"This step needs {tool}. Install it with:  {ffmpeg_hint()}")
 
 
 # ---------------------------------------------------------------- subtitles only
@@ -109,7 +118,7 @@ IMAGE_SUB_CODECS = {"dvd_subtitle", "hdmv_pgs_subtitle", "dvb_subtitle", "xsub",
 def subtitle_tracks(video):
     """List the subtitle streams in a video file (empty list if none)."""
     r = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams",
-                        "-select_streams", "s", str(video)], capture_output=True, text=True)
+                        "-select_streams", "s", str(video)], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode:
         sys.exit(f"ffprobe couldn't read {video}:\n{r.stderr}")
     tracks = []
@@ -180,7 +189,8 @@ def extract_subtitles(video, track, out, sdh=False):
     """Write one embedded text subtitle track to an SRT file."""
     with make_ass.replacing(out) as tmp:             # all at once: a stopped extraction leaves no half file
         r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-map", f"0:s:{track['n']}",
-                            "-c:s", "srt", "-f", "srt", str(tmp)], capture_output=True, text=True)
+                            "-c:s", "srt", "-f", "srt", str(tmp)],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
         if r.returncode:
             sys.exit(f"ffmpeg couldn't extract subtitle track {track['n']}:\n{r.stderr[-600:]}")
     cues = make_ass.parse_srt(out)
@@ -204,7 +214,7 @@ def extract_subtitles(video, track, out, sdh=False):
 # ---------------------------------------------------------------- video helpers
 def probe(video):
     r = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format",
-                        "-show_streams", str(video)], capture_output=True, text=True)
+                        "-show_streams", str(video)], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode:
         sys.exit(f"ffprobe couldn't read {video}:\n{r.stderr}")
     info = json.loads(r.stdout)
@@ -469,7 +479,7 @@ def run_ffmpeg_frames(video, outdir, dense, limit=None):
     def attempt(sync_flag):
         cmd = ["ffmpeg", "-hide_banner", *pre, "-i", str(video), "-an", "-vf", vf,
                *sync_flag, "-q:v", "4", str(outdir / "%06d.jpg")]
-        return subprocess.run(cmd, capture_output=True, text=True)
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     # passthrough, not vfr: vfr DROPS frames whose timestamp repeats an earlier one, after showinfo has already
     # printed them, so the list of times got longer than the list of files and every frame after a drop was
@@ -498,7 +508,7 @@ def run_ffmpeg_frames(video, outdir, dense, limit=None):
 def keyframe_times(video, limit=None):
     """Times of the video's keyframes, from the container (no decoding)."""
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags",
-                        "-of", "csv=p=0", str(video)], capture_output=True, text=True)
+                        "-of", "csv=p=0", str(video)], capture_output=True, text=True, encoding="utf-8", errors="replace")
     keys = []
     for line in r.stdout.splitlines():
         t, _, flags = line.partition(",")
@@ -992,7 +1002,7 @@ def main():
         report["contact_sheets"] = len(sheets)
         print(f"  {len(frames)} frames -> {len(sheets)} contact sheets in {out / 'sheets'}")
 
-    make_ass.write_text_safely(out / "analysis.json", json.dumps(report, indent=1), encoding=None)
+    make_ass.write_text_safely(out / "analysis.json", json.dumps(report, indent=1))
     with open(out / "report.txt", "w", encoding="utf-8") as f:
         f.write(f"{video.name}  ({hms(duration)})\nsubtitles: {srt.name}\n\n")
         f.write(f"SYNC: {sync['verdict']}\n  overall offset: {sync['offset']} s; by thirds: {sync['thirds']}\n\n")

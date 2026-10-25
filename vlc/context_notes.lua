@@ -1,5 +1,5 @@
 --[[
-  Context Notes for VLC (pre-alpha)
+  Context Notes for VLC (alpha)
   ---------------------------------
   When a video starts, looks for "<video name>.notes.ass" next to it and loads
   it as a subtitle track, keeping only the kinds of notes you've switched on

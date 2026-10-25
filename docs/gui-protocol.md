@@ -98,6 +98,19 @@ These come from `context_notes.py`, so a GUI can show which video and which step
 - `video-result`: `ready` (built now), `done` (nothing needed doing) or `stopped` (with a `reason`). It isn't
   sent for a video whose run was cancelled.
 
+### `status`
+
+`context_notes.py --status` sends one per video, with what `--status` prints:
+
+```
+@context-notes {"v": 1, "type": "status", "path": "/Movies/Amelie.mkv", "name": "Amelie.mkv", "done": false, "subtitles": "Amelie.srt", "film_language": "fr", "notes": 100, "limit": null, "notes_stopped": false, "refined": "yes", "ass": "Amelie.notes.ass", "rebuild": true}
+```
+
+- `refined`: `yes`, `no` or `stopped` (part-way).
+- `rebuild`: the notes are finished and only the `.ass` is out of date (older than the notes, or built with a
+  different look from the `--reading-speed` / `--note-background` / `--note-opacity` given, or by an older
+  `make_ass.py`). A run rebuilds it for free: nothing is sent to Claude, and no API key is needed.
+
 ## Question and input ids
 
 The ids are stable, so a GUI can show its own wording or a special dialog. The `text` is always there as a fallback.
@@ -112,7 +125,7 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 | `sync.drift` | `context_notes.py` | a / c / s (a, or c when re-timing isn't possible) | The timing drifts: re-time, carry on, or skip |
 | `alignment.check` | `context_notes.py` | y / n (y) | Check every note's timing with speech recognition (slow) |
 | `alignment.fix` | `context_notes.py` | y / n (y) | Move the stretches that are out, and rebuild |
-| `notes.limited` | `context_notes.py` | y / n (y) | Notes cover only part of the video: write them for all of it? |
+| `notes.limited` | `context_notes.py` | a / s / n (a) | Notes cover only part of the video: add the rest (keeps them; sends only the rest), start again (sends everything), or keep them as they are |
 | `folder.next` | `context_notes.py` | y / n (y) | One video stopped: go on to the next? |
 | `subs.download` | `context_notes.py` (y), `find_subs.py` (n) | y / n | Download subtitles from OpenSubtitles.com (uses a daily download) |
 | `subs.transcribe` | `context_notes.py`, `find_subs.py` | y / n (n) | Write subtitles from the soundtrack with speech recognition |
@@ -159,6 +172,12 @@ Cancel works like Ctrl-C in Terminal: send `SIGINT` to the run's whole process g
 - Start the run in a process group of its own. In Python that's `subprocess.Popen(..., start_new_session=True)`.
   To cancel, call `os.killpg(p.pid, signal.SIGINT)`.
 - Signal the group, not just the process you started, because the step that's running needs the signal too.
+- **On Windows**, which has no Ctrl-C one program can send to a group of others:
+  - Start the run with `creationflags=subprocess.CREATE_NEW_PROCESS_GROUP`, and send
+    `p.send_signal(signal.CTRL_BREAK_EVENT)`. The scripts treat Ctrl-Break as Ctrl-C when they're in json mode.
+  - Run your program with a console (`python.exe`, not `pythonw.exe`), or Ctrl-Break can't be delivered.
+  - A script that's waiting for an answer only notices Ctrl-Break once its read returns. If a `question` is
+    pending, send an empty line too; the script stops before acting on it.
 
 What happens then:
 - **Notes Claude has already written are kept**, in `notes-<name>.partial.json`. The next run asks whether to pick
@@ -167,6 +186,9 @@ What happens then:
   asks whether to pick up there (`refine.resume`), which is the default.
 - **Nothing is left half-written.** Caches, subtitle files, notes and the `.ass` are written all at once, so each
   is either the old version or the new one.
+- **The same goes for a run that ends with no warning** (killed, the window closed, the power cut): the notes so
+  far are saved after every request (`<notes>.partial.json`, or the notes file's `refined.stopped_after`), so the
+  next run can pick up after the last request that finished.
 - `context_notes.py` gives the running step up to 10 s to finish tidying up. Then it prints "Stopped. Rerun the
   same command to pick up where this left off." and exits with code 130.
 - A script run directly ends as killed by `SIGINT`: status 130 in a shell, or -2 from Python's `subprocess`.

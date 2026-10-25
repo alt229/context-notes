@@ -6,7 +6,7 @@ Notes appear as small boxed overlays while you watch, in VLC (or any player that
 
 ![A note about British slang popping up over a subtitled scene](docs/screenshot.png)
 
-> **Status: pre-alpha.** It works end to end, but it is young, tested mostly on English-language British comedy, and the notes are written by an AI. Expect rough edges, and expect the occasional wrong note (see [Limitations](#limitations)).
+> **Status: alpha.** It works end to end, but it is young, tested mostly on English-language British comedy, and the notes are written by an AI. Expect rough edges, and expect the occasional wrong note (see [Limitations](#limitations)).
 
 ## Why
 
@@ -70,6 +70,8 @@ pip install -r requirements.txt
 python3 make_ass.py examples/help-desk/the-help-desk.srt examples/help-desk/notes-the-help-desk.json -o /tmp/demo.ass
 ```
 
+On Windows, see [Windows](#windows) for the same steps in PowerShell.
+
 Then with your own episodes (put your own files wherever you like; nothing in this repository needs them to live in it):
 
 ```bash
@@ -102,6 +104,27 @@ python3 make_ass.py episode.srt --refine --video episode.mp4
 
 Your video has subtitles inside it? Skip the SRT: `python3 analyze.py episode.mp4` extracts them (`--list-tracks`, `--sub-track N`, `--strip-sdh` are there if you need them).
 
+## Windows
+
+Everything runs on Windows itself; WSL isn't needed. In PowerShell:
+
+```powershell
+winget install Python.Python.3.13 Gyan.FFmpeg VideoLAN.VLC Git.Git
+# then open a new PowerShell window, so it finds them
+git clone https://github.com/alt229/context-notes.git
+cd context-notes
+python -m venv .venv
+.venv\Scripts\Activate.ps1          # if PowerShell refuses: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+pip install -r requirements.txt
+python app.py
+```
+
+- The commands in this README say `python3`, as on macOS and Linux. On Windows, type `python`.
+- Your API key is kept in `C:\Users\<you>\.config\context-notes\api-key`.
+- Network drives and shares (`Y:\Movies`, `\\nas\Movies`) work as they are.
+- The VLC extension goes in `%APPDATA%\vlc\lua\extensions\`, and the app's Settings can put it there.
+- Windows support is new, and so far less tried than macOS.
+
 ## The app, in your browser
 
 Prefer buttons to Terminal? Start the app, and it opens a page in your browser:
@@ -113,8 +136,14 @@ python3 app.py
 - **Choose** a film or a folder of episodes. The list shows what's already done for each video.
 - **Pick how the notes are written:** best (Claude Opus) or cheaper (Claude Sonnet), whether Claude also looks at the
   frames, and how much of the film. More options has the rest, such as subtitles in another language.
+- **On screen:** how long notes stay up, in seconds a word (empty keeps each film's own, 0.4 unless you changed it),
+  and what's behind them: a see-through box (and how solid it is, 30% unless you change it), the dark box from
+  before, or no box with outlined text. Changing these for a film that's already done is free: the list says "Needs
+  a rebuild", and the button becomes "Rebuild (free)".
 - **Write the notes.** The cost appears on screen before anything is sent, along with any other question (picking up
-  a stopped run, for example). Progress is shown as it goes, and Cancel stops it the way Ctrl-C does.
+  a stopped run, for example). It's sent after 10 seconds unless you press Wait or Don't send, so a whole season can
+  run on its own; untick "Send 10 seconds after showing the cost" to always decide yourself. Progress is shown as it
+  goes, and Cancel stops it the way Ctrl-C does.
 - **Watch:** open a finished video in VLC from the list.
 - **Settings** has your Anthropic API key (saved in the usual place), the OpenSubtitles login, and a button that
   installs the VLC extension.
@@ -123,8 +152,9 @@ Keep the Terminal window open while you use it; Ctrl-C there stops it. It runs t
 anything it does you can also do by hand. Only your computer can reach it: it listens on 127.0.0.1, and the page's
 address (printed when it starts) carries a random key.
 
-On Windows, run it inside WSL; the page opens in your Windows browser. You can paste Windows paths (`D:\Films\...`)
-as they are. Network drives (`Z:`) have to be mounted in WSL first: `sudo mkdir -p /mnt/z && sudo mount -t drvfs Z: /mnt/z`.
+On Windows, run it in PowerShell (see [Windows](#windows)); network drives such as `Y:\Movies` and `\\nas\Movies`
+work as they are. It also runs inside WSL, but there a network drive has to be mounted first
+(`sudo mkdir -p /mnt/y && sudo mount -t drvfs Y: /mnt/y`), and reading from it is slower.
 
 ## Using it
 
@@ -139,6 +169,9 @@ context_notes.py PATH --show "The IT Crowd"    # name used in the titles Claude 
 context_notes.py PATH --no-refine              # skip the video-frames step
 context_notes.py PATH --redo                   # write the notes again (the old file is kept as .bak)
 context_notes.py PATH --yes                    # don't stop to ask anything
+context_notes.py PATH --reading-speed 120      # notes stay up longer (0.5 s a word); free for finished videos
+context_notes.py PATH --note-background none   # no box behind the notes (also: dark, see-through, the default)
+context_notes.py PATH --note-opacity 50        # a more solid see-through box (0 invisible, 100 solid; default 30)
 ```
 
 What it decides for you:
@@ -146,11 +179,11 @@ What it decides for you:
 - **Which subtitles.** `<video>.srt`, `<video>.en.srt`, `<video>.English.srt` and so on beside the video; a re-timed `<video>.aligned.srt` if you made one; otherwise the text track inside the video.
 - **Sync.** If the subtitles are early or late by a constant amount, the offset goes into the notes file. If the timing drifts (a different cut or release), it offers to re-time them with `analyze.py --align`, carry on, or skip.
 - **Title.** `IT Crowd/Season 1/S01E03 Fifty Fifty.mp4` becomes "IT Crowd - S01E03 Fifty Fifty", so the title always matches the file.
-- **What's left.** Notes written? Refined? `.ass` older than the notes? Notes made with `--limit` when you now want the whole thing? It runs only what's missing.
+- **What's left.** Notes written? Refined? `.ass` older than the notes, or built with a different look? Notes made with `--limit` when you now want the whole thing? It runs only what's missing. When only the `.ass` is behind, it's rebuilt for free; nothing is sent to Claude and no API key is needed.
 
 ### Testing on part of a film: `--limit`
 
-`--limit 5:00` works on `context_notes.py`, `analyze.py` and `make_ass.py --generate/--refine`. Only the first five minutes of dialogue are sent to Claude, and the soundtrack check, frames and `--align` speech recognition stop at five minutes too, so a test costs a few cents and a minute or two. The notes file records the limit; a later full run notices and offers to write notes for the whole film (keeping the old file as `.bak`). A limited `--align` writes `<name>.aligned.first300s.srt`, so it is never mistaken for a full alignment.
+`--limit 5:00` works on `context_notes.py`, `analyze.py` and `make_ass.py --generate/--refine`. Only the first five minutes of dialogue are sent to Claude, and the soundtrack check, frames and `--align` speech recognition stop at five minutes too, so a test costs a few cents and a minute or two. The notes file records the limit; a later full run notices and offers to add the rest. Adding to them keeps the notes you have and sends only the lines after the limit, and the frames step then looks at only the rest of the video; or start again, which sends everything (the old file is kept as `.bak`). By hand: `make_ass.py film.srt --generate --extend`. A limited `--align` writes `<name>.aligned.first300s.srt`, so it is never mistaken for a full alignment.
 
 ### Films not in English
 
@@ -189,11 +222,14 @@ make_ass.py episode.srt notes.json --video episode.mp4     # -> episode.notes.as
                                                             #    'English (ASS)' instead of 'Unknown' (--no-plex-copy: skip)
                                                             #    UNFINISHED: on IT Crowd S2/S3 this doesn't work yet in Plex
 make_ass.py episode.srt notes.json --layout stack          # notes in one column instead of split left/right
+make_ass.py episode.srt notes.json --note-background none  # what's behind the notes: see-through (default), dark, none
+make_ass.py episode.srt notes.json --note-opacity 50       # how solid the see-through box is, 0 to 100 (default 30)
 make_ass.py episode.srt notes.json --report                # how crowded each layout would be
 make_ass.py episode.srt --generate [--title ... --audience ... --notes-language ...]
 make_ass.py episode.srt --refine --video episode.mp4 [--frames dense] [--assume-synced]
 make_ass.py episode.srt --generate --limit 5:00                # first 5 minutes only
 make_ass.py episode.srt --generate --estimate-only             # size and cost only: nothing sent, nothing written
+make_ass.py episode.srt --generate --extend                    # notes made with --limit: keep them, write the rest
 make_ass.py film.en.srt --generate --film-language fr --original-subs film.fr.srt
 make_ass.py --set-api-key
 ```
@@ -234,7 +270,8 @@ A film's notes are written in parts, so the same idiom or person can get explain
 note out of the `.ass` when an earlier one already explained the same thing, and lists what it left out. The notes
 file isn't changed: `--keep-duplicates` builds with everything, `"keep": true` keeps one note, and
 `python3 dedupe.py notes.json` shows the repeats and near-misses. Running gags, setups and payoffs are never treated
-as repeats.
+as repeats. `--refine` works through the video a few minutes at a time, and each stretch is told what earlier notes
+already explain, so it doesn't explain them again.
 
 ### How long notes stay up
 
@@ -242,6 +279,19 @@ Each note gets 2 s to be noticed plus its words at 0.4 s a word (150 a minute), 
 shows how many seconds a word each note gets, which ones the 24 s ceiling cuts short, and how fast the film's own
 subtitles go for comparison. Change it per film with `--reading-speed 180`, `--note-max 30`, `--note-min`,
 `--note-settle`; the values are remembered in the notes file, so later rebuilds keep them.
+
+### What's behind the notes
+
+`--note-background` (on `make_ass.py` and `context_notes.py`, and "Behind the notes" in the app) picks the box:
+`see-through` (the default), `dark` (the look before 0.2.0, about 80% solid) or `none` (no box; the text gets a
+thin dark outline and a soft shadow, like the dialogue). `--note-opacity` ("How solid the box is" in the app) sets
+the see-through box from 0 (invisible) to 100 (solid); the default is 30. Both are remembered in the notes file, as
+`note_background` and `note_opacity`. A faint box can make light text harder to read over bright scenes; raise it a
+little if so.
+Each `.ass` records how it was built in a `; Look:` line at the top, and `context_notes.py` rebuilds a finished
+video's `.ass` when that line is missing or differs from what you asked for. So the first run after updating rebuilds
+each finished video once, for free. Options given only to `make_ass.py` by hand (`--layout stack`,
+`--keep-duplicates`) aren't remembered; give them again if you used them.
 
 ### Checking every note's timing
 
@@ -295,8 +345,10 @@ a line of JSON on stdout, and answers on stdin. It cancels a run the way Ctrl-C 
 changes. Details and the list of questions are in [docs/gui-protocol.md](docs/gui-protocol.md).
 
 Stopping part-way, with Ctrl-C, a GUI's Cancel or an API error, is safe. The notes Claude has already written, and
-a refine's changes so far, are kept. The next run asks whether to pick up where it left off; that's the default, so
-nothing you've paid for is sent twice. No file is ever left half-written.
+a refine's changes so far, are kept. So is everything up to the last finished request when a run ends with no
+warning at all (the window closed, the computer lost power): what's done is saved after every request. The next run
+asks whether to pick up where it left off; that's the default, so nothing you've paid for is sent twice. No file is
+ever left half-written.
 
 ## VLC extension
 
@@ -325,7 +377,7 @@ The extension looks for `<video name>.notes.ass` beside the video and gives you 
 - **Notes are AI-written and can be wrong.** Medium- and low-confidence notes are marked "(less sure)". Treat them as a starting point, especially for historical claims, etymology and "who is this person" notes. Check anything you intend to rely on or teach.
 - **Tuned for English-language material.** Foreign-language support (`--film-language`) is new and has been tested only on synthetic clips; expect the prompts to need tuning on real French, German and Spanish films. Non-Latin-script subtitles are untested.
 - **Frame sampling is coarse.** A sight gag between sampled frames can be missed.
-- **Pre-alpha.** Interfaces and the notes format may change between releases; see the [changelog](CHANGELOG.md).
+- **Alpha.** Interfaces and the notes format may change between releases; see the [changelog](CHANGELOG.md).
 
 ## Please don't commit media
 

@@ -288,7 +288,7 @@ def run_check(video, srt, notes_path, original=None, film_lang=None, window=10.0
     report = {"video": video.name, "subtitles": srt.name, "original_subtitles": Path(original).name if original else None,
               "transcript": transcript.name, "window": window, "tolerance": TOLERANCE, "video_offset": offset,
               "stretches": runs, "fixed": fixed.name if fixed else None, "notes": rows}
-    make_ass.write_text_safely(folder / "alignment.json", json.dumps(report, indent=1, ensure_ascii=False), encoding=None)
+    make_ass.write_text_safely(folder / "alignment.json", json.dumps(report, indent=1, ensure_ascii=False))
     with open(folder / "alignment.txt", "w", encoding="utf-8") as f:
         f.write("\n".join(summary) + "\n\nnote   time      lines  offset  smoothed   (offset: + = lines early)\n")
         for r in rows:

@@ -7,9 +7,20 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- `context_notes.py --reading-speed WPM`, `--note-background` and `--note-opacity`, passed to every build.
+- The app has "On screen": how long notes stay up, in seconds a word (sent as `--reading-speed`; empty keeps each
+  film's own), what's behind the notes, and how solid the see-through box is. A finished film whose `.ass` needs only a rebuild shows "Needs a
+  rebuild", and the button says "Rebuild (free)".
 - `prompts.py`, the groundwork for a GUI. With `CONTEXT_NOTES_UI=json` set, every question, hidden prompt (API key,
   OpenSubtitles login) and cost estimate is written as one JSON line on stdout and answered on stdin, through every
   script a run starts. Without it, the scripts ask exactly as before. See `docs/gui-protocol.md`.
+- Windows, natively, without WSL. Network drives and shares work as they are. Cancel works through Ctrl-Break, and
+  it works mid-request too (requests wait in a helper thread on Windows). Text from ffmpeg/ffprobe and the
+  `analysis.json` and `alignment.json` files is always read and written as UTF-8. The app's folder browser shows the
+  drive letters, and the install hints name the right tool (winget, Homebrew or apt). Setup steps are in the README.
+- The tests run on Windows, macOS and Linux in GitHub Actions on every push (`.github/workflows/tests.yml`).
+- The app sends the cost question's "Send to Claude" by itself after 10 seconds, counting down on the button. Wait
+  stops the countdown; a checkbox under Write the notes turns it off (remembered by the browser).
 - `app.py`: the whole workflow in your web browser, on your computer only: `python3 app.py`. Choose a film or folder,
   pick the quality, see the cost and answer questions on screen, follow the progress, cancel, and open finished videos
   in VLC. Settings saves the API key and OpenSubtitles login and installs the VLC extension. It works on macOS and
@@ -45,6 +56,34 @@ All notable changes to this project are recorded here. The format follows
   (`/notes`, `/check`).
 
 ### Changed
+- What's done is saved after every request, not only when a run is stopped: a run that ends with no warning (the
+  window closed, a crash, a power cut) can pick up after the last request that finished, so what was paid for
+  isn't sent again.
+- Notes made with `--limit` are added to instead of written again. When a later run wants more of the film,
+  `notes.limited` offers "add the rest" (the default; also what `--yes` does), "start again" or "keep these". Adding
+  keeps the notes and everything else in the file, and sends only the lines after the old limit; the frames step
+  then looks at only the rest of the video too. By hand: `make_ass.py --generate --extend`. Notes files now record
+  the `subtitles` they were written from.
+- `--refine` tells each stretch of the video what earlier notes already explain (a short line each: the dialogue
+  notes and the ones added in earlier stretches), and asks for one note per thing. It may now also drop an existing
+  note that only explains again something explained earlier. On Parasite, the semi-basement flat was explained three
+  times in six minutes (twice by the frames step), and a sign and the PC bang twice, because each stretch only saw the
+  notes inside it. Requests get a little bigger: up to about 3,000 tokens each on a long film.
+- The box behind each note is now see-through: 30% solid (it was about 80%). `--note-background` picks
+  `see-through` (the default), `dark` (the old look, exactly) or `none` (no box: outlined text, like the dialogue),
+  and `--note-opacity` sets how solid the see-through box is (0 to 100), on `make_ass.py` and `context_notes.py`.
+  Both are remembered in the notes file (`note_background`, `note_opacity`). In the see-through
+  box, the lines' boxes only touch, so they don't overlap into darker bands, and "(less sure)" is in the label's
+  colour instead of pink, because a second colour on the label line gave it a darker block.
+- "Alpha", not "pre-alpha": new notes open with "Alpha context notes written by Claude ...", and older notes files
+  show it that way when built (the files themselves aren't changed). The README, CONTRIBUTING and the VLC extension
+  say alpha too.
+- `context_notes.py` rebuilds a finished video's `.ass` for free when only the `.ass` is out of date. It's out of date
+  when it's older than the notes, built by an older `make_ass.py`, or built with a different look from the one asked
+  for. Every `.ass` now has a `; Look:` line at the top (build, background, reading speed) to tell. Such a rebuild
+  needs no API key, doesn't look for subtitles again and doesn't ask about the timing check. `--status` says "needs
+  rebuilding (free)", and the `status` event has `rebuild`. The first run after updating rebuilds each finished
+  video once. `make_ass.py` options that aren't remembered (`--layout stack`, `--keep-duplicates`) need giving again.
 - At most three notes on screen (the one hard limit). A fourth note waits until the earliest note leaves; while it waits,
   every note still on screen gives up half a second of timer per second of wait. The build reports how many notes waited.
 - A note that appears while earlier notes are still on screen stays up longer: half of each earlier note's own time is added. A note's own time is still capped at 24 s, and the total is capped at 45 s (`LINGER_CEILING`).
@@ -55,6 +94,7 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- The app's "Full title (one film only)" field is hidden when a folder is chosen, as it was meant to be.
 - Stopping speech recognition part-way (Ctrl-C) left half a transcript in the `<video> analysis` folder, and the
   next run used it as if it were the whole film. The transcript is now saved only once it's complete. If you ever
   stopped `--align` or the alignment check part-way, delete that video's `transcript-*.jsonl` file.

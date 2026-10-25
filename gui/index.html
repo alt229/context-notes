@@ -129,7 +129,7 @@ ul.videos .state { grid-row: 1; grid-column: 2; font-size: 14px; font-weight: 65
 ul.videos .acts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 ul.videos .acts .btn { font-size: 14px; padding: 5px 11px; }
 .state.ready { color: var(--ready); }
-.state.todo { color: var(--muted); }
+.state.todo, .state.rebuild { color: var(--muted); }
 .state.stopped, .state.working { color: var(--stopped); }
 .state.problem { color: var(--problem); }
 .empty { color: var(--muted); margin: 10px 0 0; max-width: 46ch; }
@@ -143,7 +143,8 @@ legend { font-weight: 650; padding: 0; margin-bottom: 4px; }
 .field select, .field input:not([type=checkbox]):not([type=radio]) { width: 100%; }
 .check.spaced { margin: 0 0 14px; }
 .inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-#limit { width: 5.5em; }
+#limit, #spw, #opacity { width: 5.5em; }
+.field[hidden] { display: none; }
 details.more summary { cursor: pointer; font-weight: 600; margin: 2px 0 12px; }
 .runrow { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
 .runrow .btn { padding: 10px 18px; font-size: 16px; }
@@ -206,9 +207,9 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
   </div>
 
   <section class="screen" aria-label="What's happening">
-    <div class="note left" id="noteLeft" hidden aria-live="polite">
+    <div class="note left" id="noteLeft" hidden>
       <div><span class="label"></span></div>
-      <div class="text"></div>
+      <div class="text" aria-live="polite"></div>
       <div class="acts" hidden></div>
     </div>
     <div class="note right" id="noteRight" hidden>
@@ -271,6 +272,28 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
             placeholder="all"><span>minutes</span></div>
           <small>Leave it empty for the whole thing. Try 5 to test cheaply.</small>
         </div>
+        <fieldset>
+          <legend>On screen</legend>
+          <div class="field">
+            <span>How long notes stay up</span>
+            <div class="inline"><input id="spw" type="text" inputmode="decimal" placeholder="0.4"
+              aria-label="Seconds a word"><span>seconds a word</span></div>
+            <small>Plus 2 seconds to notice each note, kept between 6 and 24 seconds. Empty keeps each film's own
+              (0.4 unless you changed it). Changing it later is free: only the subtitle file is rebuilt.</small>
+          </div>
+          <label class="field"><span>Behind the notes</span>
+            <select id="note_background">
+              <option value="see-through">A see-through box</option>
+              <option value="dark">A dark box (as before)</option>
+              <option value="none">No box: outlined text</option>
+            </select></label>
+          <div class="field" id="opacityField">
+            <span>How solid the box is</span>
+            <div class="inline"><input id="opacity" type="text" inputmode="decimal" placeholder="30"
+              aria-label="How solid the box is, in percent"><span>%</span></div>
+            <small>0 is invisible, 100 is solid. Empty keeps each film's own (30% unless you changed it).</small>
+          </div>
+        </fieldset>
         <details class="more">
           <summary>More options</summary>
           <label class="field"><span>Subtitles the notes are written from</span>
@@ -295,7 +318,9 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
         <button type="button" class="btn primary" id="runBtn" disabled>Write the notes</button>
         <button type="button" class="btn" id="cancelBtn" hidden>Cancel</button>
       </div>
-      <p class="hint">You'll see what it costs before anything is sent to Claude.</p>
+      <label class="check"><input type="checkbox" id="autoSend" checked>
+        <span>Send 10 seconds after showing the cost<small>You always see what it costs first. Wait or Don't send
+          stops it.</small></span></label>
     </section>
   </div>
 
@@ -403,7 +428,8 @@ async function api(path, body) {
 const MODELS = { "claude-opus-5-5": "Claude Opus", "claude-sonnet-5-5": "Claude Sonnet" };
 const TASKS = { soundtrack: "Listening to the soundtrack", frames: "Pulling frames", transcribe: "Recognising speech",
                 generate: "Writing notes", refine: "Looking at the frames" };
-const STATES = { ready: "Ready", todo: "To do", stopped: "Stopped part-way", working: "Working on it", problem: "Stopped" };
+const STATES = { ready: "Ready", todo: "To do", rebuild: "Needs a rebuild", stopped: "Stopped part-way",
+                 working: "Working on it", problem: "Stopped" };
 const STEPS = ["subtitles", "sync", "generate", "refine", "alignment", "done"];
 
 let info = null;
@@ -440,6 +466,15 @@ function note(side, label, text, actions) {
   }
   if (box.hidden) { box.hidden = false; box.classList.remove("show"); void box.offsetWidth; box.classList.add("show"); }
   return box;
+}
+function showScreen() {
+  // Questions and progress appear on the screen at the top: make sure it's in view (Write the notes is far below).
+  const screen = document.querySelector(".screen");
+  const top = screen.getBoundingClientRect().top;
+  if (top < 0 || top > window.innerHeight * 0.4) {
+    const calm = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    screen.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "start" });
+  }
 }
 function hideNote(side) { $(side === "left" ? "noteLeft" : "noteRight").hidden = true; }
 function title(t, sub) { $("title").textContent = t; $("titleSub").textContent = sub || ""; }
@@ -489,11 +524,13 @@ function options() {
     notes_language: $("notes_language").value.trim(), show: $("show").value.trim(),
     title: videos.length === 1 ? $("titleInput").value.trim() : "",
     check_alignment: $("check_alignment").checked, frames: $("dense").checked ? "dense" : "keyframes",
-    redo: $("redo").checked,
+    redo: $("redo").checked, seconds_per_word: $("spw").value.trim(), note_background: $("note_background").value,
+    box_opacity: $("note_background").value === "see-through" ? $("opacity").value.trim() : "",
   };
 }
 const REMEMBERED = ["recursive", "film_language", "refine", "limit", "subs_language", "show_subs", "notes_language",
-                    "show", "check_alignment", "dense", "redo"];
+                    "show", "check_alignment", "dense", "redo", "autoSend", "spw", "note_background", "opacity"];
+function showOpacity() { $("opacityField").hidden = $("note_background").value !== "see-through"; }
 function remember() {
   const o = {};
   for (const id of REMEMBERED) o[id] = $(id).type === "checkbox" ? $(id).checked : $(id).value;
@@ -522,6 +559,7 @@ function fillLanguages() {
 // ---------------------------------------------------------------- the list of videos
 function stateOf(v) {
   if (v.done) return "ready";
+  if (v.rebuild) return "rebuild";
   if (v.notes_stopped || v.refined === "stopped") return "stopped";
   return "todo";
 }
@@ -532,6 +570,7 @@ function describe(v) {
     if (v.refined === "yes") notes += ", with the frames looked at";
     if (v.refined === "stopped") notes += "; looking at the frames stopped part-way";
   } else notes = v.notes_stopped ? "Writing the notes stopped part-way" : "No notes yet";
+  if (v.rebuild) notes += ". The subtitle file needs a rebuild for these settings (free)";
   const subs = v.subtitles ? `Subtitles: ${v.subtitles}` : "No subtitles beside it yet; it will look inside the video, then online";
   return `${notes}. ${subs}.`;
 }
@@ -554,11 +593,16 @@ function renderVideos() {
   $("titleField").hidden = videos.length > 1;
   updateRunButton();
 }
+function onlyRebuilds() {
+  const left = videos.filter((v) => v.state !== "ready");
+  return left.length > 0 && left.every((v) => v.state === "rebuild") && !$("redo").checked;
+}
 function updateRunButton() {
   const todo = videos.filter((v) => v.state !== "ready").length;
   const btn = $("runBtn");
   btn.disabled = running || !videos.length || (!todo && !$("redo").checked);
-  btn.textContent = videos.length && !todo && !$("redo").checked ? "Everything here is done" : "Write the notes";
+  btn.textContent = videos.length && !todo && !$("redo").checked ? "Everything here is done"
+    : onlyRebuilds() ? "Rebuild (free)" : "Write the notes";
 }
 
 function idleScreen() {
@@ -574,15 +618,19 @@ function readyScreen() {
   const p = $("path").value.trim();
   const one = videos.length === 1;
   const ready = videos.filter((v) => v.state === "ready").length;
+  const rebuild = videos.filter((v) => v.state === "rebuild").length;
   const name = one ? stem(videos[0].name) : baseName(p);
   let sub;
-  if (one) sub = videos[0].state === "ready" ? "Ready to watch." : videos[0].state === "stopped" ? "Stopped part-way; it can pick up from there." : "No notes yet.";
-  else sub = `${plural(videos.length, "video")}: ${ready} ready, ${videos.length - ready} to do.`;
+  if (one) sub = { ready: "Ready to watch.", stopped: "Stopped part-way; it can pick up from there.",
+                   rebuild: "Notes written. The subtitle file needs a rebuild (free)." }[videos[0].state] || "No notes yet.";
+  else sub = `${plural(videos.length, "video")}: ${ready} ready, ` + (rebuild ? `${rebuild} to rebuild, ` : "")
+    + `${videos.length - ready - rebuild} to do.`;
   title(name, sub);
   hideNote("right");
   if (!keepNote) {
     if (info && !info.key.found) note("left", "Before you start", "Add your Anthropic API key in Settings. It's only needed when Claude writes notes.");
     else if (videos.length && ready === videos.length) note("left", "Ready", "Everything here has notes. Open a video in VLC from the list.");
+    else if (onlyRebuilds()) note("left", "Next", "Press Rebuild. It only remakes the subtitle file with these settings, so it's quick, and nothing is sent to Claude.");
     else note("left", "Next", "Choose how the notes are written, then press Write the notes. You'll see the cost first.");
   }
   subline("");
@@ -651,6 +699,7 @@ function startPolling(fresh) {
   resetSteps($("check_alignment").checked);
   setRunning(true);
   hideNote("left");
+  showScreen();
   poll();
 }
 async function poll() {
@@ -662,7 +711,7 @@ async function poll() {
       if (r.error) { note("left", "Problem", r.error); setRunning(false); return; }
       for (const item of r.items || []) handle(item);
       job.next = r.next ?? job.next;
-      if (!r.pending && asking) { hideNote("left"); asking = false; }
+      if (!r.pending && asking) { stopCountdown(); hideNote("left"); asking = false; }
       if (!r.running) { finished(r); return; }
       await sleep(400);
     }
@@ -691,7 +740,7 @@ function handle(item) {
     const v = videoRow(ev.path);
     if (v) {
       v.state = ev.result === "stopped" ? "problem" : "ready";
-      v.reason = ev.result === "stopped" ? ev.reason : "Notes written just now.";
+      v.reason = ev.result === "stopped" ? ev.reason : v.rebuild ? "Subtitle file rebuilt just now." : "Notes written just now.";
       renderVideos();
     }
     if (ev.result !== "stopped") { step("done"); hideNote("right"); }
@@ -710,7 +759,14 @@ function costText(e) {
   }
   return `Claude will read ${plural(e.lines, "subtitle line")} in ${plural(e.requests, "request")} to ${model}${price}${cost ? "." : ""}`;
 }
+const AUTO_SEND = 10;            // seconds the cost is shown before it's sent by itself (when that box is ticked)
+let countdown = null;
+function stopCountdown() {
+  if (countdown) clearInterval(countdown);
+  countdown = null;
+}
 function ask(ev) {
+  stopCountdown();
   asking = true;
   const send = ev.id === "generate.send" || ev.id === "refine.send";
   const label = send ? "Cost" : ev.id && ev.id.endsWith(".resume") ? "Pick up" : "Question";
@@ -719,11 +775,31 @@ function ask(ev) {
     let name = c.label.charAt(0).toUpperCase() + c.label.slice(1);
     if (send) name = c.key === "y" ? "Send to Claude" : "Don't send";
     const primary = send ? c.key === "y" : c.key === ev.default;
-    return el("button", { type: "button", class: primary ? "primary" : null, onclick: () => answer(c.key) }, name);
+    return el("button", { type: "button", class: primary ? "primary" : null, "data-key": c.key,
+                          onclick: () => answer(c.key) }, name);
   });
+  const sendBtn = buttons.find((b) => b.dataset.key === "y");
+  if (send && sendBtn && $("autoSend").checked) {
+    const wait = el("button", { type: "button", onclick: () => {
+      stopCountdown();
+      sendBtn.textContent = "Send to Claude";
+      wait.remove();
+      sendBtn.focus();
+    } }, "Wait");
+    buttons.push(wait);
+    const deadline = Date.now() + AUTO_SEND * 1000;
+    const tick = () => {
+      const left = Math.ceil((deadline - Date.now()) / 1000);
+      if (left <= 0) { stopCountdown(); answer("y"); }
+      else sendBtn.textContent = `Send to Claude (${left})`;
+    };
+    tick();
+    countdown = setInterval(tick, 250);
+  }
   hideNote("right");
   subline("");
   note("left", label, text, buttons);
+  showScreen();
   const first = $("noteLeft").querySelector("button.primary") || $("noteLeft").querySelector("button");
   if (first) first.focus({ preventScroll: true });
 }
@@ -736,18 +812,21 @@ function askText(ev) {
   input.focus();
 }
 async function answer(text) {
+  stopCountdown();
   for (const b of $("noteLeft").querySelectorAll("button, input")) b.disabled = true;
   const r = await api("/api/answer", { answer: text });
   if (!r.ok) note("left", "Problem", "That answer didn't reach the run. It may have finished already.");
   else { hideNote("left"); asking = false; }
 }
 async function cancel() {
+  stopCountdown();
   $("cancelBtn").disabled = true;
   $("cancelBtn").textContent = "Stopping…";
   await api("/api/cancel", {});
   note("left", "Stopping", "Stopping. Notes Claude has already written are kept, and the next run can pick up from there.");
 }
 function finished(r) {
+  stopCountdown();
   setRunning(false);
   hideNote("right");
   asking = false;
@@ -796,10 +875,9 @@ async function loadDir(path) {
   $("upBtn").onclick = () => loadDir(r.parent);
   $("places").replaceChildren(...(r.places || []).map((p) =>
     el("button", { type: "button", class: "btn", onclick: () => loadDir(p.path) }, p.label)));
-  const join = (name) => r.path.replace(/\/+$/, "") + "/" + name;
   const items = [
-    ...r.dirs.map((d) => el("li", {}, el("button", { type: "button", onclick: () => loadDir(join(d)) }, d, el("span", { class: "kind" }, "folder")))),
-    ...r.videos.map((v) => el("li", {}, el("button", { type: "button", onclick: () => { $("browser").close(); setPath(join(v)); } }, v, el("span", { class: "kind" }, "video")))),
+    ...r.dirs.map((d) => el("li", {}, el("button", { type: "button", onclick: () => loadDir(d.path) }, d.name, el("span", { class: "kind" }, "folder")))),
+    ...r.videos.map((v) => el("li", {}, el("button", { type: "button", onclick: () => { $("browser").close(); setPath(v.path); } }, v.name, el("span", { class: "kind" }, "video")))),
   ];
   if (!items.length) items.push(el("li", {}, el("p", { class: "empty" }, "No folders or videos here.")));
   $("entries").replaceChildren(...items);
@@ -895,10 +973,12 @@ $("browseBtn").addEventListener("click", openBrowser);
 $("useFolderBtn").addEventListener("click", () => { $("browser").close(); setPath(browsing); });
 $("path").addEventListener("change", () => { remember(); refresh(); });
 $("path").addEventListener("keydown", (e) => { if (e.key === "Enter") { remember(); refresh(); } });
-for (const id of ["recursive", "film_language", "subs_language", "limit", "refine", "redo"]) {
+$("note_background").addEventListener("change", showOpacity);
+for (const id of ["recursive", "film_language", "subs_language", "limit", "refine", "redo", "spw", "note_background",
+                  "opacity"]) {
   $(id).addEventListener("change", () => { remember(); refresh(); });
 }
-for (const id of ["show_subs", "notes_language", "show", "check_alignment", "dense"]) $(id).addEventListener("change", remember);
+for (const id of ["show_subs", "notes_language", "show", "check_alignment", "dense", "autoSend"]) $(id).addEventListener("change", remember);
 for (const r of document.querySelectorAll("input[name=quality]")) r.addEventListener("change", remember);
 $("runBtn").addEventListener("click", run);
 $("cancelBtn").addEventListener("click", cancel);
@@ -907,6 +987,7 @@ $("cancelBtn").addEventListener("click", cancel);
   if (!(await reloadInfo())) return;
   fillLanguages();
   restore();
+  showOpacity();
   if (info.running) {
     await refresh();
     $("log").dataset.fresh = "yes";

@@ -1,6 +1,9 @@
 """Shared fixtures: sample subtitles, an isolated HOME, and a local stand-in for the Claude API."""
 import json
+import os
 import shutil
+import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -12,6 +15,36 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 needs_ffmpeg = pytest.mark.skipif(not FFMPEG, reason="ffmpeg/ffprobe not installed")
+WINDOWS = os.name == "nt"
+
+# A run in a process group of its own, and the way to stop it as Ctrl-C does: SIGINT to the group, or on Windows
+# Ctrl-Break (which the scripts treat as Ctrl-C when a GUI is driving them; see prompts.py). INTERRUPTED: the exit
+# codes of a script stopped like that.
+NEW_GROUP = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {"start_new_session": True}
+INTERRUPTED = (0xC000013A, 130) if WINDOWS else (-signal.SIGINT, 130)
+
+
+def interrupt(p):
+    if WINDOWS:
+        p.send_signal(signal.CTRL_BREAK_EVENT)
+    else:
+        os.killpg(p.pid, signal.SIGINT)
+
+
+def place(src, dest):
+    """Put a test video at dest: a symlink where the system allows one, else a copy (Windows needs Developer Mode
+    for symlinks)."""
+    try:
+        os.symlink(src, dest)
+    except OSError:
+        shutil.copyfile(src, dest)
+    return Path(dest)
+
+
+def assert_private(path, mode=0o600):
+    """Only its owner can read it. On Windows a file in your user folder is private already; mode bits mean little."""
+    if not WINDOWS:
+        assert stat.S_IMODE(Path(path).stat().st_mode) == mode
 
 
 def srt_time(t):
@@ -47,8 +80,7 @@ def home(tmp_path, monkeypatch):
 
 def run_cli(script, *args, cwd=None, home_dir=None, stdin=None, env_extra=None):
     """Run one of the scripts as a user would, returning the CompletedProcess."""
-    import os
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"}
     env.pop("ANTHROPIC_API_KEY", None)
     env.pop("CONTEXT_NOTES_UI", None)                         # tests choose the GUI mode themselves (env_extra)
     if home_dir:
@@ -58,7 +90,8 @@ def run_cli(script, *args, cwd=None, home_dir=None, stdin=None, env_extra=None):
     # start_new_session: no terminal attached. Otherwise a hidden prompt (getpass) reads the real terminal you ran
     # pytest in, not `stdin`, and the test waits for you to type.
     return subprocess.run([sys.executable, str(ROOT / script), *map(str, args)], cwd=cwd, env=env,
-                          input=stdin, capture_output=True, text=True, timeout=300, start_new_session=True)
+                          input=stdin, capture_output=True, encoding="utf-8", errors="replace", timeout=300,
+                          start_new_session=not WINDOWS)
 
 
 def message(text, stop_reason="end_turn", usage=(1000, 200)):

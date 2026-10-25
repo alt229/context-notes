@@ -1,7 +1,7 @@
 """app.py, the page's local server: who may talk to it, what it shows, and whole runs driven over HTTP."""
+import base64
 import json
 import os
-import stat
 import threading
 import time
 import urllib.error
@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from conftest import make_srt, needs_ffmpeg
+from conftest import assert_private, make_srt, needs_ffmpeg, place
 
 import app
 
@@ -104,7 +104,8 @@ def test_saving_a_key(server, home):
     status, r = call(server, "/api/key", {"key": "sk-ant-from-the-page-9876"})
     path = home / ".config" / "context-notes" / "api-key"
     assert status == 200 and r["ok"] and r["key"]["ends"] == "9876", r
-    assert path.read_text() == "sk-ant-from-the-page-9876\n" and stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert path.read_text() == "sk-ant-from-the-page-9876\n"
+    assert_private(path)
     assert "sk-ant-from" not in json.dumps(r)
     _, r = call(server, "/api/key", {"key": "hunter2"})
     assert not r["ok"] and "doesn't look like an Anthropic API key" in r["message"]
@@ -145,7 +146,9 @@ def test_browse_lists_folders_and_videos(server, tmp_path):
     (films / "Film.mkv").write_bytes(b"")
     (films / "notes.txt").write_text("x")
     _, r = call(server, f"/api/browse?path={urllib.request.quote(str(films))}")
-    assert r["path"] == str(films) and r["dirs"] == ["Season 1"] and r["videos"] == ["Film.mkv"]
+    assert r["path"] == str(films)
+    assert [d["name"] for d in r["dirs"]] == ["Season 1"] and [v["name"] for v in r["videos"]] == ["Film.mkv"]
+    assert r["videos"][0]["path"] == str(films / "Film.mkv")                      # full paths: no joining on the page
     assert any(p["label"] == "Home" for p in r["places"])
     _, r = call(server, f"/api/browse?path={urllib.request.quote(str(films / 'Film.mkv'))}")
     assert r["path"] == str(films)                                                       # a file: its folder
@@ -160,15 +163,26 @@ def test_paths_as_people_paste_them(monkeypatch):
     monkeypatch.setattr(app, "wslpath", lambda p, to_windows: "/mnt/d/Films/Amélie.mkv")
     assert app.clean_path(r"D:\Films\Amélie.mkv", where="wsl") == Path("/mnt/d/Films/Amélie.mkv")
     assert app.clean_path(r"D:\Films\Amélie.mkv", where="mac") == Path(r"D:\Films\Amélie.mkv")
-    assert "mount -t drvfs" in app.missing_path_hint(r"Z:\Films", where="wsl")
+    assert "sudo mount -t drvfs Z: /mnt/z" in app.missing_path_hint(r"Z:\Films", where="wsl")
+    assert "File Explorer" in app.missing_path_hint(r"\\10.0.0.98\Movies\x.mkv", where="windows")
     assert app.missing_path_hint("/Users/x/film.mkv", where="mac") is None
+
+
+def test_windows_drives_in_the_folder_browser(monkeypatch):
+    if os.name != "nt":
+        assert app.windows_drives() == []                                         # none outside Windows
+    monkeypatch.setattr(app, "system", lambda: "windows")
+    monkeypatch.setattr(app, "windows_drives", lambda: ["C:\\", "Y:\\"])
+    shortcuts = app.places()
+    assert {"label": "Y: drive", "path": "Y:\\"} in shortcuts and {"label": "C: drive", "path": "C:\\"} in shortcuts
 
 
 def test_file_dialogs(monkeypatch):
     assert app.dialog_command("file", where="mac")[0] == "osascript"
     assert "choose folder" in app.dialog_command("folder", where="mac")[2]
     assert app.dialog_command("file", where="wsl")[0] == "powershell.exe"
-    assert "FolderBrowserDialog" in app.dialog_command("folder", where="wsl")[-1]
+    script = base64.b64decode(app.dialog_command("folder", where="wsl")[-1]).decode("utf-16-le")
+    assert "FolderBrowserDialog" in script
     monkeypatch.setattr(app.shutil, "which", lambda name: None)
     assert app.dialog_command("file", where="linux") is None
     monkeypatch.setattr(app, "system", lambda: "linux")
@@ -227,7 +241,7 @@ def clip(tmp_path_factory):
 def episode(tmp_path, clip):
     folder = tmp_path / "Show" / "Season 1"
     folder.mkdir(parents=True)
-    os.symlink(clip, folder / "S01E01 Pilot.mp4")
+    place(clip, folder / "S01E01 Pilot.mp4")
     return folder
 
 
@@ -257,6 +271,24 @@ def test_a_whole_run_from_the_page(server, api, api_key_file, episode):
     assert {c["body"]["model"] for c in api.calls} == {"claude-sonnet-5-5"}             # "Cheaper"
     _, r = call(server, "/api/status", {"path": str(episode)})
     assert r["videos"][0]["done"] and r["videos"][0]["refined"] == "yes"
+
+
+@needs_ffmpeg
+def test_cancel_while_a_question_waits(server, api, api_key_file, episode):
+    """Cancel while the cost question is on screen: on Windows the script is stuck reading the answer, so the app
+    also sends it an empty line. Either way it stops, and nothing is sent."""
+    make_srt(episode / "S01E01 Pilot.srt", n=24)
+    call(server, "/api/run", {"path": str(episode)})
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        _, r = call(server, "/api/job?after=0")
+        if (r.get("pending") or {}).get("id") == "generate.send":
+            break
+        assert r["running"], "\n".join(i.get("text", "") for i in r["items"])
+        time.sleep(0.1)
+    assert call(server, "/api/cancel", {})[1] == {"ok": True}
+    state, _, log = run_job(server, {}, timeout=60)
+    assert state["cancelled"] and state["returncode"] != 0 and not api.calls, log
 
 
 @needs_ffmpeg

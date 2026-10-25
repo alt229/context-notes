@@ -1,0 +1,35 @@
+# The tests on Windows, macOS and Linux, on every push and pull request. No API key or real media needed:
+# the tests use a fake API and make their own short videos with ffmpeg.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+      - name: ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Python packages (speech recognition left out; the tests don't need it)
+        run: python -m pip install numpy Pillow pytest ruff
+      - name: Lint
+        run: python -m ruff check .
+      - name: Tests
+        run: python -m pytest

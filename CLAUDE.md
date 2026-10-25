@@ -20,8 +20,11 @@ Read `README.md` for the full command reference. This file holds what we've lear
      project, `/notes` does this with the **note-writer** agent.
 4. **Frame notes.** `make_ass.py --refine` uses the API only; there is no subscription route yet. It sends contact
    sheets of keyframes.
-5. **Build.** `make_ass.py SRT NOTES --video V`. Repeats are left out (`dedupe.py`) and timing comes from the notes
-   file's `timing`.
+5. **Build.** `make_ass.py SRT NOTES --video V`. Repeats are left out (`dedupe.py`); timing and the box behind the
+   notes come from the notes file's `timing` and `note_background`. The `.ass` header's `; Look:` line records the
+   build (`make_ass.BUILD`), background and reading speed. `context_notes.py` rebuilds a finished video's `.ass`
+   (free, no API key) when it's older than the notes or its look line is missing or different. Bump `BUILD` when
+   a change to the build output should reach existing `.ass` files.
 6. **Check.** `align_check.py V SRT` measures every note against the speech in the 10 s before it. `--fix` corrects
    stretches that are out.
 
@@ -53,6 +56,20 @@ Read `README.md` for the full command reference. This file holds what we've lear
   screen gives up half a second of timer per second of wait (`make_ass.make_room`). The old 12 s ceiling cut 62 of
   Amélie's 100 notes short. Raising it added only 1.5 s of three notes on screen at once over the whole film. The
   settle, floor, ceiling and speed were changed on 2026-10-21 after friends found the notes too brief.
+- **Refine and repeats** (Erin, 2026-10-24). Each refine stretch used to see only the notes inside it, so on
+  Parasite the frames step explained the semi-basement flat at 0:43 and 1:35 (and a dialogue note did at 5:59), the
+  corner-shop sign twice and the PC bang twice, 4 s apart. Now each stretch gets "Already explained earlier in the
+  film": the last 100 earlier notes, the first 16 words of each (`refine_notes.earlier_notes`), and may drop an
+  existing note that only repeats one. Not yet checked on a real run.
+- **Note background** (Erin, 2026-10-24: "slightly or fully transparent"). Default `see-through` at 30% solid
+  (`DEFAULT_OPACITY`, Erin's choice; `--note-opacity` / `note_opacity` changes it, and the `; Look:` line records
+  it); `dark` is the old look (`&H38`, about 80% solid), byte for byte; `none` is outlined text. Renderers draw one box per line,
+  and per stretch of a line in one colour or weight, padded by the Outline. Overlapping see-through boxes show
+  darker bands, so see-through uses `\ybord0` (the lines' boxes just touch) and a one-colour label line ("(less
+  sure)" in the label colour). Checked by rendering with libass (ffmpeg's `ass` filter) on bright, busy and dark
+  frames.
+- **"Alpha"** (Erin, 2026-10-24). The intro note of older notes files still says "Pre-alpha"; `make_ass.alpha_intro`
+  shows it as "Alpha" at build time and leaves the file alone.
 - **Alignment check.** Speech recognition only, with a tolerance of 0.7 s and at least 2 recognised lines per window.
   - Subtitle makers time lines loosely: on Amélie's in-sync subtitles, a quarter of 10 s windows were more than
     0.6 s off.
@@ -68,6 +85,17 @@ Read `README.md` for the full command reference. This file holds what we've lear
     only for the same subtitle file, `--limit` and film language, and it's removed once the notes file is written.
   - Refine writes `refined.stopped_after` (time, part, parts, backup) into the notes file. `context_notes.py` treats
     that as unfinished. "Start again" restores the backup made before the stopped refine.
+  - Both are also written after every finished request, not only on a stop, so a run killed outright (the window
+    closed, a crash, the power) loses at most the request in flight (Erin, 2026-10-24: "save the amount of times
+    the subtitles get sent").
+  - Parts are made from the lines not covered yet (`chunks(rest)`), so picking up never sends a line twice. For a
+    stopped run that's the same split as before, because a part starts from nothing either way.
+- **Notes made with `--limit` are added to, not written again** (Erin, 2026-10-24). `notes.limited` offers "add
+  the rest" (the default), "start again" or "keep these". Adding is `make_ass.py --generate --extend`
+  (`generate_notes.notes_to_extend`): the notes file keeps everything it has (frame notes, `refined`, the look
+  settings), gets a fresh intro note and a backup, and only the lines after the old limit are sent. Notes files now
+  record their `subtitles`; a re-timed `.aligned` copy counts as the same. Refine then sees `refined.limit` short of
+  what's asked and looks at only the rest, starting its parts at the old limit.
 
 ## Known pitfalls
 
@@ -114,7 +142,7 @@ Read `README.md` for the full command reference. This file holds what we've lear
 8. **Write files all at once.** Anything a later run reads (caches, subtitles, notes, `.ass`) is written with
    `make_ass.write_text_safely()` or `make_ass.replacing()`, so Ctrl-C or a GUI's Cancel can't leave half a file.
 9. **Write for Erin.** Plain English in messages and docs, and say what to do next. She runs macOS (Apple
-   Silicon, Homebrew, Python 3.14) and works in Terminal.
+   Silicon, Homebrew, Python 3.14) and works in Terminal. Her friends use the app on macOS, Windows and Linux.
 
 ## The app (`app.py` and `gui/index.html`)
 
@@ -123,11 +151,30 @@ Read `README.md` for the full command reference. This file holds what we've lear
 - Standard library only. One HTML file, with no external scripts, fonts or images.
 - Security: it listens on 127.0.0.1 only, every request needs the random key, and `Host` and `Origin` are checked.
   The API key never goes to the page; it only shows the last 4 characters. Keep all of this when changing it.
-- New options friends should reach go in the page's form, and in `common_args` / `App.run` in `app.py`.
-- WSL is supported through a small layer: Windows paths, `explorer.exe`, `vlc.exe`, and PowerShell file dialogs.
-  Native Windows is not.
+- New options friends should reach go in the page's form, and in `common_args` / `App.run` in `app.py`. Options
+  that change how a finished film looks (seconds a word, the background) go in `common_args`, so `--status`
+  reports "Needs a rebuild" for them.
+- Windows runs natively (Erin, 2026-10-24: friends keep their media on NAS drives, which WSL makes a chore). WSL
+  still works, through a small layer: Windows paths, `explorer.exe`, `vlc.exe`, and PowerShell file dialogs.
 - Tests: `tests/test_app.py` (HTTP, whole runs, cancel). To look at the page, run it with `--api-url` pointing at the
   fake API from `tests/conftest.py` and open it in a headless browser.
+
+## Windows
+
+- **Cancel.** The app starts a run with `CREATE_NEW_PROCESS_GROUP` and sends Ctrl-Break. `prompts.py` turns that
+  into KeyboardInterrupt in json mode. So:
+  - Every script the app runs must `import prompts`, or Ctrl-Break kills it on the spot.
+  - The app needs a console (`python.exe`, not `pythonw.exe`). Keep it that way in any launcher.
+- **Blocking calls don't notice Ctrl-Break.**
+  - Network requests wait through `generate_notes.wait_awake`.
+  - A question that's waiting gets an empty line from the app's cancel.
+- **Text.** Windows Python isn't UTF-8 by default. Pass `encoding="utf-8"` for subprocess output and for files that
+  can hold non-English text. The app sets `PYTHONUTF8=1` for its runs.
+- **Tests.**
+  - Use `conftest.place` (a symlink or a copy), `assert_private`, `interrupt`, `NEW_GROUP` and `INTERRUPTED`
+    instead of Unix-only calls.
+  - `.github/workflows/tests.yml` runs Windows, macOS and Linux.
+  - Tests that can't work on Windows say why in their `skipif`.
 
 ## Agents in this project
 

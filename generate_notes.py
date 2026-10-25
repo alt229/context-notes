@@ -21,9 +21,11 @@ cost is shown before anything is sent.
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -111,7 +113,7 @@ def year_in_tags(video, this_year=None):
     old rip it's the day someone made the file."""
     try:
         r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format_tags", "-of", "json", str(video)],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
         tags = (json.loads(r.stdout or "{}").get("format") or {}).get("tags") or {}
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
@@ -205,7 +207,38 @@ def load_key(explicit=None):
 
 
 # ---------------------------------------------------------------- API call
+# On Windows a program waiting for a network reply doesn't notice Ctrl-C (or a GUI's Cancel) until the reply comes,
+# which can be minutes. There the request waits in a helper thread while this one stays awake.
+WAIT_IN_THREAD = os.name == "nt"
+
+
+def wait_awake(fn, *args, **kwargs):
+    """fn(*args, **kwargs), run in a helper thread while this thread waits in short steps, so Ctrl-C and Cancel are
+    noticed at once. Whatever fn raises (sys.exit included) is raised here; its result is returned."""
+    out = {}
+
+    def work():
+        try:
+            out["value"] = fn(*args, **kwargs)
+        except BaseException as e:                         # carried over to the waiting thread
+            out["error"] = e
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    while t.is_alive():
+        t.join(0.2)
+    if "error" in out:
+        raise out["error"]
+    return out.get("value")
+
+
 def call_api(key, model, system, user, url=API_URL, timeout=300, max_tokens=MAX_TOKENS, effort=None):
+    """One request to the Messages API (see _call_api). On Windows it waits awake, so Cancel works mid-request."""
+    if WAIT_IN_THREAD:
+        return wait_awake(_call_api, key, model, system, user, url, timeout, max_tokens, effort)
+    return _call_api(key, model, system, user, url, timeout, max_tokens, effort)
+
+
+def _call_api(key, model, system, user, url=API_URL, timeout=300, max_tokens=MAX_TOKENS, effort=None):
     """`user` is a string, or a list of content blocks (text and images).
     `effort` ("low", "medium", "high", ...) is sent as output_config.effort; None leaves the model's own default
     (Haiku 4.5 rejects the field, so only pass it for models that support it)."""
@@ -533,30 +566,80 @@ def pick_up_choice(partial, srt_path, cues, film_language, limit, auto):
     return (notes, through) if pick == "p" else ([], 0)
 
 
+def same_subtitles(name):
+    """film.en.aligned.srt and film.en.srt are the same lines (re-timed), so notes from one work on the other."""
+    return re.sub(r"\.aligned(\.first\d+s)?(?=\.srt$)", "", str(name), flags=re.I)
+
+
+def notes_to_extend(notes_path, srt_path, cues, film_language, limit):
+    """Notes written for only the first part of a film (--limit), now wanted for more of it: the existing notes file
+    to keep and add to. Returns (its spec, its notes without the intro, the last subtitle line they cover); exits if
+    they can't be added to; (spec, [], None) if they already cover what's asked."""
+    try:
+        spec = json.loads(make_ass.read_text(notes_path))
+    except (OSError, ValueError):
+        sys.exit(f"Can't read {notes_path} to add to it.")
+    if not isinstance(spec, dict) or not spec.get("notes"):
+        sys.exit(f"{Path(notes_path).name} has no notes to add to; leave off --extend to write them.")
+    had = spec.get("limit")
+    if not had or (limit and limit <= had + 1):
+        return spec, [], None
+    if languages.code(spec.get("film_language") or "en") != languages.code(film_language or "en"):
+        sys.exit(f"Can't add to {Path(notes_path).name}: it was written for a film in another language. "
+                 f"Use --force to start again.")
+    if spec.get("subtitles") and same_subtitles(spec["subtitles"]) != same_subtitles(Path(srt_path).name):
+        sys.exit(f"Can't add to {Path(notes_path).name}: it was written from {spec['subtitles']}, not "
+                 f"{Path(srt_path).name}. Use --force to start again.")
+    covered = make_ass.limit_cues(cues, had)
+    if not covered:
+        sys.exit(f"{Path(notes_path).name} covers none of these subtitles. Use --force to start again.")
+    kept = [n for n in spec["notes"] if str(n.get("category", "")).lower() != "about these notes"]
+    return spec, kept, covered[-1]["n"]
+
+
 def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=None, language="English",
              assume_yes=False, key_file=None, api_url=API_URL, film_language=None, original_srt=None,
-             limit=None, video_offset=None, effort=None, max_tokens=MAX_TOKENS, year=None, estimate_only=False):
+             limit=None, video_offset=None, effort=None, max_tokens=MAX_TOKENS, year=None, estimate_only=False,
+             extend=False):
     """Write the notes file. With estimate_only, stop after the size and cost estimate: no API key is needed,
-    nothing is sent and nothing is written (returns None)."""
+    nothing is sent and nothing is written (returns None). With extend, keep the notes already in the notes file
+    (written with a shorter --limit) and write notes only for the lines after them: everything else in that file
+    (the frames step's notes and record, the look settings) is kept too."""
     all_cues = make_ass.parse_srt(srt_path)
     if not all_cues:
         sys.exit(f"No subtitle cues found in {srt_path}")
     cues = make_ass.limit_cues(all_cues, limit)
     if not cues:
         sys.exit(f"No subtitle lines start in the first {make_ass.fmt_limit(limit)} of {srt_path}.")
+    base = None                                  # with extend: the notes file being added to
+    if extend and Path(notes_path).exists():
+        base, kept_notes, kept_through = notes_to_extend(notes_path, srt_path, cues, film_language, limit)
+        if kept_through is None:
+            print(f"{Path(notes_path).name} already covers "
+                  f"{('the first ' + make_ass.fmt_limit(limit)) if limit else 'the whole video'}: nothing to add, "
+                  f"nothing sent.")
+            return None if estimate_only else base
     key = None if estimate_only else load_key(key_file)     # fail early if there's no usable key
     title = title or Path(srt_path).stem
     situation, extra = subtitle_setup(cues, film_language, original_srt)
-    audience = audience or default_audience(film_language, situation)
+    audience = audience or (base or {}).get("audience") or default_audience(film_language, situation)
     if limit:
         print(f"Limited to the first {make_ass.fmt_limit(limit)}: {len(cues)} of {len(all_cues)} lines.")
-    all_parts = chunks(cues, extra)
-    parts = len(all_parts)
     partial = Path(notes_path).with_suffix(".partial.json")
     earlier, through = pick_up_choice(partial, srt_path, cues, film_language, limit, assume_yes or estimate_only)
+    if base is not None and not through:
+        earlier, through = kept_notes, kept_through
+        print(f"Keeping the {len(earlier)} notes for the first {make_ass.fmt_limit(base['limit'])} (up to line "
+              f"{through}); only the lines after them are sent.")
+    # Parts are made from the lines not yet covered, so a pick-up or an addition never sends a line twice. (For a
+    # stopped run that's the same split as the first time: a new part starts from nothing either way.)
+    rest = [c for c in cues if c["n"] > through]
+    all_parts = chunks(cues, extra)
     first = 1 + sum(1 for p in all_parts if p[-1]["n"] <= through)
-    send = [cue for p in all_parts[first - 1:] for cue in p]       # all the lines, unless picking up
-    if first > 1:
+    todo = chunks(rest, extra)
+    parts = first - 1 + len(todo)
+    send = rest
+    if first > 1 and base is None:
         print(f"Picking up where the last run stopped: {len(earlier)} notes kept; part {first} of {parts} is next.")
     n_send, est_in, est_out = estimate(send, extra) if send else (0, 0, 0)
     c = cost(model, est_in, est_out)
@@ -572,6 +655,10 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
             sys.exit("Not an interactive terminal, so add --yes to confirm sending the subtitles to the API.")
         if not prompts.confirm("Send the subtitle text to the Claude API now?", id="generate.send"):
             sys.exit("Cancelled; nothing was sent.")
+    if base is not None:                         # adding to a notes file: keep it as it was, too
+        backup = make_ass.unique_backup(notes_path)
+        shutil.copy2(notes_path, backup)
+        print(f"Kept a backup: {backup.name}")
     foreign = situation is not None
     system = SYSTEM.format(audience=audience, language=language, era_section=era_section(year),
                            cats=", ".join(FOREIGN_CATEGORIES if foreign else CATEGORIES),
@@ -581,21 +668,27 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
                            else ENGLISH_EXAMPLES)
 
     notes, tin, tout, problems = list(earlier), 0, 0, []
-    prev_tail = all_parts[first - 2][-CONTEXT_LINES:] if first > 1 else []
+    prev_tail = [c for c in cues if c["n"] <= through][-CONTEXT_LINES:]
     done_line = through                          # the last subtitle line whose part is finished
+    done_parts = first - 1
 
-    def keep_partial(k):
+    def save_partial():
+        """After every part, so even a run that ends without warning (the window closed, the computer lost power)
+        leaves what was paid for, and the next run can pick up there."""
         if notes:
             make_ass.write_text_safely(partial, json.dumps(
                 {"notes": notes, "through_line": done_line, "subtitles": Path(srt_path).name,
                  "film_language": film_language, "limit": round(limit, 1) if limit else None, "model": model},
                 indent=1, ensure_ascii=False))
-            print(f"\n  Stopped after part {k - 1} of {parts}. The {len(notes)} notes written so far "
+
+    def keep_partial():
+        if notes:
+            save_partial()
+            print(f"\n  Stopped after part {done_parts} of {parts}. The {len(notes)} notes written so far "
                   f"were saved to {partial.name}; the next run offers to pick up from there.", flush=True)
 
-    k = first
     try:
-        for k, part in enumerate(all_parts[first - 1:], first):
+        for k, part in enumerate(todo, first):
             lo, hi = part[0]["n"], part[-1]["n"]
             prompts.progress("generate", k - 1, parts, "requests")     # before the line below, which stays open
             print(f"  part {k}/{parts}: lines {lo}-{hi} ...", end=" ", flush=True)
@@ -603,7 +696,7 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
                 reply = call_api(key, model, system, user_message(title, part, prev_tail, notes, k, parts, extra), api_url,
                                  max_tokens=max_tokens, effort=effort)
             except SystemExit:                               # an API error: keep what was paid for
-                keep_partial(k)
+                keep_partial()
                 raise
             usage = reply.get("usage", {})
             tin += usage.get("input_tokens", 0)
@@ -631,31 +724,39 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
             print(f"{kept} notes")
             prev_tail = part[-CONTEXT_LINES:]
             notes.extend(part_notes)             # a part counts once all of it is in, so a stop never splits one
-            done_line = hi
+            done_line, done_parts = hi, k
+            if k < parts:
+                save_partial()
     except KeyboardInterrupt:                    # Ctrl-C, or a GUI's Cancel, at any point: keep what was paid for
-        keep_partial(k)
+        keep_partial()
         raise
     prompts.progress("generate", parts, parts, "requests")
 
     ms = int(round(cues[0]["start"] * 1000))
+    earlier_model = (base or {}).get("generated_by")
+    by = model if not earlier_model or earlier_model == model else f"{earlier_model} and {model}"
     intro = {"at": f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}",
              "category": "About these notes", "duration": 9, "kind": "speech",
-             "text": f"Pre-alpha context notes written by Claude ({model}) for this viewer: {audience.rstrip('.')}. "
+             "text": f"Alpha context notes written by Claude ({by}) for this viewer: {audience.rstrip('.')}. "
                      "Each note appears just after its line. “(less sure)” means: check me."
                      + (f" These notes cover only the first {make_ass.fmt_limit(limit)}." if limit else "")}
-    spec = {"title": f"{title} (context notes)", "audience": audience,
-            "scope": "Dialogue notes written from the subtitles only (no video or audio was analysed)",
-            "generated_by": model}
+    spec = dict(base or {})                      # adding to a notes file: keep everything else in it
+    spec.update({"title": f"{title} (context notes)", "audience": audience,
+                 "scope": spec.get("scope") or "Dialogue notes written from the subtitles only (no video or audio "
+                                               "was analysed)",
+                 "generated_by": by, "subtitles": Path(srt_path).name})
     if video_offset is not None:
         spec["video_offset"] = round(float(video_offset), 2)
     if foreign:
         spec["film_language"] = languages.code(film_language)
         if original_srt:
             spec["original_subtitles"] = Path(original_srt).name
+    spec.pop("limit", None)
     if limit:
         spec["limit"] = round(limit, 1)
     if year:
         spec["year"] = int(year)
+    spec.pop("notes", None)
     spec["notes"] = [intro] + notes
     make_ass.write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
     try:

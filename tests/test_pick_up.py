@@ -1,11 +1,10 @@
 """Picking up where a stopped run left off: note-writing (from <notes>.partial.json) and refine (from the notes file)."""
 import json
 import re
-import signal
 import threading
 
 import pytest
-from conftest import make_srt, needs_ffmpeg, run_cli
+from conftest import INTERRUPTED, make_srt, needs_ffmpeg, place, run_cli
 from test_progress_and_cancel import LONG, cancel_when, held_after_first
 from test_prompts import drive
 
@@ -103,7 +102,7 @@ def clip(tmp_path_factory):
 
 @pytest.fixture
 def project(tmp_path, clip):
-    (tmp_path / "synced.mp4").symlink_to(clip)
+    place(clip, tmp_path / "synced.mp4")
     make_srt(tmp_path / "synced.srt", n=24)
     notes = [{"at": "00:00:03,000", "category": "About these notes", "text": "Intro", "kind": "speech"}]
     notes += [{"match": f"Line {i} of", "category": "Idiom", "text": f"Note {i}", "confidence": "high", "kind": "speech"}
@@ -184,6 +183,120 @@ def test_cancel_during_refine_keeps_the_changes_so_far(project, api, api_key_fil
                              on_event=cancel)
     finally:
         gate.set()
-    assert cancel.sent and code == -signal.SIGINT, out
+    assert cancel.sent and code in INTERRUPTED, out
     assert json.loads((project / "notes-synced.json").read_text())["refined"]["stopped_after"]["part"] == 1
     assert props(project) == 1
+
+
+# ---------------------------------------------------------------- a run that ends without warning
+def killed_at(test):
+    """An on_event for drive(): end the run at once, as closing the window or a power cut would. Unlike Ctrl-C,
+    nothing gets the chance to save anything."""
+    def on_event(ev, p):
+        if not on_event.sent and test(ev):
+            on_event.sent = True
+            p.kill()
+    on_event.sent = False
+    return on_event
+
+
+def test_note_writing_picks_up_after_a_run_that_ended_without_warning(tmp_path, api, api_key_file, home):
+    from test_generate_notes import notes_for_each_part
+    gate = threading.Event()
+    api.responder = held_after_first(notes_for_each_part, gate)
+    srt = make_srt(tmp_path / "ep.srt", n=24, text=LONG)
+    kill = killed_at(lambda ev: ev["type"] == "progress" and ev["task"] == "generate" and ev["done"] == 1)
+    try:
+        code, out, _ = drive([srt, "--generate", "--yes", "--api-url", api.url], {}, tmp_path, home,
+                             script="make_ass.py", on_event=kill)
+    finally:
+        gate.set()
+    assert kill.sent and code != 0 and "Stopped after" not in out, out          # it never got to say anything...
+    kept = json.loads((tmp_path / "notes-ep.partial.json").read_text())        # ...but part 1 was kept as it ended
+    assert kept["through_line"] > 1 and kept["notes"]
+    api.calls.clear()
+    code, out, evs = drive([srt, "--generate", "--api-url", api.url], {"generate.send": "y"}, tmp_path, home,
+                           script="make_ass.py")
+    assert code == 0, out
+    assert asked(evs) == ["generate.resume", "generate.send"]
+    assert first_line_sent(api.calls[0]) == kept["through_line"] + 1             # nothing is sent twice
+    assert not (tmp_path / "notes-ep.partial.json").exists()
+
+
+@needs_ffmpeg
+def test_refine_picks_up_after_a_run_that_ended_without_warning(project, api, api_key_file, home):
+    gate = threading.Event()
+    api.responder = held_after_first(refine_responder, gate)
+    kill = killed_at(lambda ev: ev["type"] == "progress" and ev["task"] == "refine" and ev["done"] == 1)
+    try:
+        code, out, _ = drive([*REFINE, "--yes", "--api-url", api.url], {}, project, home, script="make_ass.py",
+                             on_event=kill)
+    finally:
+        gate.set()
+    assert kill.sent and code != 0, out
+    spec = json.loads((project / "notes-synced.json").read_text())
+    assert spec["refined"]["stopped_after"]["part"] == 1 and props(project) == 1    # part 1 is in the notes file
+    api.calls.clear()
+    code, out, evs = drive([*REFINE, "--api-url", api.url], {"refine.send": "y"}, project, home, script="make_ass.py")
+    assert code == 0, out
+    assert asked(evs) == ["refine.resume", "refine.send"] and len(api.calls) == 1 and props(project) == 2
+
+
+# ---------------------------------------------------------------- adding to notes made with --limit
+def notes_for_the_first_minute(tmp_path, api, home):
+    from test_generate_notes import notes_for_each_part
+    api.responder = notes_for_each_part
+    srt = make_srt(tmp_path / "ep.srt", n=24, text=LONG)          # a line every 6 s from 0:03: 1:00 is lines 1-10
+    r = run_cli("make_ass.py", srt, "--generate", "--yes", "--limit", "1:00", "--api-url", api.url, cwd=tmp_path,
+                home_dir=home)
+    assert r.returncode == 0, r.stdout + r.stderr
+    api.calls.clear()
+    return srt, tmp_path / "notes-ep.json"
+
+
+def test_notes_for_the_first_part_are_added_to_not_written_again(tmp_path, api, api_key_file, home):
+    srt, notes_file = notes_for_the_first_minute(tmp_path, api, home)
+    first = json.loads(notes_file.read_text())
+    assert first["subtitles"] == "ep.srt"
+    first["notes"].append({"at_video": "00:00:20,000", "kind": "visual", "category": "Prop", "text": "A frame note"})
+    first.update(refined={"model": "m", "date": "2026-10-24", "contact_sheets": 3, "limit": 60.0}, note_opacity=55)
+    notes_file.write_text(json.dumps(first))                        # as a refine and the app's settings leave it
+    r = run_cli("make_ass.py", srt, "--generate", "--extend", "--yes", "--api-url", api.url, cwd=tmp_path, home_dir=home)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "only the lines after them are sent" in r.stdout and "Kept a backup: notes-ep.json.bak" in r.stdout
+    assert api.calls and first_line_sent(api.calls[0]) == 11 and all(first_line_sent(c) > 10 for c in api.calls)
+    spec = json.loads(notes_file.read_text())
+    assert "limit" not in spec and spec["refined"] == first["refined"] and spec["note_opacity"] == 55
+    texts = [n["text"] for n in spec["notes"]]
+    assert all(n["text"] in texts for n in first["notes"] if n["category"] != "About these notes")
+    intros = [n for n in spec["notes"] if n["category"] == "About these notes"]
+    assert len(intros) == 1 and "only the first" not in intros[0]["text"] and spec["notes"][0] == intros[0]
+    assert len(spec["notes"]) > len(first["notes"])
+    assert json.loads((tmp_path / "notes-ep.json.bak").read_text()) == first
+
+    api.calls.clear()                                               # now it covers everything: nothing to add
+    r = run_cli("make_ass.py", srt, "--generate", "--extend", "--yes", "--api-url", api.url, cwd=tmp_path, home_dir=home)
+    assert r.returncode == 0 and "nothing to add, nothing sent" in r.stdout and not api.calls, r.stdout + r.stderr
+    assert not (tmp_path / "notes-ep.json.bak2").exists()
+
+
+def test_adding_needs_notes_it_can_add_to(tmp_path, api, api_key_file, home):
+    srt, notes_file = notes_for_the_first_minute(tmp_path, api, home)
+
+    def gen(*extra):
+        return run_cli("make_ass.py", srt, "--generate", "--yes", "--api-url", api.url, *extra, cwd=tmp_path,
+                       home_dir=home)
+
+    r = gen("--extend", "--force")
+    assert r.returncode == 2 and "use one or the other" in r.stderr
+    r = gen()
+    assert r.returncode == 1 and "--extend to keep them" in r.stderr
+    spec = json.loads(notes_file.read_text())
+    notes_file.write_text(json.dumps({**spec, "subtitles": "other.srt"}))
+    r = gen("--extend")
+    assert r.returncode == 1 and "it was written from other.srt" in r.stderr
+    notes_file.write_text(json.dumps({**spec, "subtitles": "ep.aligned.srt"}))      # a re-timed copy is fine
+    assert gen("--extend").returncode == 0
+    assert not api.calls or all(first_line_sent(c) > 10 for c in api.calls)
+    r = run_cli("make_ass.py", srt, "--extend", cwd=tmp_path, home_dir=home)
+    assert r.returncode == 2 and "--extend goes with --generate" in r.stderr

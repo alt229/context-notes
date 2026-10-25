@@ -38,6 +38,12 @@ import prompts
 SHEETS_PER_REQUEST = 4            # contact sheets (12 frames each) per request
 REFINE_MAX_TOKENS = 6000
 MAX_NEW_PER_WINDOW = 8
+# Each stretch is also told what earlier notes already explain (the dialogue notes and the ones added in earlier
+# stretches), a short line each, so it doesn't explain the same thing again: on Parasite, the semi-basement flat
+# was explained three times in the first six minutes, twice by this step. Only the most recent ones, and only how
+# each starts, to keep requests small: at most about 3,000 tokens.
+EARLIER_NOTES = 100
+EARLIER_WORDS = 16
 
 SYSTEM = """{mode_note}You refine "pop-up" context notes for a show or film, using frames from the video. Viewers watch with \
 subtitles and see a small note appear just after a line, or at a moment in the video, explaining what they may \
@@ -54,6 +60,7 @@ you cannot see what happens between them, so never claim to have seen it.
 - the dialogue for the stretch (times are video times)
 - loud moments with no dialogue (usually an audience laugh, a sound gag or action)
 - the existing notes for the stretch, each with an id, when it appears, its kind and category
+- what notes earlier in the film already explain, a short line each (they have no id)
 
 What to do:
 1. ADD notes about things the viewer may miss on screen: sight gags, props, text on screens/signs/posters/T-shirts, \
@@ -66,15 +73,17 @@ lands (kind "speech", with "cue": the line number it follows). Only when it help
 the replacement "text" and a short "reason". Don't rewrite for style.
 4. RETIME an existing note ("delay" in seconds, 0 to 15) when it appears before the thing it explains, \
 for instance a note that gives away a punchline before it is spoken or seen.
-5. DROP an existing note only if the frames clearly show it is wrong. Give a "reason".
+5. DROP an existing note only if the frames clearly show it is wrong, or if all it does is explain again something \
+already explained earlier in the film. Give a "reason".
 
 Rules:
 - Be accurate. Describe only what you can see. Never invent text on screen, names, trivia or production details. \
 If you aren't sure, say "medium" or "low" in "confidence" (the viewer sees a "less sure" tag) or leave it out.
 - No spoilers: only use what is in this stretch or earlier. Don't hint at later events.
 - Each note is at most about 40 words, plain and friendly, no markdown.
-- Don't repeat what an existing note already says. Fewer, better notes beat many: usually 0 to {maxnew} additions \
-for a stretch, and often none.
+- One note per thing. Don't explain again what an existing note in this stretch or an earlier note in the film \
+already explains, even in other words or from another angle, and don't add two notes about the same thing. Fewer, \
+better notes beat many: usually 0 to {maxnew} additions for a stretch, and often none.
 - Refer to existing notes only by the ids listed for this stretch.
 
 Reply with ONLY a JSON object, no prose and no code fences:
@@ -147,14 +156,7 @@ def check_same_episode(*names):
                  f"{lines}\nCheck the --video, subtitle and notes file names.")
 
 
-def unique_backup(path):
-    p = Path(path)
-    n = 1
-    while True:
-        b = p.with_name(p.name + (".bak" if n == 1 else f".bak{n}"))
-        if not b.exists():
-            return b
-        n += 1
+unique_backup = make_ass.unique_backup
 
 
 def resume_choice(notes_path, stopped, auto):
@@ -226,7 +228,20 @@ def foreign_note(film_language, situation):
     return note
 
 
-def window_text(win, cues, offset, moments, notes, times, title, k, total, visual_only=False, extra=None):
+def earlier_notes(notes, times, before, dropped=()):
+    """A short line for each note shown before `before` (video time), the most recent EARLIER_NOTES of them."""
+    rows = sorted(((times[i], n) for i, n in enumerate(notes, 1)
+                  if times.get(i) is not None and times[i] < before and i not in dropped
+                  and str(n.get("category", "")).lower() != "about these notes"), key=lambda r: r[0])
+    out = []
+    for t, n in rows[-EARLIER_NOTES:]:
+        words = str(n.get("text", "")).split()
+        short = " ".join(words[:EARLIER_WORDS]) + (" ..." if len(words) > EARLIER_WORDS else "")
+        out.append(f"- [{hms(t)}] {n.get('category', 'Note')}: {short}")
+    return out
+
+
+def window_text(win, cues, offset, moments, notes, times, title, k, total, visual_only=False, extra=None, dropped=()):
     lo, hi = win["lo"], win["hi"]
     lines = []
     for c in cues:
@@ -248,10 +263,13 @@ def window_text(win, cues, offset, moments, notes, times, title, k, total, visua
                         f"{n.get('confidence', 'high')}] {n['text']}"
     dialogue = ("(left out: the subtitles are not reliably in step with this video)" if visual_only
                 else "\n".join(lines) or "(none)")
+    earlier = earlier_notes(notes, times, lo, dropped)
     text = (f"Title: {title}\nPart {k} of {total}. This stretch: {hms(lo)} to {hms(hi)} (video time).\n\n"
             f"Dialogue in this stretch:\n" + dialogue +
             "\n\nLoud moments with no dialogue:\n" + ("\n".join(loud) or "(none)") +
             "\n\nExisting notes in this stretch:\n" + ("\n".join(listed.values()) or "(none)") +
+            ("\n\nAlready explained earlier in the film (don't explain these again):\n" + "\n".join(earlier)
+             if earlier else "") +
             "\n\nReply with the JSON object only.")
     return text, listed
 
@@ -374,10 +392,16 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
         sys.exit(f"{notes_path} has no notes to refine. Run with --generate first.")
     stopped = (spec.get("refined") or {}).get("stopped_after")
     resume_from, first_backup = None, None
+    done_to = (spec.get("refined") or {}).get("limit")
     if stopped:
         resume_from, first_backup, before = resume_choice(notes_path, stopped, assume_yes or estimate_only)
         if before is not None:
             spec, notes = before, before["notes"]
+    elif done_to and (limit is None or limit > done_to + 1):
+        # The frames were looked at for the first part only (--limit): look at the rest, and keep what it added.
+        resume_from = float(done_to)
+        print(f"The frames were looked at for the first {make_ass.fmt_limit(done_to)} before, so only the rest is "
+              f"sent now.")
     key = None if estimate_only else gn.load_key(key_file)    # fail early if there is no usable key
     film_language = film_language or spec.get("film_language")
     if not original_srt and spec.get("original_subtitles"):
@@ -415,11 +439,19 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
     if not wins:
         sys.exit("No contact sheets were produced, so there is nothing to look at.")
     total, first = len(wins), 1
+    todo = wins
     if resume_from is not None:
         first = 1 + sum(1 for w in wins if w["hi"] <= resume_from + 0.01)
+        todo = wins[first - 1:]
+        if todo and todo[0]["lo"] < resume_from - 0.01:
+            # Picking up part-way through a part (frames looked at with a shorter --limit before): make the parts
+            # from the contact sheets after that point, so frames already looked at aren't sent again.
+            todo = make_windows([s for s in an["sheets"] if s[2] > resume_from + 0.01], an["duration"])
+            if todo:
+                todo[0]["lo"] = resume_from
+            total = first - 1 + len(todo)
         sync_msg = f"picked up at {hms(resume_from)} (part {first} of {total}); {sync_msg}"
         print(f"  Picking up at {hms(resume_from)}: part {first} of {total}.")
-    todo = wins[first - 1:]
     if not todo:
         if not estimate_only:
             _save(spec, notes, {}, notes_path, ["(nothing was left to refine)"],
@@ -467,7 +499,7 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
     log, dropped, tin, tout, total_added, problems = [], {}, 0, 0, 0, []
     total_revised = total_retimed = 0
     def stop_early():
-        last = max(resume_from or 0.0, wins[completed - 1]["hi"] if completed else 0.0)
+        last = max(resume_from or 0.0, done_until)
         print()
         _save(spec, notes, dropped, notes_path, log, backup, model=model, usage=(tin, tout), sheets=n_img,
               sync_msg=f"STOPPED EARLY after part {completed} of {total}; {sync_msg}", limit=limit,
@@ -477,11 +509,22 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
         print(f"  Stopped after part {completed} of {total}. The changes so far were saved to the notes file "
               f"(original: {backup.name}). The next refine offers to pick up from here.", flush=True)
 
-    completed = first - 1
+    def checkpoint():
+        """After every part, so a run that ends without warning (the window closed, the computer lost power) can
+        pick up after the last part that finished: the notes file says where, as stop_early() does."""
+        last = max(resume_from or 0.0, done_until)
+        snapshot = {**spec, "notes": [n for i, n in enumerate(notes, 1) if i not in dropped]}
+        snapshot["refined"] = {"model": model, "date": datetime.date.today().isoformat(), "contact_sheets": n_img,
+                               **({"limit": round(limit, 1)} if limit else {}),
+                               "stopped_after": {"time": round(last, 3), "part": completed, "parts": total,
+                                                 "backup": first_backup or backup.name}}
+        make_ass.write_text_safely(notes_path, json.dumps(snapshot, indent=1, ensure_ascii=False) + "\n")
+
+    completed, done_until = first - 1, 0.0
     try:
         for k, win in enumerate(todo, first):
             text, listed = window_text(win, cues, offset, an["moments"], notes, times, title, k, total, visual_only,
-                                       extra)
+                                       extra, dropped)
             content = []
             for path, t0, t1 in win["sheets"]:
                 content.append({"type": "text", "text": f"Contact sheet: frames from {hms(t0)} to {hms(t1)}"})
@@ -515,7 +558,9 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
             print(f"{added} added, {revised} revised, {retimed} retimed, {dropped_n} dropped")
             # new notes need times too, so later windows can see them
             times = note_times(cues, notes, offset)
-            completed = k
+            completed, done_until = k, win["hi"]
+            if k < total:
+                checkpoint()
     except KeyboardInterrupt:                    # Ctrl-C, or a GUI's Cancel: keep the changes so far
         stop_early()
         raise

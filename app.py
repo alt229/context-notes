@@ -13,6 +13,7 @@ Only this computer can reach it: it listens on 127.0.0.1, and every request must
 it prints. Standard library only.
 """
 import argparse
+import base64
 import hmac
 import json
 import os
@@ -106,10 +107,40 @@ def clean_path(text, where=None):
 
 def missing_path_hint(text, where=None):
     """Why a path can't be found, when there's something more useful to say than 'not found'."""
-    if (where or system()) == "wsl" and (WINDOWS_PATH.match(text.strip().strip('"')) or text.startswith("/mnt/")):
-        return ("Windows network drives (like Z: or \\\\nas\\films) aren't visible inside WSL until you mount them, "
-                "for example:  sudo mkdir -p /mnt/z && sudo mount -t drvfs Z: /mnt/z")
+    where, s = where or system(), (text or "").strip().strip('"').strip("'")
+    drive = re.match(r"^([A-Za-z]):", s) or (re.match(r"^/mnt/([A-Za-z])(?:/|$)", s) if where == "wsl" else None)
+    unc = re.match(r"^(\\\\[^\\]+\\[^\\]+)", s)
+    if where == "wsl":
+        if unc:
+            return (f"Network shares aren't visible inside WSL until you mount them. Easiest: map {unc.group(1)} to a "
+                    f"drive letter in Windows (say Y:), then run:  sudo mkdir -p /mnt/y && sudo mount -t drvfs Y: /mnt/y")
+        if drive:
+            d = drive.group(1)
+            mnt = Path(f"/mnt/{d.lower()}")
+            try:
+                mounted = mnt.is_dir() and any(mnt.iterdir())
+            except OSError:
+                mounted = False
+            if not mounted:
+                return (f"Drive {d.upper()}: isn't mounted inside WSL (network drives never are until you do it). "
+                        f"Mount it with:  sudo mkdir -p /mnt/{d.lower()} && sudo mount -t drvfs {d.upper()}: /mnt/{d.lower()}")
+    if where == "windows":
+        if unc:
+            return f"Can't reach {unc.group(1)}. Check that it opens in File Explorer."
+        if drive:
+            return (f"Not found on {drive.group(1).upper()}:. If that's a network drive, open it in File Explorer once, "
+                    "so Windows reconnects it.")
     return None
+
+
+def windows_drives():
+    """The drive letters Windows knows about (C:, D:, a mapped Y: ...), found without touching the drives."""
+    try:
+        import ctypes
+        mask = ctypes.windll.kernel32.GetLogicalDrives()
+    except (ImportError, AttributeError, OSError):
+        return []
+    return [f"{chr(65 + i)}:\\" for i in range(26) if mask >> i & 1]
 
 
 def places():
@@ -125,6 +156,9 @@ def places():
     if where == "mac":
         for vol in sorted(Path("/Volumes").glob("*")) if Path("/Volumes").is_dir() else []:
             add(vol.name, vol)
+    elif where == "windows":
+        for d in windows_drives():                         # not checked: a disconnected drive can take seconds
+            out.append({"label": f"{d[0]}: drive", "path": d})
     elif where == "wsl":
         profile = windows_env("USERPROFILE")
         add("Windows home", profile)
@@ -157,9 +191,9 @@ def browse(text):
             continue
         try:
             if e.is_dir():
-                dirs.append(e.name)
+                dirs.append({"name": e.name, "path": str(e)})
             elif e.suffix.lower() in analyze.VIDEO_EXTS:
-                videos.append(e.name)
+                videos.append({"name": e.name, "path": str(e)})
         except OSError:
             continue
     return {"path": str(p), "parent": str(p.parent) if p.parent != p else None, "dirs": dirs, "videos": videos,
@@ -194,7 +228,8 @@ def dialog_command(kind, where=None):
         return ["osascript", "-e", f"POSIX path of ({what})"]
     if where in ("wsl", "windows"):
         exe = "powershell.exe" if where == "wsl" or shutil.which("powershell.exe") else "powershell"
-        return [exe, "-NoProfile", "-STA", "-Command", POWERSHELL_FOLDER if folder else POWERSHELL_FILE]
+        script = (POWERSHELL_FOLDER if folder else POWERSHELL_FILE).encode("utf-16-le")   # survives any quoting
+        return [exe, "-NoProfile", "-STA", "-EncodedCommand", base64.b64encode(script).decode()]
     if shutil.which("zenity"):
         return ["zenity", "--file-selection", "--title", "Choose a folder of videos" if folder else "Choose a video",
                 *(["--directory"] if folder else [])]
@@ -355,7 +390,7 @@ def open_browser(url):
 # ---------------------------------------------------------------- running the scripts
 def gui_env():
     return {**os.environ, "CONTEXT_NOTES_UI": "json", "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8",
-            "PYTHONDONTWRITEBYTECODE": "1"}
+            "PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1"}            # UTF-8 everywhere, Windows too
 
 
 def script(name, *args):
@@ -414,6 +449,26 @@ def common_args(o):
         if minutes <= 0:
             raise BadRequest("The time limit is a number of minutes, like 5.")
         args += ["--limit", f"{minutes * 60:g}"]
+    per_word = str(o.get("seconds_per_word") or "").strip().replace(",", ".")
+    if per_word:                                  # empty: each video keeps its own (0.4 s a word unless changed)
+        try:
+            seconds = float(per_word)
+        except ValueError:
+            seconds = 0
+        if not 0.1 <= seconds <= 2:
+            raise BadRequest("Seconds a word is a number from 0.1 to 2, like 0.4 (the default) or 0.5 for longer.")
+        args += ["--reading-speed", f"{60 / seconds:g}"]
+    background = o.get("note_background")
+    if background:
+        if background not in make_ass.BACKGROUNDS:
+            raise BadRequest(f"That doesn't look right: {background}")
+        args += ["--note-background", background]
+    opacity = str(o.get("box_opacity") or "").strip().rstrip("%").strip().replace(",", ".")
+    if opacity:                                   # empty: each video keeps its own (30% unless changed)
+        try:
+            args += ["--note-opacity", f"{make_ass.percent_arg(opacity):g}"]
+        except argparse.ArgumentTypeError:
+            raise BadRequest("How solid the box is: a number from 0 (invisible) to 100 (solid), like 30.")
     if o.get("refine") is False:
         args.append("--no-refine")
     if o.get("redo"):
@@ -502,6 +557,18 @@ class Job:
                 self.proc.send_signal(signal.CTRL_BREAK_EVENT)
         except (OSError, ProcessLookupError):
             return False
+        if os.name != "posix":
+            # On Windows a script waiting for an answer only notices Ctrl-Break once its read returns. Give it an
+            # empty line: it stops before acting on it.
+            with self.lock:
+                waiting = self.pending is not None
+            if waiting:
+                time.sleep(0.2)
+                try:
+                    self.proc.stdin.write("\n")
+                    self.proc.stdin.flush()
+                except (OSError, ValueError):
+                    pass
         return True
 
 

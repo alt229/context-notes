@@ -200,7 +200,7 @@ def collect(a):
     ms = int(round(cues[0]["start"] * 1000))
     intro = {"at": f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}",
              "category": "About these notes", "duration": 9, "kind": "speech",
-             "text": f"Pre-alpha context notes written by Claude ({a.model_label}) for this viewer: "
+             "text": f"Alpha context notes written by Claude ({a.model_label}) for this viewer: "
                      f"{audience.rstrip('.')}. Each note appears just after its line. “(less sure)” means: check me."
                      + (f" These notes cover only the first {make_ass.fmt_limit(limit)}." if limit else "")}
     year = gn.resolve_year(a.year, video, a.title)

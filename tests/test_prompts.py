@@ -2,13 +2,12 @@
 import io
 import json
 import os
-import stat
 import subprocess
 import sys
 import threading
 
 import pytest
-from conftest import ROOT, make_srt, needs_ffmpeg, run_cli
+from conftest import NEW_GROUP, ROOT, assert_private, make_srt, needs_ffmpeg, place, run_cli
 
 import find_subs
 import prompts
@@ -113,7 +112,7 @@ def test_opensubtitles_login_from_a_gui(gui, home, monkeypatch, capsys):
     assert find_subs.os_set_login()
     path = home / ".config" / "context-notes" / "opensubtitles.json"
     assert json.loads(path.read_text()) == {"api_key": "OSKEY", "username": "erin", "password": "pass word"}
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert_private(path)
     out = capsys.readouterr().out
     assert [(e["id"], e["hidden"]) for e in events(out)] == [
         ("opensubtitles.api-key", True), ("opensubtitles.username", False), ("opensubtitles.password", True)]
@@ -125,7 +124,8 @@ def test_cli_set_api_key_from_a_gui(tmp_path, home):
     r = run_cli("make_ass.py", "--set-api-key", cwd=tmp_path, home_dir=home, stdin="sk-ant-gui-5678\n", env_extra=GUI)
     assert r.returncode == 0, r.stderr
     path = home / ".config" / "context-notes" / "api-key"
-    assert path.read_text() == "sk-ant-gui-5678\n" and stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert path.read_text() == "sk-ant-gui-5678\n"
+    assert_private(path)
     assert [e["id"] for e in events(r.stdout)] == ["api-key"]
     assert "sk-ant-gui" not in r.stdout + r.stderr and "5678" in r.stdout
 
@@ -203,7 +203,7 @@ def clip(tmp_path_factory):
 
 @pytest.fixture
 def project(tmp_path, clip):
-    (tmp_path / "synced.mp4").symlink_to(clip)
+    place(clip, tmp_path / "synced.mp4")
     make_srt(tmp_path / "synced.srt", n=24)
     notes = [{"at": "00:00:03,000", "category": "About these notes", "text": "Intro", "kind": "speech"}]
     notes += [{"match": f"Line {i} of", "category": "Idiom", "text": f"Note {i}", "confidence": "high", "kind": "speech"}
@@ -232,12 +232,12 @@ def drive(args, answers, cwd, home, script="context_notes.py", on_event=None):
     """Run a script the way a GUI would: read its output line by line and answer each question by id (anything not
     in `answers` gets an empty line, the default). `on_event(event, process)` sees every event, e.g. to press
     Cancel. Returns (exit code, output, events)."""
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "HOME": str(home), **GUI}
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8", "HOME": str(home), **GUI}
     env.pop("ANTHROPIC_API_KEY", None)
     env.pop("XDG_CONFIG_HOME", None)
     p = subprocess.Popen([sys.executable, str(ROOT / script), *map(str, args)], cwd=cwd, env=env,
-                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                         start_new_session=True)
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8",
+                         errors="replace", **NEW_GROUP)
     timer = threading.Timer(240, p.kill)
     timer.start()
     out, evs = [], []
@@ -263,7 +263,7 @@ def drive(args, answers, cwd, home, script="context_notes.py", on_event=None):
 def test_a_gui_can_drive_the_whole_wrapper(tmp_path, clip, api, api_key_file, home):
     """Questions from context_notes.py itself and from the scripts it starts all reach the GUI, in order."""
     from test_context_notes import both
-    os.symlink(clip, tmp_path / "ep.mp4")
+    place(clip, tmp_path / "ep.mp4")
     make_srt(tmp_path / "ep.srt", n=24)
     api.responder = both
     code, out, evs = drive(["ep.mp4", "--api-url", api.url],

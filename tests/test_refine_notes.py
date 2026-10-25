@@ -3,7 +3,7 @@ import re
 import subprocess
 
 import pytest
-from conftest import make_srt, message, needs_ffmpeg, run_cli
+from conftest import make_srt, message, needs_ffmpeg, place, run_cli
 
 import refine_notes as rn
 
@@ -110,6 +110,28 @@ def test_note_times_and_windows():
     assert len(wins) == 3 and wins[0]["lo"] == 0.0 and wins[0]["hi"] == wins[1]["lo"] == 40.0 and wins[-1]["hi"] == 101.0
 
 
+def test_each_stretch_is_told_what_earlier_notes_explain(monkeypatch):
+    long = " ".join(f"word{i}" for i in range(30))
+    notes = fresh_notes() + [{"at_video": "00:00:40,000", "category": "Prop", "kind": "visual", "text": long},
+                             {"at_video": "00:00:55,000", "category": "Prop", "kind": "visual", "text": "In this stretch"},
+                             {"at": "00:00:01,000", "category": "About these notes", "text": "Intro", "kind": "speech"}]
+    times = rn.note_times(CUES, notes, 0.0)
+    head = "Already explained earlier in the film (don't explain these again):\n"
+
+    def earlier(lo, dropped=()):
+        text, listed = rn.window_text({"lo": lo, "hi": 100.0}, CUES, 0.0, [], notes, times, "T", 2, 2, dropped=dropped)
+        return (text.split(head)[1].split("\n\n")[0].splitlines() if head in text else []), listed
+
+    rows, listed = earlier(50.0, dropped={2})
+    assert rows == [f"- [{rn.hms(times[1])}] Idiom: A", "- [0:00:25] Prop: A red balloon floats past the window",
+                    f"- [{rn.hms(times[3])}] Idiom: C",
+                    "- [0:00:40] Prop: " + " ".join(long.split()[:rn.EARLIER_WORDS]) + " ..."]   # in time order;
+    assert list(listed) == [6]                       # not the dropped note, the intro or the stretch's own notes
+    assert earlier(0.0)[0] == []                     # the first stretch has nothing before it: no section at all
+    monkeypatch.setattr(rn, "EARLIER_NOTES", 2)
+    assert [r.split("]")[0] for r in earlier(50.0)[0]] == [f"- [{rn.hms(times[3])}", "- [0:00:40"]   # the most recent
+
+
 def test_reply_parsing_survives_truncation():
     text = '```json\n{"add": [{"at": "0:00:01", "text": "done"}, {"at": "0:00:0'
     assert rn.parse_reply(text)["add"] == [{"at": "0:00:01", "text": "done"}]
@@ -140,7 +162,7 @@ def videos(tmp_path_factory):
 @pytest.fixture
 def project(tmp_path, videos):
     for name in ("synced.mp4", "drift.mp4"):
-        (tmp_path / name).symlink_to(videos / name)
+        place(videos / name, tmp_path / name)
     make_srt(tmp_path / "synced.srt", n=24)
     (tmp_path / "drift.srt").write_text((tmp_path / "synced.srt").read_text())
     notes = [{"at": "00:00:03,000", "category": "About these notes", "text": "Intro", "kind": "speech"}]
@@ -217,7 +239,7 @@ def test_refine_only_adds_visual_notes_when_sync_cannot_be_confirmed(project, ap
 @needs_ffmpeg
 def test_refine_refuses_a_video_for_a_different_episode(project, api, api_key_file, home):
     (project / "S01E03 Fifty.srt").write_text((project / "synced.srt").read_text())
-    (project / "S01E02 Calamity.mp4").symlink_to(project / "synced.mp4")
+    place(project / "synced.mp4", project / "S01E02 Calamity.mp4")
     (project / "notes-S01E03.json").write_text((project / "notes-synced.json").read_text())
     r = run_cli("make_ass.py", "S01E03 Fifty.srt", "notes-S01E03.json", "--refine", "--video", "S01E02 Calamity.mp4",
                 "--yes", "--api-url", api.url, cwd=project, home_dir=home)
@@ -242,3 +264,18 @@ def test_refine_keeps_what_it_has_when_the_api_fails_midway(project, api, api_ke
     assert r.returncode == 1 and "Stopped after part 1" in r.stdout
     assert "STOPPED EARLY" in (project / "notes-synced.refine-report.txt").read_text()
     assert (project / "notes-synced.json.bak").exists()
+
+
+@needs_ffmpeg
+def test_later_stretches_are_told_what_earlier_ones_explained(project, api, api_key_file, home):
+    api.responder = refine_responder
+    r = run_cli("make_ass.py", "synced.srt", "notes-synced.json", "--refine", "--video", "synced.mp4", "--yes",
+                "--api-url", api.url, cwd=project, home_dir=home)
+    assert r.returncode == 0, r.stdout + r.stderr
+    texts = [[b for b in c["body"]["messages"][0]["content"] if b["type"] == "text"][-1]["text"] for c in api.calls]
+    assert len(texts) == 2 and "Already explained earlier" not in texts[0]
+    second = texts[1].split("Already explained earlier in the film (don't explain these again):\n")[1]
+    assert "- [0:00:05] Prop: Prop at 0:00:05" in second and "] Prop: Prop in decimal minutes" in second  # added in part 1
+    dropped_in_part_1 = re.findall(r"^#\d+ \[[^\]]*\] (.*)$", texts[0], re.M)[-1]
+    assert dropped_in_part_1 not in second
+    assert "One note per thing" in api.calls[0]["body"]["system"]
