@@ -48,6 +48,7 @@ Notes appear as small boxed overlays while you watch, in VLC (or any player that
 | `chat_notes.py` | Write the dialogue notes in a claude.ai chat or with Claude Code (your subscription) instead of the API. |
 | `languages.py` | Language codes and names shared by the scripts (`fr`, `fre`, `French` are all French). |
 | `tidy.py` | Moves the working files earlier versions left beside your videos into their `context-notes` folders (see [Where the files go](#where-the-files-go)). |
+| `embed.py` | Puts a film's notes inside the `.mkv` as a subtitle track, for films that already have a `.notes.ass` (see [Putting the notes inside the film](#putting-the-notes-inside-the-film)). |
 | `workfiles.py` | Where each script puts a video's working files, and finds them again. |
 | `prompts.py` | How the scripts ask questions: in Terminal as usual, or answered by another program such as a GUI ([docs/gui-protocol.md](docs/gui-protocol.md)). |
 
@@ -200,6 +201,30 @@ tidy.py "/Volumes/Movies" --recursive --dry-run   # list what would move, and mo
 tidy.py "/Volumes/Movies" --recursive             # move it (it asks first; --yes doesn't)
 tidy.py film.mkv                                  # one video
 ```
+
+### Putting the notes inside the film
+
+`<video>.notes.ass` beside the video is all VLC needs. To have the notes travel with the film itself (one file to
+copy or share, or a device that doesn't read subtitle files beside a video), `embed.py` adds them to an `.mkv` as
+one more subtitle track, called "Context Notes". Nothing is re-encoded, so it costs nothing and keeps the notes'
+colours, positions and fades.
+
+```bash
+python3 context_notes.py "film.mkv" --embed          # after the notes are written (or already done)
+python3 embed.py "film.mkv"                          # a film that already has a .notes.ass
+python3 embed.py "/Volumes/Movies" --recursive       # every .mkv with a .notes.ass under a folder
+python3 embed.py "/Volumes/Movies" --dry-run         # only list what it would do
+python3 embed.py film.mkv --default                  # play with the notes on (otherwise: pick the track)
+python3 embed.py "/Volumes/Movies" --delete-backups  # free the space the kept originals take
+```
+
+- It builds a new file in the film's `context-notes` folder, checks it (same length, same tracks, chapters and
+  fonts, plus the new one), then swaps it in. Your original stays there as `<film>.original.mkv` until you delete
+  it. It needs about the film's size in free space while it works.
+- Existing subtitle tracks, chapters and fonts are kept. If the notes change later (a rebuild, or a new
+  `--reading-speed`), run it again: it replaces its own track and never adds a second.
+- `.mp4` files are left as they are: MP4 can't hold these subtitles without losing their styling. Notes that only
+  cover the first part of a film (`--limit`) aren't embedded.
 
 Files are moved as they are, never changed or overwritten. A file whose name is already taken in the folder, or that
 could belong to two videos (`film.mkv` and `film.mp4`), stays where it is and is listed.

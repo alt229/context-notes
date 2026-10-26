@@ -623,6 +623,22 @@ class App:
                      "done": next((e for e in events if e.get("type") == "tidy-done"), None),
                      "ok": code == 0, "lines": lines}
 
+    def embed(self, o):
+        """Films whose notes can go inside the .mkv (embed.py): listed, or with o["go"] started as a job like a run
+        (it takes minutes a film). Nothing is sent to Claude."""
+        with self.lock:
+            if self.job and self.job.running:
+                return 409, {"error": "Something is already running. Wait for it to finish, or cancel it."}
+            p = clean_path(o.get("path"))
+            if p is None or not p.exists():
+                return 400, {"error": "Choose a film or a folder first."}
+            args = [p, *(["--recursive"] if o.get("recursive") and p.is_dir() else [])]
+            if o.get("go"):
+                self.job = Job(script("embed.py", *args, "--yes", *(["--default"] if o.get("default") else [])))
+                return 200, {"ok": True}
+            code, lines, events = run_quietly(script("embed.py", *args, "--dry-run"), timeout=600)
+        return 200, {"videos": [e for e in events if e.get("type") == "embed-plan"], "ok": code == 0, "lines": lines}
+
     def set_credit(self, o):
         """The credit left, as the page's Settings gives it (usage.py keeps the estimate from there)."""
         low = str(o.get("low") or "").strip()
@@ -766,6 +782,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(*app.run(o))
         if path == "/api/tidy":
             return self._send(*app.tidy(o))
+        if path == "/api/embed":
+            return self._send(*app.embed(o))
         if path == "/api/answer":
             ok = bool(app.job and app.job.answer(o.get("answer", "")))
             return self._send(200 if ok else 409, {"ok": ok})

@@ -2,6 +2,7 @@
 import base64
 import json
 import os
+import shutil
 import threading
 import time
 import urllib.error
@@ -13,6 +14,7 @@ import pytest
 from conftest import assert_private, make_srt, needs_ffmpeg, place
 
 import app
+from test_embed import ASS, make_clips
 
 
 @pytest.fixture
@@ -327,3 +329,28 @@ def test_tidy_lists_then_moves(server, tmp_path):
     assert (films / "context-notes" / "Film.mkv" / "notes-Film.json").exists()
     code, r = call(server, "/api/tidy", {"path": str(films / "nowhere")})
     assert code == 400 and "Choose a film or a folder" in r["error"]
+
+
+@needs_ffmpeg
+def test_embed_lists_then_runs_as_a_job(server, tmp_path):
+    clips = make_clips(tmp_path / "clips")
+    films = tmp_path / "Films"
+    films.mkdir()
+    shutil.copyfile(clips / "plain.mkv", films / "A.mkv")
+    shutil.copyfile(clips / "plain.mp4", films / "B.mp4")
+    for n in ("A", "B"):
+        (films / f"{n}.notes.ass").write_text(ASS)
+    code, r = call(server, "/api/embed", {"path": str(films)})
+    assert code == 200 and r["ok"], r
+    assert {Path(v["video"]).name: v["action"] for v in r["videos"]} == {"A.mkv": "add", "B.mp4": "skip"}
+    assert not (films / "context-notes").exists()                                   # listing changes nothing
+    code, r = call(server, "/api/embed", {"path": str(films / "nowhere")})
+    assert code == 400 and "Choose a film or a folder" in r["error"]
+    code, r = call(server, "/api/embed", {"path": str(films), "go": True})
+    assert code == 200 and r["ok"], r
+    server.app.job.proc.wait(timeout=120)
+    code, view = call(server, "/api/job?after=0")
+    types = [i["event"]["type"] for i in view["items"] if "event" in i]
+    assert view["returncode"] == 0 and "embed-video" in types and "question" not in types, view
+    assert any(i.get("event", {}).get("result") == "embedded" for i in view["items"])
+    assert (films / "context-notes" / "A.mkv" / "A.original.mkv").exists() and not (films / "context-notes" / "B.mp4").exists()

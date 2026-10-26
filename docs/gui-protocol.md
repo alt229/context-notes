@@ -153,6 +153,27 @@ moving, `tidy-done` says how it went (the app's Tidy button runs it with `--dry-
 @context-notes {"v": 1, "type": "tidy-done", "moved": 2, "problems": []}
 ```
 
+### `embed-plan`, `embed-video`, `embed-result` and `embed-backup`
+
+`embed.py` (the notes inside an `.mkv`, README "Putting the notes inside the film") lists what it would do, one
+`embed-plan` per video that has a `.notes.ass`. `action` is `add`, `update` (the notes changed since they were put
+inside), `current` (nothing to do) or `skip` (`reason` says why: an `.mp4`, notes that only cover part of the film,
+a link). `size` is the film's size in bytes. While it works it sends `embed-video` and `embed-result` for each film
+(`result` is `embedded` or `stopped`, with a `reason`), and `progress` events with `task` `embed` and `unit`
+`seconds` (how much of the film has been copied). `--delete-backups` lists each kept original as `embed-backup`.
+The app's Embed button runs it with `--dry-run`, then `--yes` as a job like a run:
+
+```
+@context-notes {"v": 1, "type": "embed-plan", "video": "/Movies/Amelie.mkv", "action": "add", "size": 4213456789, "reason": null}
+@context-notes {"v": 1, "type": "embed-plan", "video": "/Movies/Heat.mp4", "action": "skip", "size": 0, "reason": ".mp4 can't hold these subtitles without losing their styling, so it stays as it is (.mkv only for now)"}
+@context-notes {"v": 1, "type": "embed-video", "path": "/Movies/Amelie.mkv", "index": 1, "total": 1}
+@context-notes {"v": 1, "type": "progress", "task": "embed", "done": 612.4, "total": 7320.0, "unit": "seconds"}
+@context-notes {"v": 1, "type": "embed-result", "path": "/Movies/Amelie.mkv", "result": "embedded", "reason": null}
+```
+
+`context_notes.py --embed` runs `embed.py` after each finished film, so a run's events can include these, and
+`step` gets the name `embed`.
+
 ## Question and input ids
 
 The ids are stable, so a GUI can show its own wording or a special dialog. The `text` is always there as a fallback.
@@ -173,6 +194,8 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 | `notes.unreadable` | `context_notes.py` | y / n (y) | Claude's reply for some parts couldn't be read last time: send just those lines again (no frames step) |
 | `folder.next` | `context_notes.py` | y / n (y) | One video stopped: go on to the next? |
 | `tidy.move` | `tidy.py` | y / n (y) | Move the working files listed above into their `context-notes` folders |
+| `embed.go` | `embed.py` | y / n (y) | Put the notes inside the films listed above (rewrites each; the original is kept) |
+| `embed.delete` | `embed.py --delete-backups` | y / n (n) | Delete the kept originals listed (can't be undone) |
 | `subs.download` | `context_notes.py` (y), `find_subs.py` (n) | y / n | Download subtitles from OpenSubtitles.com (uses a daily download) |
 | `subs.transcribe` | `context_notes.py`, `find_subs.py` | y / n (n) | Write subtitles from the soundtrack with speech recognition |
 | `api-key` | `make_ass.py --set-api-key` | input, hidden | Saved to `~/.config/context-notes/api-key`, mode 600 |

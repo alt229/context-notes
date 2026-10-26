@@ -7,6 +7,11 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- `embed.py` puts a film's notes inside the `.mkv` as a "Context Notes" subtitle track (ffmpeg copies every track,
+  nothing is re-encoded). Works on any film with a `.notes.ass`, like `tidy.py`: a folder, `--recursive`,
+  `--dry-run`, `--yes`, plus `--default` and `--delete-backups`. The new file is checked before it replaces the film;
+  the original is kept in `context-notes/<film>/`. `.mp4` is skipped (MP4 can't hold ASS without losing its
+  styling), and so are notes from a `--limit` run. `context_notes.py --embed` does it after the notes are done.
 - `usage.py`: what the API calls cost, and the credit probably left. Every finished request is written to a ledger
   (`~/.config/context-notes/usage.jsonl`) with its tokens and cost; `usage.py --set-balance 25` (or `--add-credit`)
   gives it the console's figure, and the estimate counts down from there. Each request prints one line

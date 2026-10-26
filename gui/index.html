@@ -366,6 +366,22 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
   </div>
 </dialog>
 
+<dialog id="embed" aria-labelledby="embedTitle">
+  <div class="dhead"><h2 id="embedTitle">Put the notes inside the film</h2>
+    <button type="button" class="btn quiet" data-close>Close</button></div>
+  <div class="dbody">
+    <p id="embedIntro"></p>
+    <ul class="entries" id="embedList"></ul>
+    <label class="check" id="embedDefaultRow"><input type="checkbox" id="embedDefault">
+      <span>Play with the notes on<small>Otherwise the track is there to choose in your player's subtitle menu.</small></span></label>
+    <p class="msg" id="embedMsg" role="status"></p>
+  </div>
+  <div class="dfoot">
+    <button type="button" class="btn" id="embedNo">Not now</button>
+    <button type="button" class="btn primary" id="embedBtn">Put them inside</button>
+  </div>
+</dialog>
+
 <dialog id="tidy" aria-labelledby="tidyTitle">
   <div class="dhead"><h2 id="tidyTitle">Tidy up</h2>
     <button type="button" class="btn quiet" data-close>Close</button></div>
@@ -481,7 +497,7 @@ async function api(path, body) {
 
 const MODELS = { "claude-opus-5-5": "Claude Opus", "claude-sonnet-5-5": "Claude Sonnet" };
 const TASKS = { soundtrack: "Listening to the soundtrack", frames: "Pulling frames", transcribe: "Recognising speech",
-                generate: "Writing notes", refine: "Looking at the frames" };
+                generate: "Writing notes", refine: "Looking at the frames", embed: "Putting the notes inside" };
 const STATES = { ready: "Ready", todo: "To do", rebuild: "Needs a rebuild", stopped: "Stopped part-way",
                  working: "Working on it", problem: "Stopped" };
 const STEPS = ["subtitles", "sync", "generate", "refine", "alignment", "done"];
@@ -493,6 +509,7 @@ let lastEstimate = null;
 let polling = false;
 let running = false;
 let asking = false;
+let embedding = false;          // the job running is embed.py, not a run
 let keepNote = false;
 let usageNow = null;             // what usage.py reports: the credit estimate, spending, and the plan's session
 
@@ -689,6 +706,10 @@ function readyScreen() {
   if (old) note("right", "Tidy up", (one ? "This film still has its" : `${plural(old, "film")} here still have their`)
     + " working files beside the video, where an earlier version left them. They work there; Tidy moves them into a "
     + "context-notes folder.", [el("button", { type: "button", class: "primary", onclick: openTidy }, "Tidy…")]);
+  const mkvs = videos.filter((v) => v.ass && v.limit == null && /\.mkv$/i.test(v.name)).length;
+  if (!old && mkvs) note("right", "Embed", (one ? "This film's" : `${plural(mkvs, "film")}'s`) + " notes can go inside the .mkv "
+    + "as a subtitle track, so the notes travel with the film. It's free and nothing is re-encoded.",
+    [el("button", { type: "button", onclick: openEmbed }, "Embed…")]);
   if (!keepNote) {
     if (info && !info.key.found) note("left", "Before you start", "Add your Anthropic API key in Settings. It's only needed when Claude writes notes.");
     else if (videos.length && ready === videos.length) note("left", "Ready", "Everything here has notes. Open a video in VLC from the list.");
@@ -793,6 +814,19 @@ function handle(item) {
     title(stem(baseName(ev.path)), ev.total > 1 ? `Video ${ev.index} of ${ev.total}` : "");
     resetSteps($("check_alignment").checked);
     hideNote("right");
+  } else if (ev.type === "embed-video") {
+    const v = videoRow(ev.path);
+    if (v) { v.state = "working"; v.reason = null; renderVideos(); }
+    title(stem(baseName(ev.path)), ev.total > 1 ? `Film ${ev.index} of ${ev.total}` : "");
+    $("steps").hidden = true;
+    hideNote("right");
+  } else if (ev.type === "embed-result") {
+    const v = videoRow(ev.path);
+    if (v) {
+      v.state = ev.result === "embedded" ? "ready" : "problem";
+      v.reason = ev.result === "embedded" ? "The notes are inside the film." : ev.reason;
+      renderVideos();
+    }
   } else if (ev.type === "step") { step(ev.step); hideNote("right"); }
   else if (ev.type === "progress") progress(ev);
   else if (ev.type === "estimate") lastEstimate = ev;
@@ -904,14 +938,17 @@ function finished(r) {
   const lines = $("log").textContent.trim().split("\n").filter((l) => l.trim());
   const last = lines.length ? lines[lines.length - 1].trim() : "";
   if (r.cancelled) {
-    note("left", "Stopped", "Cancelled. Notes already written are kept. Press Write the notes to pick up where it left off.");
+    note("left", "Stopped", embedding ? "Cancelled. The film being worked on is exactly as it was."
+      : "Cancelled. Notes already written are kept. Press Write the notes to pick up where it left off.");
   } else if (r.returncode === 0) {
     step("done");
-    note("left", "Done", "Finished. Open a video in VLC from the list.");
+    note("left", "Done", embedding ? "The notes are inside. Each original is kept in its film's context-notes folder until you delete it."
+      : "Finished. Open a video in VLC from the list.");
   } else {
     note("left", "Stopped", `It stopped before the end: ${last || "see Details below."}`);
     $("logBox").open = true;
   }
+  embedding = false;
   keepNote = true;
   refresh().then(() => { keepNote = false; });
 }
@@ -994,6 +1031,47 @@ async function doTidy() {
   $("tidyBtn").hidden = true;
   $("tidyNo").textContent = "Done";
   refresh();
+}
+
+// ---------------------------------------------------------------- embed (embed.py)
+const sizeText = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.round(n / 1e3)} KB`;
+function embedTarget() { return { path: $("path").value.trim(), recursive: $("recursive").checked }; }
+async function openEmbed() {
+  $("embedIntro").textContent = "Looking…";
+  $("embedList").replaceChildren();
+  $("embedMsg").textContent = "";
+  $("embedMsg").className = "msg";
+  $("embedDefaultRow").hidden = true;
+  $("embedBtn").hidden = false;
+  $("embedBtn").disabled = true;
+  $("embed").showModal();
+  const r = await api("/api/embed", embedTarget());
+  if (r.error) { $("embedIntro").textContent = r.error; $("embedBtn").hidden = true; return; }
+  const todo = r.videos.filter((v) => v.action === "add" || v.action === "update");
+  const rest = r.videos.filter((v) => !(v.action === "add" || v.action === "update"));
+  $("embedMsg").textContent = rest.length ? "Not now: " + rest.map((v) => `${baseName(v.video)} (${v.reason})`).join("; ") : "";
+  if (!todo.length) { $("embedIntro").textContent = "Nothing to put inside here."; $("embedBtn").hidden = true; return; }
+  const total = todo.reduce((n, v) => n + v.size, 0);
+  const biggest = Math.max(...todo.map((v) => v.size));
+  $("embedIntro").textContent = `${plural(todo.length, "film")} (${sizeText(total)}) get their notes inside as a subtitle `
+    + `track called "Context Notes". Nothing is re-encoded and nothing is sent to Claude. Each film is rewritten as a `
+    + `new file first, checked, then swapped in; your original is kept in its context-notes folder until you delete `
+    + `it. It needs about ${sizeText(biggest)} free while it works.`;
+  $("embedList").replaceChildren(...todo.map((v) => el("li", {},
+    el("p", { class: "tidyvideo" }, baseName(v.video)),
+    el("p", { class: "tidyfiles" }, `${v.action === "update" ? "Replaces the earlier notes inside" : "Adds the notes"} · ${sizeText(v.size)}`))));
+  $("embedDefaultRow").hidden = false;
+  $("embedBtn").disabled = false;
+  $("embedBtn").focus();
+}
+async function doEmbed() {
+  $("embedBtn").disabled = true;
+  const r = await api("/api/embed", { ...embedTarget(), go: true, default: $("embedDefault").checked });
+  if (r.error) { $("embedMsg").textContent = r.error; $("embedMsg").className = "msg bad"; $("embedBtn").disabled = false; return; }
+  $("embed").close();
+  embedding = true;
+  $("log").dataset.fresh = "yes";
+  startPolling(true);
 }
 
 // ---------------------------------------------------------------- VLC and folders
@@ -1170,6 +1248,8 @@ $("apiMeter").addEventListener("click", async () => { await reloadInfo(); $("set
 $("installVlcBtn").addEventListener("click", installVlc);
 $("tidyBtn").addEventListener("click", doTidy);
 $("tidyNo").addEventListener("click", () => $("tidy").close());
+$("embedBtn").addEventListener("click", doEmbed);
+$("embedNo").addEventListener("click", () => $("embed").close());
 $("pickFile").addEventListener("click", () => pick("file"));
 $("pickFolder").addEventListener("click", () => pick("folder"));
 $("browseBtn").addEventListener("click", openBrowser);

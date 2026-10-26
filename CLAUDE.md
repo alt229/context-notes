@@ -150,6 +150,20 @@ Read `README.md` for the full command reference. This file holds what we've lear
     (Plex `.plexignore`, Jellyfin/Emby 4.8 `.ignore`, Emby 4.9+ `.embyignore`; from their docs, 2026-10-24).
   - Checked by running the old and new code side by side on synthetic films (13 wrapper runs: same output,
     requests and files once the paths are mapped), and on films the old code started, untidied and tidied.
+- **Notes inside the film: `embed.py`, `.mkv` only** (Erin, 2026-10-26: "leave the mp4s as is for now"; optional,
+  both after a run (`--embed`) and as a tidy-style command for films that already have a `.notes.ass`).
+  - ffmpeg stream copy adds the `.ass` as a track titled "Context Notes", language eng, with the `.notes.ass`'s SHA-1
+    in a track tag (`CONTEXT_NOTES_SHA1`): that is how it knows a film is current, or needs its track replaced
+    (never a second). Off by default (`-default_mode passthrough`, else the muxer flags a lone subtitle track default);
+    `--default` turns it on. MP4 can only take `mov_text`, which loses the styling, so it is skipped, not converted.
+  - Never edits the film in place: builds `context-notes/<film>/<stem>.embedding.mkv`, checks it (`verify`: track
+    counts and codecs, existing subtitle tracks, chapters, length, size), then `swap_in` moves the original to
+    `<stem>.original.mkv` (kept; a later update drops only the earlier embedded version) and renames the new file in,
+    restoring the original if that fails. It needs the film's size in free space. `--delete-backups` only deletes
+    originals of films that now carry the notes (`action == "current"`), and `--yes` there is the answer, not the default.
+  - Skips: not `.mkv`, no `.notes.ass`, a symlink, or notes from a `--limit` run (`partial_notes`).
+  - Events (`embed-plan`, `embed-video`, `embed-result`, `progress` task `embed`) are in docs/gui-protocol.md. The app's
+    Embed button lists with `--dry-run`, then starts `embed.py --yes` as a job (`App.embed`, `/api/embed`).
 
 ## Known pitfalls
 

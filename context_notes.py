@@ -19,6 +19,7 @@ For each video it:
   3. has Claude write the notes from the dialogue        (make_ass.py --generate: shows the cost, asks first)
   4. has Claude improve them using the video's frames    (make_ass.py --refine: shows the cost, asks first)
   5. leaves <video>.notes.ass beside the video for VLC
+  6. with --embed: also puts the notes inside an .mkv as a subtitle track (embed.py; .mp4 files stay as they are)
 Working files (the notes file, re-timed subtitles, reports, frames) go in context-notes/<video file name>/ beside
 the video (see workfiles.py). Files earlier versions left beside the video still work; tidy.py moves them in.
 Steps already done are skipped (the notes file records them), so it is safe to stop and run it again. A finished
@@ -814,6 +815,17 @@ def process(video, opts):
     return "ready"
 
 
+def embed_step(video, opts):
+    """--embed: put the finished notes inside an .mkv (embed.py checks the new file and keeps the original; an .mp4
+    can't hold the styled notes, so it stays as it is). True if all is well."""
+    if video.suffix.lower() != ".mkv":
+        say(f"(--embed: {video.name} stays as it is; only .mkv films can hold the notes for now.)")
+        return True
+    say("Putting the notes inside the film (no Claude, no cost)...")
+    prompts.event("step", step="embed")
+    return run(script("embed.py", video, *(["--yes"] if opts.yes else [])), video.parent) == 0
+
+
 def left_beside(videos):
     """{video: [(file, where it goes)]} for the files earlier versions left beside these videos (tidy.py)."""
     out, folders = {}, {}
@@ -858,6 +870,9 @@ def main(argv=None):
                     help="check every note against the speech in the seconds before it, and offer to fix stretches "
                          "that are out (transcribes the soundtrack once; also works on videos already done)")
     ap.add_argument("--no-alignment-check", action="store_true", help="don't check or ask about it")
+    ap.add_argument("--embed", action="store_true",
+                    help="when a film's notes are done, also put them inside the .mkv as a subtitle track (embed.py: "
+                         "free, checked, the original is kept; .mp4 files stay as they are). Not for --limit runs")
     ap.add_argument("--window", type=float, default=10.0,
                     help="for the alignment check: seconds before each note to look at (default 10)")
     ap.add_argument("--offline", action="store_true",
@@ -928,6 +943,9 @@ def main(argv=None):
                                            opts.yes, id="folder.next") == "n":
                     break
             else:
+                if opts.embed and results[v] in ("done", "ready") and not embed_step(v, opts):
+                    say(f"! The notes are done, but couldn't be put inside {v.name} (it is as it was).")
+                    results[v] = "not embedded"
                 prompts.event("video-result", path=str(v), result=results[v])
     except KeyboardInterrupt:
         say("\nStopped. Rerun the same command to pick up where this left off.")
