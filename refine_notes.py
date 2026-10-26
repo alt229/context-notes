@@ -511,6 +511,7 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
           f"your {len(notes)} notes; about {est_in:,} tokens in and {est_out:,} out"
           + (f", roughly ${c:.2f} in API credits." if c is not None else "."))
     bal = usage.plan_note(c)
+    per_request = None if c is None or not sending else c / len(sending)     # for usage.guard, until real costs are known
     prompts.event("estimate", step="refine", model=model, mode="visual-only" if visual_only else "full",
                   offset=round(offset, 2), requests=len(sending), images=n_img, notes=len(notes), input_tokens=est_in,
                   output_tokens=est_out, cost_usd=None if c is None else round(c, 4), limit=limit,
@@ -532,7 +533,7 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
         workfiles.make_dirs(ass_backup.parent)
         shutil.copy2(ass_path, ass_backup)
         print(f"Kept the old subtitles: {ass_backup.name}")
-    usage.begin(film=usage.film_name(notes_path), step="refine")
+    usage.begin(film=usage.film_name(notes_path), step="refine", per_request=per_request)
     log, dropped, tin, tout, total_added, problems = [], {}, 0, 0, 0, []
     total_revised = total_retimed = 0
     unread = []                                  # stretches whose replies couldn't be read in this run
@@ -579,6 +580,10 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
     requests = done_before + len(jobs)
     try:
         for j, (k, win) in enumerate(jobs):
+            stop = usage.guard(assume_yes)
+            if stop:                             # about to run out of credit: keep the changes so far, then say so
+                stop_early()
+                sys.exit(stop)
             number = k if k is not None else wins.index(win) + 1
             text, listed = window_text(win, cues, offset, an["moments"], notes, times, title, number,
                                        total if k is not None else len(wins), visual_only, extra, dropped)

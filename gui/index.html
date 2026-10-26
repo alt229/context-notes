@@ -504,7 +504,7 @@ function clock(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return (h ? `${h}:${String(m).padStart(2, "0")}` : `${m}`) + `:${String(sec).padStart(2, "0")}`;
 }
-const dollars = (usd) => `$${usd.toFixed(2)}`;
+const dollars = (usd) => (usd > 0 && usd < 0.005 ? "<$0.01" : `$${usd.toFixed(2)}`);   // same as usage.money
 function money(usd) {
   if (usd == null) return null;
   return usd < 0.01 ? "less than a cent" : `about $${usd.toFixed(2)}`;
@@ -838,11 +838,12 @@ function ask(ev) {
   stopCountdown();
   asking = true;
   const send = ev.id === "generate.send" || ev.id === "refine.send";
-  const label = send ? "Cost" : ev.id && ev.id.endsWith(".resume") ? "Pick up" : "Question";
+  const label = send ? "Cost" : ev.id && ev.id.endsWith(".resume") ? "Pick up" : ev.id === "credit.continue" ? "Credit" : "Question";
   const text = send && lastEstimate ? costText(lastEstimate) + creditText(lastEstimate) : ev.text;
   const buttons = ev.choices.map((c) => {
     let name = c.label.charAt(0).toUpperCase() + c.label.slice(1);
     if (send) name = c.key === "y" ? "Send to Claude" : "Don't send";
+    if (ev.id === "credit.continue") name = c.key === "y" ? "Carry on anyway" : "Stop here";
     const primary = send ? c.key === "y" : c.key === ev.default;
     return el("button", { type: "button", class: primary ? "primary" : null, "data-key": c.key,
                           onclick: () => answer(c.key) }, name);

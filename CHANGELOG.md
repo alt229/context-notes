@@ -21,6 +21,12 @@ All notable changes to this project are recorded here. The format follows
 - The week at a glance: `usage.py` adds API spending and requests over the last 7 days, the plan's 7-day figure, and
   how many 5-hour sessions the status line has seen this week (and the busiest one's peak); the app shows them under
   Settings, "This week", and the plan meter adds the week's percentage.
+- It stops before the credit runs out: before each request `generate_notes.py` and `refine_notes.py` check the estimate
+  against what a request is costing, and when the next one would go under $0 they ask `credit.continue` (Carry on
+  anyway / Stop here, once per run); with `--yes` they stop. Finished parts are kept and a rerun picks up.
+- `/notes` pauses at 90% of the 5-hour session (`usage.py --session --stop-at 90` exits 3), and measures what each
+  part costs as a share of the session (`usage.py --note-parts start|end`, saved in `parts.jsonl`) so it can estimate
+  a film up front (`usage.py --parts-estimate N`).
 - The app shows both: an API credit meter and a plan session meter in the header, a Settings section to enter the credit
   left, and the credit left in the cost question (with a warning when the run may cost more). `GET /api/usage`,
   `POST /api/credit`, a `usage` event, and `balance_usd` in the `estimate` event (`docs/gui-protocol.md`).

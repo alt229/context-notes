@@ -732,6 +732,7 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     print(f"Plan: {len(send)} lines in {n_send} request(s) to {model}; about {est_in:,} tokens in and "
           f"{est_out:,} out" + (f", roughly ${c:.2f} in API credits." if c is not None else "."))
     bal = usage.plan_note(c)
+    per_request = None if c is None or not n_send else c / n_send           # for usage.guard, until real costs are known
     prompts.event("estimate", step="generate", model=model, lines=len(send), requests=n_send, input_tokens=est_in,
                   output_tokens=est_out, cost_usd=None if c is None else round(c, 4), limit=limit,
                   balance_usd=None if bal is None else bal["balance_usd"])
@@ -755,7 +756,7 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
                            examples=(ORIGINAL_EXAMPLES if situation == "original" else FOREIGN_EXAMPLES) if foreign
                            else ENGLISH_EXAMPLES)
 
-    usage.begin(film=usage.film_name(notes_path), step="generate")
+    usage.begin(film=usage.film_name(notes_path), step="generate", per_request=per_request)
     notes, tin, tout, problems = list(earlier), 0, 0, []
     prev_tail = [c for c in cues if c["n"] <= through][-CONTEXT_LINES:]
     done_line = through                          # the last subtitle line whose part is finished
@@ -785,6 +786,10 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     try:
         for i, (k, part) in enumerate(jobs):
             lo, hi = part[0]["n"], part[-1]["n"]
+            stop = usage.guard(assume_yes)
+            if stop:                             # about to run out of credit: keep what was paid for, then say so
+                keep_partial()
+                sys.exit(stop)
             prompts.progress("generate", done_before + i, total, "requests")    # before the line below (stays open)
             if k is None:                        # lines whose reply couldn't be read before: only earlier context
                 number = next((j for j, p in enumerate(all_parts, 1) if p[0]["n"] <= lo <= p[-1]["n"]), 1)

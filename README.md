@@ -438,6 +438,10 @@ python3 usage.py                            # credit left, spending today / this
 - It leaves out anything else spent on the same account (other tools, other keys), so it drifts. Type the console's
   figure in again when it matters.
 - A model whose price isn't in `generate_notes.PRICES` is counted as "unknown", not as free.
+- **It stops before the credit runs out.** Before each request it checks the estimate against what a request has
+  cost so far in this run (or the plan's estimate, for the first). If the next one would take it under $0, it asks
+  "Carry on anyway / Stop here" (once per run). With `--yes`, or when nothing can ask, it stops. What was written is
+  kept; add credit (`--add-credit`) and rerun to pick up where it left off. With no balance set, it never stops a run.
 - The ledger (`usage.jsonl`), the balance (`credit.json`) and the session reading (`session.json`) are kept beside
   your API key in `~/.config/context-notes/`. Nothing in them is secret, and the key is never written to them.
 
@@ -458,6 +462,16 @@ status line was running for. The reading only moves while Claude
 Code is open in this project; a window that has reset since the last reading is shown as reset, not as the old
 percentage. This replaces any status line of your own for this project, and appears only with a Pro or Max plan,
 after Claude's first reply.
+
+**Pausing `/notes` and planning a film.** `/notes` does two more things with the session reading:
+
+- Before each part it runs `python3 usage.py --session --stop-at 90`. At 90% or more of the 5-hour session it stops
+  starting parts, says where it got to and when the session resets, and keeps the finished parts. Run `/notes` again
+  after the reset. (`--stop-at` takes any percentage; a window that has already reset doesn't count.)
+- It learns what a part costs. Around each part (or pair) it notes the session's percentage, and records how far it
+  moved (`parts.jsonl`; a measurement is dropped if the window reset in between or the figure didn't move).
+  Before a film it says, from the median of those, roughly how much of a session the film will take and how many
+  parts should fit before 90% (`python3 usage.py --parts-estimate 12`). With nothing measured yet, it says so.
 
 ## Privacy
 

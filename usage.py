@@ -9,6 +9,10 @@ usage.py - what the API calls cost, how much credit is probably left, and how mu
     python3 usage.py --set-balance 25 --low 3 # ... and warn below $3 (the default is $2)
     python3 usage.py --add-credit 20          # you topped up by $20
     python3 usage.py --json                   # the summary for another program
+    python3 usage.py --session --stop-at 90   # as --session, but exit with code 3 when the session is 90%+ used
+    python3 usage.py --parts-estimate 12      # how much of a session 12 /notes parts should take, from earlier ones
+    python3 usage.py --note-parts start       # (/notes does these two around each part to learn that)
+    python3 usage.py --note-parts end --count 2 --film "Amelie"
 
 Two meters, because they work differently:
 
@@ -98,13 +102,24 @@ def _append(path, text):
 
 
 # ---------------------------------------------------------------- recording
-_run = {"film": None, "step": None, "requests": 0, "tin": 0, "tout": 0, "usd": 0.0, "unpriced": 0, "last": None}
+_run = {"film": None, "step": None, "requests": 0, "tin": 0, "tout": 0, "usd": 0.0, "unpriced": 0, "last": None,
+        "per_request": None, "carry_on": False}
 _warned = []
 
 
-def begin(film=None, step=None):
-    """A paid step is starting: label what follows (which film, which step) and zero this run's totals."""
-    _run.update(film=film, step=step, requests=0, tin=0, tout=0, usd=0.0, unpriced=0, last=None)
+def begin(film=None, step=None, per_request=None):
+    """A paid step is starting: label what follows (which film, which step) and zero this run's totals.
+    `per_request`: the plan's estimate for one request, used until real ones show what they cost."""
+    _run.update(film=film, step=step, requests=0, tin=0, tout=0, usd=0.0, unpriced=0, last=None,
+                per_request=per_request, carry_on=False)
+
+
+def next_cost():
+    """What the next request is expected to cost: the average so far in this run, else the plan's estimate, else None."""
+    priced = _run["requests"] - _run["unpriced"]
+    if priced > 0:
+        return _run["usd"] / priced
+    return _run["per_request"]
 
 
 def film_name(notes_path):
@@ -322,6 +337,107 @@ def session(now=None):
     return out
 
 
+# ---------------------------------------------------------------- what a /notes part costs the session
+PAUSE_DEFAULT = 90.0                                # /notes stops starting parts at this much of the 5-hour session
+
+
+def parts_path():
+    return data_dir() / "parts.jsonl"
+
+
+def pending_path():
+    return data_dir() / "parts-pending.json"
+
+
+def _five():
+    s = session()
+    w = s.get("five_hour") if s else None
+    return w if w and w["percent"] is not None else None
+
+
+def note_parts_start(say=print):
+    """Remember where the session stands, just before one or more /notes parts are written."""
+    w = _five()
+    if w is None:
+        say("No session reading, so these parts won't be measured.")
+        return False
+    _write(pending_path(), json.dumps({"pct": w["percent"], "resets_at": w["resets_at"], "t": time.time()}) + "\n")
+    say(f"Session at {w['percent']:.0f}% before these parts.")
+    return True
+
+
+def note_parts_end(count=1, film=None, say=print):
+    """After the parts: how far the session moved. Recorded only when it's a fair measure (same window, and it moved)."""
+    try:
+        start = json.loads(pending_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        say("The start of these parts wasn't noted, so they aren't measured.")
+        return None
+    try:
+        pending_path().unlink()
+    except OSError:
+        pass
+    w = _five()
+    if w is None:
+        say("No session reading now, so these parts aren't measured.")
+        return None
+    same = (w["resets_at"] is None or start.get("resets_at") is None
+            or abs(w["resets_at"] - start["resets_at"]) < WINDOW_S)
+    delta = w["percent"] - start["pct"]
+    if not same or delta < 0:
+        say("The session reset in between, so these parts aren't measured.")
+        return None
+    if delta == 0:
+        say("The session figure hasn't moved yet (the status line updates after a reply), so these parts aren't measured.")
+        return None
+    count = max(int(count), 1)
+    entry = {"t": now_stamp(), "film": film, "parts": count, "delta_pct": round(delta, 2), "per_part": round(delta / count, 3)}
+    try:
+        _append(parts_path(), json.dumps(entry, ensure_ascii=False))
+    except OSError as e:
+        say(f"Couldn't record it in {parts_path()}: {e.strerror or e}")
+        return None
+    say(f"Those {count} {'part' if count == 1 else 'parts'} took about {delta:.1f}% of the session "
+        f"({entry['per_part']:.1f}% a part).")
+    return entry
+
+
+def parts_measured():
+    try:
+        text = parts_path().read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    out = []
+    for line in text.splitlines():
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict) and _number(e.get("per_part")) and e["per_part"] > 0:
+            out.append(e)
+    return out[-40:]
+
+
+def parts_estimate(n, stop_at=PAUSE_DEFAULT):
+    """A few lines: how much of a session `n` parts should take, from the parts measured before."""
+    seen = sorted(e["per_part"] for e in parts_measured())
+    if not seen:
+        return ["No earlier parts have been measured yet, so there's no estimate. This film's parts start the measurement."]
+    mid = seen[len(seen) // 2] if len(seen) % 2 else (seen[len(seen) // 2 - 1] + seen[len(seen) // 2]) / 2
+    lines = [f"Earlier parts ({len(seen)} measured) took about {mid:.1f}% of a session each (from {seen[0]:.1f}% to "
+             f"{seen[-1]:.1f}%). {n} parts is roughly {n * mid:.0f}% of a session."]
+    w = _five()
+    if w is not None:
+        fit = max(0, int((stop_at - w["percent"]) // mid))
+        when = f", which resets {clock(w['resets_at'])}" if w["resets_at"] else ""
+        if fit >= n:
+            lines.append(f"The session is {w['percent']:.0f}% used now, so all {n} should fit before {stop_at:.0f}%.")
+        else:
+            lines.append(f"The session is {w['percent']:.0f}% used now, so about {fit} should fit before {stop_at:.0f}%; "
+                         f"then it pauses until the session resets{when}.")
+    return lines
+
+
 # ---------------------------------------------------------------- words
 def money(usd):
     if usd is None:
@@ -383,6 +499,34 @@ def week_line(s=None):
         n = s["week"]["sessions"]
         parts.append(f"{n} {'session' if n == 1 else 'sessions'} seen here (the busiest reached {s['week']['busiest']:.0f}%)")
     return ("This week: " + "; ".join(parts) + ".") if parts else None
+
+
+# ---------------------------------------------------------------- stopping at the credit
+def guard(assume_yes=False):
+    """Call before each request. Returns None to go on, or a one-line message to stop with.
+
+    With a balance set and the next request expected to cost more than what's left, ask whether to carry on (the
+    estimate can be out of date: credit added and not mentioned). Asked once per run. With --yes, or nobody to ask, the
+    answer is no, because the safe default for anything that spends money is no."""
+    if _run["carry_on"]:
+        return None
+    bal, cost = balance(), next_cost()
+    if bal is None or cost is None or bal["balance_usd"] >= cost:
+        return None
+    import prompts
+    left = money(max(bal["balance_usd"], 0))
+    stop = (f"Stopped before the next request: about {left} of credit is left and the next one is expected to cost about "
+            f"{money(cost)}. Add credit (python3 usage.py --add-credit 20, or Settings in the app), then run the same "
+            f"command again: what was written is kept, and only the rest is sent.")
+    if assume_yes or not prompts.interactive():
+        return stop
+    if prompts.confirm(f"The credit estimate says about {left} is left, and the next request is expected to cost about "
+                       f"{money(cost)}. Carry on anyway? (The estimate only counts what this tool has spent. If you've "
+                       f"added credit since, it's fine to carry on; then update the figure in Settings, or with "
+                       f"python3 usage.py --add-credit 20.)", id="credit.continue"):
+        _run["carry_on"] = True
+        return None
+    return stop
 
 
 # ---------------------------------------------------------------- what's printed while a run goes on
@@ -537,6 +681,11 @@ def main(argv=None):
     ap.add_argument("--add-credit", metavar="USD", help="you topped up by this much")
     ap.add_argument("--low", metavar="USD", help="with --set-balance: warn below this (default $2)")
     ap.add_argument("--session", action="store_true", help="one line about the Claude plan's session")
+    ap.add_argument("--stop-at", type=float, metavar="PCT", help="with --session: exit with code 3 at this much used")
+    ap.add_argument("--parts-estimate", type=int, metavar="N", help="how much of a session N /notes parts should take")
+    ap.add_argument("--note-parts", choices=("start", "end"), help="measure what /notes parts cost the session")
+    ap.add_argument("--count", type=int, default=1, metavar="K", help="with --note-parts end: how many parts ran")
+    ap.add_argument("--film", metavar="NAME", help="with --note-parts end: the film's name")
     ap.add_argument("--films", type=int, default=8, metavar="N", help="how many films to list (default 8)")
     ap.add_argument("--json", action="store_true", help="the summary as JSON")
     a = ap.parse_args(argv)
@@ -555,8 +704,22 @@ def main(argv=None):
         sys.exit(str(e))
     except OSError as e:
         sys.exit(f"Couldn't save it in {data_dir()}: {e.strerror or e}")
+    if a.note_parts == "start":
+        note_parts_start()
+        return 0
+    if a.note_parts == "end":
+        note_parts_end(a.count, a.film)
+        return 0
+    if a.parts_estimate is not None:
+        print("\n".join(parts_estimate(max(a.parts_estimate, 0), a.stop_at if a.stop_at is not None else PAUSE_DEFAULT)))
+        return 0
     if a.session:
         print(session_line())
+        w = _five()
+        if a.stop_at is not None and w is not None and w["percent"] >= a.stop_at:
+            print(f"That's {a.stop_at:.0f}% or more: don't start another part until the session resets"
+                  + (f" ({clock(w['resets_at'])})." if w["resets_at"] else "."))
+            return 3
         return 0
     s = summary(a.films)
     if a.json:

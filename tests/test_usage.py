@@ -399,3 +399,145 @@ def test_the_page_has_what_the_app_fills_in():
     for needle in ('id="apiMeter"', 'id="sessionMeter"', 'id="creditInput"', 'id="saveCreditBtn"', 'id="weekList"',
                    '"/api/usage"', '"/api/credit"', 'ev.type === "usage"', "creditText("):
         assert needle in page, needle
+
+
+# ---------------------------------------------------------------- stopping at the credit
+def test_the_guard_lets_a_run_through_unless_the_credit_is_short(monkeypatch):
+    usage.begin("Film", "generate", per_request=0.02)
+    assert usage.guard() is None                                  # no balance: nothing to hold it to
+    usage.set_balance(5)
+    assert usage.guard() is None                                  # plenty
+    tick()
+    usage.set_balance(0.01)
+    msg = usage.guard(assume_yes=True)                            # --yes: the safe answer is no
+    assert msg.startswith("Stopped before the next request") and "$0.01 of credit" in msg and "--add-credit" in msg
+    assert "\n" not in msg                                        # the app shows the last line
+
+
+def test_the_guard_uses_what_requests_really_cost_once_it_knows(monkeypatch):
+    usage.set_balance(1.0)
+    tick()
+    usage.begin("Film", "generate", per_request=0.001)
+    assert usage.next_cost() == 0.001
+    usage.record(MODEL, 1, 1, 0.6)
+    usage.record(MODEL, 1, 1, 0.8)
+    usage.record("new-model", 1, 1, None)                         # unpriced: not part of the average
+    assert usage.next_cost() == pytest.approx(0.7)
+    assert usage.balance()["balance_usd"] < 0.7                    # about 0.3 left, less than the 0.7 a request really costs
+    assert "Stopped before the next request" in usage.guard(assume_yes=True)
+
+
+def test_the_guard_asks_once_and_carry_on_stays_carried_on(monkeypatch):
+    asked = []
+    monkeypatch.setattr(prompts, "interactive", lambda: True)
+    monkeypatch.setattr(prompts, "confirm", lambda text, id=None: asked.append(id) or True)
+    usage.set_balance(0.01)
+    tick()
+    usage.begin("Film", "generate", per_request=0.02)
+    assert usage.guard() is None and usage.guard() is None and asked == ["credit.continue"]
+    usage.begin("Film", "generate", per_request=0.02)             # a new run asks again
+    assert usage.guard() is None and asked == ["credit.continue"] * 2
+    monkeypatch.setattr(prompts, "confirm", lambda text, id=None: False)
+    usage.begin("Film", "generate", per_request=0.02)
+    assert "Stopped before the next request" in usage.guard()
+
+
+def test_a_run_with_too_little_credit_sends_nothing(tmp_path, api, api_key_file):
+    usage.set_balance(0.0001)
+    tick()
+    api.responder = notes_for_each_part
+    srt = make_srt(tmp_path / "ep.srt", n=30, text=LONG)
+    with pytest.raises(SystemExit) as e:
+        gn.generate(srt, tmp_path / "n.json", assume_yes=True, api_url=api.url)
+    assert "Stopped before the next request" in str(e.value) and not api.calls
+    assert not (tmp_path / "n.json").exists() and not (tmp_path / "n.partial.json").exists()
+
+
+def test_a_run_that_runs_short_part_way_stops_and_keeps_what_it_wrote(tmp_path, api, api_key_file):
+    usage.set_balance(0.012)                                        # a request costs 0.007 here: one fits, two don't
+    tick()
+    api.responder = notes_for_each_part
+    srt = make_srt(tmp_path / "ep.srt", n=30, text=LONG)
+    with pytest.raises(SystemExit) as e:
+        gn.generate(srt, tmp_path / "n.json", assume_yes=True, api_url=api.url)
+    assert "Stopped before the next request" in str(e.value) and len(api.calls) == 1
+    assert json.loads((tmp_path / "n.partial.json").read_text())["notes"]            # part 1's notes are kept
+    assert not (tmp_path / "n.json").exists()
+    usage.add_credit(5)                                                              # topped up: the next run picks up
+    gn.generate(srt, tmp_path / "n.json", assume_yes=True, api_url=api.url)
+    assert (tmp_path / "n.json").exists() and not (tmp_path / "n.partial.json").exists()
+
+
+def test_the_credit_question_in_a_gui_run(tmp_path, api, api_key_file, home):
+    usage.set_balance(0.0001)
+    tick()
+    api.responder = notes_for_each_part
+    srt = make_srt(tmp_path / "ep.srt", n=24, text=LONG)
+    args = ("make_ass.py", srt, "--generate", "--api-url", api.url)
+    env = {prompts.ENV: "json", "PYTHONUNBUFFERED": "1"}
+    r = run_cli(*args, cwd=tmp_path, home_dir=home, env_extra=env, stdin="y\ny\n")             # send; carry on anyway
+    asked = [e["id"] for e in events_in(r.stdout) if e["type"] == "question"]
+    assert r.returncode == 0 and asked == ["generate.send", "credit.continue"], r.stdout + r.stderr
+    assert len(api.calls) > 1
+    before = len(api.calls)
+    srt2 = make_srt(tmp_path / "ep2.srt", n=24, text=LONG)
+    r = run_cli("make_ass.py", srt2, "--generate", "--api-url", api.url,
+                cwd=tmp_path, home_dir=home, env_extra=env, stdin="y\nn\n")                     # send; stop here
+    assert r.returncode != 0 and len(api.calls) == before
+    assert r.stderr.strip().splitlines()[-1].startswith("Stopped before the next request"), r.stderr
+
+
+# ---------------------------------------------------------------- pausing /notes, and learning what a part costs
+def test_session_stop_at_exits_with_3_only_when_the_session_is_that_full():
+    usage.write_session(payload(five=95))
+    r = run_cli("usage.py", "--session", "--stop-at", "90")
+    assert r.returncode == 3 and "5-hour session: 95% used" in r.stdout and "don't start another part" in r.stdout
+    usage.write_session(payload(five=50))
+    r = run_cli("usage.py", "--session", "--stop-at", "90")
+    assert r.returncode == 0 and "don't start" not in r.stdout
+    usage.write_session(payload(five=99, reset=int(time.time()) - 60))                # reset since: not stopped
+    assert run_cli("usage.py", "--session", "--stop-at", "90").returncode == 0
+
+
+def test_with_no_session_reading_nothing_is_stopped():
+    r = run_cli("usage.py", "--session", "--stop-at", "90")
+    assert r.returncode == 0 and "No session reading yet" in r.stdout
+
+
+def test_a_part_is_measured_by_how_far_the_session_moved(capsys):
+    usage.write_session(payload(five=20))
+    assert usage.note_parts_start() is True
+    usage.write_session(payload(five=26))
+    entry = usage.note_parts_end(2, "Film")
+    assert entry["delta_pct"] == 6 and entry["per_part"] == 3 and entry["parts"] == 2
+    assert "Those 2 parts took about 6.0% of the session (3.0% a part)." in capsys.readouterr().out
+    assert not usage.pending_path().exists()
+
+
+def test_a_measurement_that_would_mislead_is_not_kept(capsys):
+    assert usage.note_parts_end(1, "Film") is None and "wasn't noted" in capsys.readouterr().out
+    usage.write_session(payload(five=20))
+    usage.note_parts_start()
+    assert usage.note_parts_end(1, "Film") is None and "hasn't moved yet" in capsys.readouterr().out
+    usage.write_session(payload(five=80, reset=RESET))
+    usage.note_parts_start()
+    usage.write_session(payload(five=5, reset=RESET + 5 * 3600))                       # a new window began in between
+    assert usage.note_parts_end(1, "Film") is None and "reset in between" in capsys.readouterr().out
+    assert usage.parts_measured() == []
+    assert usage.write_session({}) is False                                              # no reading in it: nothing saved
+    usage.session_path().unlink()
+    assert usage.note_parts_start() is False                                              # nothing to measure from
+
+
+def test_the_estimate_for_a_film_comes_from_the_parts_measured_before():
+    assert "No earlier parts have been measured" in usage.parts_estimate(12)[0]
+    for per in (2.0, 4.0, 3.0):                                                          # the median is 3
+        usage.write_session(payload(five=10))
+        usage.note_parts_start()
+        usage.write_session(payload(five=10 + per))
+        usage.note_parts_end(1, "Film", say=lambda *_: None)
+    lines = usage.parts_estimate(12)
+    assert "3 measured" in lines[0] and "about 3.0% of a session each" in lines[0] and "12 parts is roughly 36%" in lines[0]
+    assert lines[1].startswith("The session is 13% used now, so all 12 should fit before 90%")
+    longer = usage.parts_estimate(40)                                                    # 13% + 120% can't all fit
+    assert "so about 25 should fit before 90%" in longer[1] and "resets" in longer[1]    # (90 - 13) // 3

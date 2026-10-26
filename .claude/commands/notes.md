@@ -41,9 +41,17 @@ Read `CLAUDE.md` first; its rules bind you. Keep your messages short.
    `"<that folder>/<stem> chat-replies/"`.
 4. **Write.**
    - Tell Erin N, and that each part is one Opus agent run on her plan's usage.
-   - Run `python3 usage.py --session` before the first part, and again after each part (or pair of parts). Put its
-     one line in your update, so she can see how much of the session is left. It only moves while the status line
-     runs; if it says there's no reading, say so once and carry on.
+   - Run `python3 usage.py --parts-estimate N` and give Erin its lines: how much of a session the N parts should
+     take, from the parts measured before.
+   - **Before each part (or pair of parts)** run `python3 usage.py --session --stop-at 90`, and put its first line in
+     your update so she can see how much of the session is left.
+     - Exit code 0: carry on. (With no reading it also exits 0: say so once and carry on.)
+     - Exit code 3: the session is 90% or more used. **Do not start the next part.** Tell Erin the line (it says when
+       the session resets), that the finished parts are kept, and that she can rerun `/notes` with the same arguments
+       after the reset. Then stop.
+   - To measure what a part costs: run `python3 usage.py --note-parts start` just before the part (or pair), and
+     `python3 usage.py --note-parts end --count K --film "<video file name>"` as soon as it finishes (K is how many
+     parts ran together). Say its line in a few words. These let the next film's estimate be better.
    - Run the **note-writer** agent once per part. Do parts in order, two at a time at most (K and K+1 together),
      so each part sees what earlier parts covered.
    - If her usage limit stops the run, the finished part files stay. Rerun `/notes` with the same arguments and skip

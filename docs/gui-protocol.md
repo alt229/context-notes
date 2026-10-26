@@ -161,6 +161,7 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 |---|---|---|---|
 | `generate.send` | `generate_notes.py` | y / n (**n**) | Send the subtitles to the API |
 | `refine.send` | `refine_notes.py` | y / n (**n**) | Send frames and subtitles to the API |
+| `credit.continue` | `generate_notes.py`, `refine_notes.py` | y / n (**n**) | A balance is set (`usage.py`) and the next request is expected to cost more than what's left: carry on anyway? Asked once per run, between requests. With `--yes` the answer is no, and the run stops with what was written kept |
 | `generate.resume` | `generate_notes.py` | p / s (p) | The last run stopped part-way: pick up where it left off, or start again |
 | `refine.unreadable` | `refine_notes.py` | y / n (y) | The frames step couldn't read the reply for some stretches last time: send just those again (n sends nothing) |
 | `refine.resume` | `refine_notes.py` | p / s (p) | The last refine stopped part-way: pick up, or start again from the notes as they were before it |

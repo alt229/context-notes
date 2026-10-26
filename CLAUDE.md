@@ -84,6 +84,14 @@ Read `README.md` for the full command reference. This file holds what we've lear
     week"); `usage.py --session` and the app read them back, and `/notes` repeats the reading after each part. It's
     switched on in `.claude/settings.local.json` (git-ignored; it holds her path). It only moves while Claude Code
     is open here, and a window that has reset since the last reading is shown as reset, never as the old figure.
+  - **Stopping at the credit** (Erin: "do it now"). `usage.guard(assume_yes)` runs at the top of every request loop
+    (generate and refine). It compares the balance with `next_cost()` (the average of this run's priced requests,
+    else the plan's `per_request`), asks `credit.continue` once per run, and with `--yes` or no way to ask returns
+    a stop message. Callers keep their partial notes (`keep_partial` / `stop_early`) and `sys.exit` with it. No balance
+    set means no guard.
+  - **`/notes` pause and learning** (Erin: "do it at 90%", "do it now"). `usage.py --session --stop-at 90` exits 3
+    when the 5-hour window is that full; `--note-parts start|end` brackets a part and records the percentage it moved
+    in `parts.jsonl` only when the window is the same and the figure moved; `--parts-estimate N` uses the median.
   - **Order matters:** `usage.report()` (the cost line and the `usage` event) goes after a part is counted and saved,
     never before. A Ctrl-C that lands as the part's line is printed must find the part in `notes`
     (`test_ctrl_c_in_a_terminal_keeps_the_notes_too` sends it at exactly that moment).
