@@ -41,6 +41,9 @@ Read `CLAUDE.md` first; its rules bind you. Keep your messages short.
    `"<that folder>/<stem> chat-replies/"`.
 4. **Write.**
    - Tell Erin N, and that each part is one Opus agent run on her plan's usage.
+   - Run `python3 usage.py --session` before the first part, and again after each part (or pair of parts). Put its
+     one line in your update, so she can see how much of the session is left. It only moves while the status line
+     runs; if it says there's no reading, say so once and carry on.
    - Run the **note-writer** agent once per part. Do parts in order, two at a time at most (K and K+1 together),
      so each part sees what earlier parts covered.
    - If her usage limit stops the run, the finished part files stay. Rerun `/notes` with the same arguments and skip

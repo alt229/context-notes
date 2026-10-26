@@ -64,6 +64,18 @@ input[type=text], input[type=password], input:not([type]), select {
   margin-top: 12px; padding: 10px 14px; background: var(--surface); border-left: 3px solid var(--gold); }
 .banner[hidden] { display: none; }
 
+/* ---------- the credit and session meters in the header ---------- */
+.meters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 6px 0 auto; justify-content: flex-end; }
+.meters[hidden], .meter[hidden] { display: none; }
+.meter { font: 600 13.5px/1.2 var(--sans); padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--ink); }
+button.meter { cursor: pointer; }
+button.meter:hover { border-color: var(--muted); }
+.meter .k { color: var(--muted); font-weight: 500; margin-right: 2px; }
+.meter.low { border-color: var(--problem); color: var(--problem); }
+ul.weeklist { margin: 4px 0 10px; padding-left: 20px; max-width: 64ch; }
+ul.weeklist li { margin: 2px 0; }
+
 /* ---------- the screen: the notes' own look (gold labels, pale text on dark boxes) ---------- */
 .screen { position: relative; display: grid; margin: 14px 0 10px; padding: 16px 18px 14px; min-height: 300px;
   grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr auto;
@@ -185,6 +197,8 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
   .columns { grid-template-columns: 1fr; gap: 26px; }
 }
 @media (max-width: 620px) {
+  header.top { flex-wrap: wrap; }
+  .meters { order: 3; flex: 1 0 100%; justify-content: flex-start; margin: 2px 0 0; }
   .screen { grid-template-columns: 1fr; grid-template-areas: "left" "right" "title" "sub"; min-height: 340px; }
   .note.right { justify-self: start; text-align: left; }
   .note.right .acts { justify-content: flex-start; }
@@ -200,6 +214,10 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
 <div class="wrap">
   <header class="top">
     <h1>Context Notes</h1>
+    <div class="meters" id="meters" hidden>
+      <button type="button" class="meter" id="apiMeter"><span class="k">API credit</span> <span id="apiMeterV"></span></button>
+      <span class="meter" id="sessionMeter" hidden><span class="k" id="sessionMeterK">Plan session</span> <span id="sessionMeterV"></span></span>
+    </div>
     <button type="button" class="btn quiet" id="settingsBtn">Settings</button>
   </header>
 
@@ -379,6 +397,25 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
       <p class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a>.
         API use is billed to your Anthropic account, separately from a Claude subscription.</p>
     </section>
+    <section id="creditSection">
+      <h2>API credit</h2>
+      <p id="creditStatus"></p>
+      <label class="field"><span>Credit left, from Billing in the Anthropic console ($)</span>
+        <input id="creditInput" type="text" inputmode="decimal" autocomplete="off" placeholder="25.00"></label>
+      <label class="field"><span>Warn me when it drops below ($)</span>
+        <input id="lowInput" type="text" inputmode="decimal" autocomplete="off" placeholder="2.00 (leave empty to keep it)"></label>
+      <button type="button" class="btn primary" id="saveCreditBtn">Save</button>
+      <p class="msg" id="creditMsg" role="status"></p>
+      <p class="hint">Anthropic doesn't let programs ask for your balance. So this counts down from the figure you give,
+        as notes are written, and it's an estimate: it leaves out anything else spent on the same account. Type the console's
+        figure in again after you add credit.</p>
+    </section>
+    <section id="weekSection">
+      <h2>This week</h2>
+      <ul id="weekList" class="weeklist"></ul>
+      <p class="hint">The plan figures come from Claude Code's status line and cover everything on your plan (chat as well),
+        so they only update while Claude Code is open here. Sessions used elsewhere are in the percentages but not in the count.</p>
+    </section>
     <section>
       <h2>OpenSubtitles.com</h2>
       <p>Optional. Used to find subtitles for videos that have none. You need a free account and an API key from
@@ -457,6 +494,7 @@ let polling = false;
 let running = false;
 let asking = false;
 let keepNote = false;
+let usageNow = null;             // what usage.py reports: the credit estimate, spending, and the plan's session
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const baseName = (p) => (p || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
@@ -466,6 +504,7 @@ function clock(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return (h ? `${h}:${String(m).padStart(2, "0")}` : `${m}`) + `:${String(sec).padStart(2, "0")}`;
 }
+const dollars = (usd) => `$${usd.toFixed(2)}`;
 function money(usd) {
   if (usd == null) return null;
   return usd < 0.01 ? "less than a cent" : `about $${usd.toFixed(2)}`;
@@ -757,6 +796,7 @@ function handle(item) {
   } else if (ev.type === "step") { step(ev.step); hideNote("right"); }
   else if (ev.type === "progress") progress(ev);
   else if (ev.type === "estimate") lastEstimate = ev;
+  else if (ev.type === "usage") loadUsage();
   else if (ev.type === "question") ask(ev);
   else if (ev.type === "input") askText(ev);
   else if (ev.type === "video-result") {
@@ -782,6 +822,12 @@ function costText(e) {
   }
   return `Claude will read ${plural(e.lines, "subtitle line")} in ${plural(e.requests, "request")} to ${model}${price}${cost ? "." : ""}`;
 }
+function creditText(e) {
+  if (e.balance_usd == null) return "";
+  let t = ` You have about ${dollars(Math.max(e.balance_usd, 0))} of credit left.`;
+  if (e.cost_usd != null && e.cost_usd > e.balance_usd) t += " That's more than is left, so it may stop part-way; add credit and run it again to pick up.";
+  return t;
+}
 const AUTO_SEND = 10;            // seconds the cost is shown before it's sent by itself (when that box is ticked)
 let countdown = null;
 function stopCountdown() {
@@ -793,7 +839,7 @@ function ask(ev) {
   asking = true;
   const send = ev.id === "generate.send" || ev.id === "refine.send";
   const label = send ? "Cost" : ev.id && ev.id.endsWith(".resume") ? "Pick up" : "Question";
-  const text = send && lastEstimate ? costText(lastEstimate) : ev.text;
+  const text = send && lastEstimate ? costText(lastEstimate) + creditText(lastEstimate) : ev.text;
   const buttons = ev.choices.map((c) => {
     let name = c.label.charAt(0).toUpperCase() + c.label.slice(1);
     if (send) name = c.key === "y" ? "Send to Claude" : "Don't send";
@@ -850,6 +896,7 @@ async function cancel() {
 }
 function finished(r) {
   stopCountdown();
+  loadUsage();
   setRunning(false);
   hideNote("right");
   asking = false;
@@ -959,8 +1006,93 @@ async function reveal(v) {
   if (!r.ok) note("left", "Folder", r.message || r.error || "Couldn't open the folder.");
 }
 
+// ---------------------------------------------------------------- credit and session meters
+async function loadUsage() {
+  const r = await api("/api/usage");
+  if (r.error) return;
+  usageNow = r;
+  renderMeters();
+  renderCredit();
+}
+function renderMeters() {
+  const u = usageNow;
+  const shown = !!u && !!((info && info.key && info.key.found) || u.balance || (u.spent && u.spent.all > 0));
+  $("meters").hidden = !shown;
+  if (!shown) return;
+  const bal = u.balance;
+  let text;
+  if (bal) text = `about ${dollars(Math.max(bal.balance_usd, 0))} left${bal.low ? " (low)" : ""}`;
+  else if (u.spent.all > 0) text = `${dollars(u.spent.all)} spent · set your balance`;
+  else text = "set your balance";
+  $("apiMeterV").textContent = text;
+  $("apiMeter").classList.toggle("low", !!(bal && bal.low));
+  $("apiMeter").title = bal ? "An estimate: the balance you gave, less what this app has spent since. Click to change it."
+    : "Anthropic can't tell programs your balance. Give it once and this counts down. Click to set it.";
+  const w = u.session && u.session.five_hour;
+  const wk = u.session && u.session.seven_day;
+  const live = !!w && !w.reset_since && w.percent != null;
+  const weekOk = !!wk && !wk.reset_since && wk.percent != null;
+  $("sessionMeter").hidden = !(live || weekOk);
+  if (live || weekOk) {
+    const parts = [];
+    if (live) {
+      const when = w.resets_at ? new Date(w.resets_at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
+      parts.push(`${Math.round(w.percent)}% used` + (when ? ` · resets ${when}` : ""));
+    }
+    if (weekOk) parts.push(`week ${Math.round(wk.percent)}%`);
+    if (u.session.age_s > 900) parts.push(`seen ${Math.round(u.session.age_s / 60)} min ago`);
+    $("sessionMeterK").textContent = live ? "Plan session" : "Plan week";
+    $("sessionMeterV").textContent = parts.join(" · ");
+  }
+  renderWeek();
+}
+function renderWeek() {
+  const u = usageNow;
+  if (!u) return;
+  const sp = u.spent || {};
+  const lines = [sp.week_requests
+    ? `API calls: ${dollars(sp.week)} in ${plural(sp.week_requests, "request")} over the last 7 days (${dollars(sp.today)} today).`
+    : "API calls: none through this app in the last 7 days."];
+  const s = u.session;
+  const wk = s && s.seven_day, w = s && s.five_hour;
+  if (!s) lines.push("Claude plan: no reading yet. It appears once Claude Code's status line has run in this project (see the README).");
+  else {
+    if (w && !w.reset_since && w.percent != null) lines.push(`Claude plan, this session: ${Math.round(w.percent)}% used.`);
+    if (wk && !wk.reset_since && wk.percent != null) lines.push(`Claude plan, this week: ${Math.round(wk.percent)}% of the weekly limit used.`);
+    if (s.week) lines.push(`Sessions seen this week: ${s.week.sessions} (the busiest reached ${Math.round(s.week.busiest)}%).`);
+  }
+  $("weekList").replaceChildren(...lines.map((t) => el("li", {}, t)));
+}
+function renderCredit() {
+  const u = usageNow;
+  if (!u) return;
+  const bal = u.balance;
+  if (bal) {
+    const when = new Date(bal.as_of).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+    $("creditStatus").textContent = `About ${dollars(Math.max(bal.balance_usd, 0))} left. You gave ${dollars(bal.set_usd)} on ${when}, `
+      + `and ${dollars(bal.spent_usd)} has been spent since. It warns below ${dollars(bal.low_usd)}.`;
+  } else {
+    $("creditStatus").textContent = "No balance given yet." + (u.spent.all > 0 ? ` ${dollars(u.spent.all)} has been spent through this app so far.` : "");
+  }
+}
+async function saveCredit() {
+  msg("creditMsg", "Saving…");
+  const r = await api("/api/credit", { balance: $("creditInput").value, low: $("lowInput").value });
+  msg("creditMsg", r.message || r.error, !!r.ok);
+  if (r.ok) {
+    $("creditInput").value = "";
+    $("lowInput").value = "";
+    usageNow = r.usage;
+    renderMeters();
+    renderCredit();
+  }
+}
+
 // ---------------------------------------------------------------- settings
 function renderSettings() {
+  usageNow = info.usage || usageNow;
+  renderMeters();
+  renderCredit();
   const k = info.key;
   if (k.found) $("keyStatus").textContent = k.source === "environment"
     ? `Using the key in the ANTHROPIC_API_KEY setting of this computer (ends in …${k.ends}). A key saved here takes its place.`
@@ -1031,6 +1163,9 @@ $("saveKeyBtn").addEventListener("click", saveKey);
 $("keyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") saveKey(); });
 $("testKeyBtn").addEventListener("click", testKey);
 $("saveOsBtn").addEventListener("click", saveOs);
+$("saveCreditBtn").addEventListener("click", saveCredit);
+$("creditInput").addEventListener("keydown", (e) => { if (e.key === "Enter") saveCredit(); });
+$("apiMeter").addEventListener("click", async () => { await reloadInfo(); $("settings").showModal(); $("creditInput").focus(); });
 $("installVlcBtn").addEventListener("click", installVlc);
 $("tidyBtn").addEventListener("click", doTidy);
 $("tidyNo").addEventListener("click", () => $("tidy").close());

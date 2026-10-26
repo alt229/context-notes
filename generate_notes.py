@@ -34,6 +34,7 @@ from pathlib import Path
 import languages
 import make_ass
 import prompts
+import usage
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
@@ -253,7 +254,7 @@ def _call_api(key, model, system, user, url=API_URL, timeout=300, max_tokens=MAX
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.load(r)
+                reply = json.load(r)
         except urllib.error.HTTPError as e:
             try:
                 msg = json.load(e)["error"]["message"]
@@ -266,6 +267,10 @@ def _call_api(key, model, system, user, url=API_URL, timeout=300, max_tokens=MAX
                 continue
             if e.code == 401:
                 sys.exit("The API rejected the key (401). Check it, or save a new one with --set-api-key.")
+            if e.code == 400 and "credit balance" in str(msg).lower():
+                usage.mark_empty()                   # the API knows better than the estimate (usage.py)
+                sys.exit(f"API error {e.code}: {msg}\nAdd credit at https://platform.claude.com/settings/billing, "
+                         f"then run the same command again: what was already written is kept.")
             sys.exit(f"API error {e.code}: {msg}")
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
             if attempt < 3:
@@ -273,6 +278,18 @@ def _call_api(key, model, system, user, url=API_URL, timeout=300, max_tokens=MAX
                 time.sleep(2 ** (attempt + 1))
                 continue
             sys.exit(f"Couldn't reach the API: {e}")
+        _record_usage(model, reply)
+        return reply
+
+
+def _record_usage(model, reply):
+    """Note what a finished request cost (usage.py), without ever letting the bookkeeping stop a paid run."""
+    try:
+        used = reply.get("usage") or {}
+        tin, tout = int(used.get("input_tokens") or 0), int(used.get("output_tokens") or 0)
+        usage.record(model, tin, tout, cost(model, tin, tout))
+    except Exception:                        # a reply shaped oddly: the notes matter more than the ledger
+        pass
 
 
 # ---------------------------------------------------------------- prompts
@@ -714,8 +731,10 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     c = cost(model, est_in, est_out)
     print(f"Plan: {len(send)} lines in {n_send} request(s) to {model}; about {est_in:,} tokens in and "
           f"{est_out:,} out" + (f", roughly ${c:.2f} in API credits." if c is not None else "."))
+    bal = usage.plan_note(c)
     prompts.event("estimate", step="generate", model=model, lines=len(send), requests=n_send, input_tokens=est_in,
-                  output_tokens=est_out, cost_usd=None if c is None else round(c, 4), limit=limit)
+                  output_tokens=est_out, cost_usd=None if c is None else round(c, 4), limit=limit,
+                  balance_usd=None if bal is None else bal["balance_usd"])
     if estimate_only:
         print("Estimate only: nothing was sent.")
         return None
@@ -736,6 +755,7 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
                            examples=(ORIGINAL_EXAMPLES if situation == "original" else FOREIGN_EXAMPLES) if foreign
                            else ENGLISH_EXAMPLES)
 
+    usage.begin(film=usage.film_name(notes_path), step="generate")
     notes, tin, tout, problems = list(earlier), 0, 0, []
     prev_tail = [c for c in cues if c["n"] <= through][-CONTEXT_LINES:]
     done_line = through                          # the last subtitle line whose part is finished
@@ -781,9 +801,9 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
             except SystemExit:                               # an API error: keep what was paid for
                 keep_partial()
                 raise
-            usage = reply.get("usage", {})
-            tin += usage.get("input_tokens", 0)
-            tout += usage.get("output_tokens", 0)
+            used = reply.get("usage", {})        # (not `usage`: that's the module)
+            tin += used.get("input_tokens", 0)
+            tout += used.get("output_tokens", 0)
             if reply.get("stop_reason") == "refusal":
                 problems.append(f"part {number}: the model declined to write notes for these lines")
             text = "".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text")
@@ -810,12 +830,14 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
                 notes = insert_in_order(cues, notes, part_notes, hi)      # in film order: the build relies on it
                 pending.remove([lo, hi])
                 save_partial()
+                usage.report()                   # once the part is counted and saved, never before
                 continue
             prev_tail = part[-CONTEXT_LINES:]
             notes.extend(part_notes)             # a part counts once all of it is in, so a stop never splits one
             done_line, done_parts = hi, k
             if k < parts:
                 save_partial()
+            usage.report()
     except KeyboardInterrupt:                    # Ctrl-C, or a GUI's Cancel, at any point: keep what was paid for
         keep_partial()
         raise
@@ -859,6 +881,7 @@ def generate(srt_path, notes_path, model=DEFAULT_MODEL, audience=None, title=Non
     actual = cost(model, tin, tout)
     print(f"Wrote {len(notes)} notes -> {notes_path}")
     print(f"Used {tin:,} input and {tout:,} output tokens" + (f" (about ${actual:.2f})." if actual is not None else "."))
+    usage.finish()
     for p in problems:
         print("  ! " + p)
     if unread:

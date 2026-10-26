@@ -70,6 +70,25 @@ Read `README.md` for the full command reference. This file holds what we've lear
   frames.
 - **"Alpha"** (Erin, 2026-10-24). The intro note of older notes files still says "Pre-alpha"; `make_ass.alpha_intro`
   shows it as "Alpha" at build time and leaves the file alone.
+- **Credit and session meters** (Erin, 2026-10-25: "show the balance of credits as we process movies", for the API
+  and for the session that resets every few hours, in the GUI too, and the week's totals).
+  - **API credit is an estimate.** Anthropic has no endpoint for the prepaid balance (the Admin API is for
+    organizations and only reports spending). So `usage.py` keeps a ledger of this tool's own requests
+    (`~/.config/context-notes/usage.jsonl`, written in `generate_notes._call_api` through `_record_usage`, so
+    generate, refine, bench and judge all count) and subtracts it from the balance Erin last gave
+    (`usage.py --set-balance`, or the app's Settings). It leaves out other spending on the account. When the API says
+    "credit balance is too low" the estimate goes to $0 (`usage.mark_empty`).
+  - **The plan's session is not visible to the API.** Claude Code gives its status line `rate_limits.five_hour` and
+    `seven_day` (`used_percentage`, `resets_at`) on Pro and Max, after the first reply. `.claude/statusline.py`
+    saves them to `session.json` (and the highest use of each 5-hour window to `sessions.json`, for "sessions this
+    week"); `usage.py --session` and the app read them back, and `/notes` repeats the reading after each part. It's
+    switched on in `.claude/settings.local.json` (git-ignored; it holds her path). It only moves while Claude Code
+    is open here, and a window that has reset since the last reading is shown as reset, never as the old figure.
+  - **Order matters:** `usage.report()` (the cost line and the `usage` event) goes after a part is counted and saved,
+    never before. A Ctrl-C that lands as the part's line is printed must find the part in `notes`
+    (`test_ctrl_c_in_a_terminal_keeps_the_notes_too` sends it at exactly that moment).
+  - Tests use `CONTEXT_NOTES_USAGE_DIR` (autouse fixture `usage_dir`), so they never touch the real ledger. Any new test
+    that runs a script inherits it.
 - **Alignment check.** Speech recognition only, with a tolerance of 0.7 s and at least 2 recognised lines per window.
   - Subtitle makers time lines loosely: on Amélie's in-sync subtitles, a quarter of 10 s windows were more than
     0.6 s off.

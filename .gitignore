@@ -12,6 +12,9 @@ dist/
 # Notes from one Claude session to the next (personal paths)
 HANDOFF.md
 
+# Your own Claude Code settings (the status line points at a path on your computer)
+.claude/settings.local.json
+
 # OS / editor
 .DS_Store
 Thumbs.db

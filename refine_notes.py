@@ -35,6 +35,7 @@ from pathlib import Path
 import generate_notes as gn
 import make_ass
 import prompts
+import usage
 import workfiles
 
 SHEETS_PER_REQUEST = 4            # contact sheets (12 frames each) per request
@@ -509,9 +510,11 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
     print(f"Plan: {len(sending)} request(s) to {model}, {n_img} contact-sheet images (video frames) plus the dialogue and "
           f"your {len(notes)} notes; about {est_in:,} tokens in and {est_out:,} out"
           + (f", roughly ${c:.2f} in API credits." if c is not None else "."))
+    bal = usage.plan_note(c)
     prompts.event("estimate", step="refine", model=model, mode="visual-only" if visual_only else "full",
                   offset=round(offset, 2), requests=len(sending), images=n_img, notes=len(notes), input_tokens=est_in,
-                  output_tokens=est_out, cost_usd=None if c is None else round(c, 4), limit=limit)
+                  output_tokens=est_out, cost_usd=None if c is None else round(c, 4), limit=limit,
+                  balance_usd=None if bal is None else bal["balance_usd"])
     if estimate_only:
         print("Estimate only: nothing was sent. (The video analysis is saved, so the real run is quicker.)")
         return None
@@ -529,6 +532,7 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
         workfiles.make_dirs(ass_backup.parent)
         shutil.copy2(ass_path, ass_backup)
         print(f"Kept the old subtitles: {ass_backup.name}")
+    usage.begin(film=usage.film_name(notes_path), step="refine")
     log, dropped, tin, tout, total_added, problems = [], {}, 0, 0, 0, []
     total_revised = total_retimed = 0
     unread = []                                  # stretches whose replies couldn't be read in this run
@@ -616,10 +620,12 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
             if k is None:
                 pending.pop(0)                   # sent again in the order they're listed
                 checkpoint()
+                usage.report()                   # once the part is counted and saved, never before
                 continue
             completed, done_until = k, win["hi"]
             if k < total:
                 checkpoint()
+            usage.report()
     except KeyboardInterrupt:                    # Ctrl-C, or a GUI's Cancel: keep the changes so far
         stop_early()
         raise
@@ -633,6 +639,7 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
     print(f"Refined {notes_path.name}: {total_added} added, {total_revised} revised, {total_retimed} retimed, "
           f"{len(dropped)} dropped; {sync_msg}.")
     print(f"Used {tin:,} input and {tout:,} output tokens" + (f" (about ${actual:.2f})." if actual is not None else "."))
+    usage.finish()
     print(f"Report of every change: {report}")
     for p in problems:
         print("  ! " + p)

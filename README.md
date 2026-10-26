@@ -150,8 +150,13 @@ python3 app.py
   says so, and Tidy lists what would move into the `context-notes` folder, then moves it when you say (see
   [Where the files go](#where-the-files-go)).
 - **Watch:** open a finished video in VLC from the list.
-- **Settings** has your Anthropic API key (saved in the usual place), the OpenSubtitles login, and a button that
-  installs the VLC extension.
+- **Credit and session.** Two small meters sit beside Settings. **API credit** is about how much of your prepaid
+  credit is left; it counts down as notes are written and turns red below your warning level. **Plan session**
+  appears when you use a Claude Pro or Max plan through Claude Code, and shows how much of the 5-hour session is
+  used and when it resets (see [Credit and session use](#credit-and-session-use)). The cost question also says how
+  much credit you have left, and warns if the run may cost more.
+- **Settings** has your Anthropic API key (saved in the usual place), the credit you have left, the OpenSubtitles
+  login, and a button that installs the VLC extension.
 
 Keep the Terminal window open while you use it; Ctrl-C there stops it. It runs the same scripts described below, so
 anything it does you can also do by hand. Only your computer can reach it: it listens on 127.0.0.1, and the page's
@@ -407,8 +412,52 @@ The extension looks for `<video name>.notes.ass` beside the video and gives you 
 ## API key and cost
 
 - Claude calls use your own Anthropic API key. API usage is billed separately from a claude.ai subscription.
+- See [Credit and session use](#credit-and-session-use) for a running total and an estimate of the credit left.
 - The key is read from `--api-key-file`, then `~/.config/context-notes/api-key` (or `$XDG_CONFIG_HOME/context-notes/api-key`), then the `ANTHROPIC_API_KEY` environment variable as a fallback. The file must be readable only by you; `--set-api-key` creates it that way.
 - Rough costs at the default model's list price: writing notes (`--generate`) is on the order of a few cents per episode; `--refine`, which sends images, is on the order of 10 to 25 cents. The tool shows an estimate and asks before sending. Prices change; check [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing).
+
+## Credit and session use
+
+`usage.py` keeps two meters, because the two kinds of use work differently.
+
+**API credit.** Anthropic gives programs no way to ask "how much credit is left?", so this is an estimate: tell it
+what Billing in the Anthropic console shows once, and it subtracts what this tool's own requests cost from then on.
+
+```
+python3 usage.py --set-balance 25.00        # once, and again after you top up (or to correct drift)
+python3 usage.py --add-credit 20            # or just say how much you added
+python3 usage.py                            # credit left, spending today / this month, the latest films, the session
+```
+
+- During a run, each request prints one line: `$0.03 (run $0.11, film $0.42) · about $17.82 left`. The plan line before
+  the cost question says what's left and warns if the run may outspend it. When the film has had more than one step,
+  the last line adds what the film has cost in all.
+- Warns when the estimate drops below $2 (`--set-balance 25 --low 3` changes that).
+- If the API itself says the credit has run out, the estimate is set to $0 at once and the message says where to add
+  credit. Rerun the same command afterwards: what was written is kept and only the rest is sent.
+- It leaves out anything else spent on the same account (other tools, other keys), so it drifts. Type the console's
+  figure in again when it matters.
+- A model whose price isn't in `generate_notes.PRICES` is counted as "unknown", not as free.
+- The ledger (`usage.jsonl`), the balance (`credit.json`) and the session reading (`session.json`) are kept beside
+  your API key in `~/.config/context-notes/`. Nothing in them is secret, and the key is never written to them.
+
+**Claude plan session.** The 5-hour and 7-day usage windows of a Pro or Max plan, which the `/notes` command uses,
+are not visible to the API at all. Claude Code reports them to its status line, and `.claude/statusline.py` saves
+what it hears. To switch it on, make `.claude/settings.local.json` (this is yours alone; git ignores it):
+
+```json
+{ "statusLine": { "type": "command", "command": "python3 \"/path/to/context-notes/.claude/statusline.py\"" } }
+```
+
+Claude Code then shows `[Opus 4.5] 5h 42% (resets 8:10 PM) · 7d 18% · API ~$17.82`, `python3 usage.py --session`
+prints the same reading in a sentence, and `/notes` repeats it after each part. `python3 usage.py` also gives the
+week: API spending over the last 7 days, the plan's 7-day figure, and how many 5-hour sessions the status line has
+seen this week (and how full the busiest got); the app shows the same under Settings, "This week". The plan's
+percentages cover everything on your plan, claude.ai chat included, but the session count only has the sessions the
+status line was running for. The reading only moves while Claude
+Code is open in this project; a window that has reset since the last reading is shown as reset, not as the old
+percentage. This replaces any status line of your own for this project, and appears only with a Pro or Max plan,
+after Claude's first reply.
 
 ## Privacy
 

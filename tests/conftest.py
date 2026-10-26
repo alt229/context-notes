@@ -66,6 +66,15 @@ def sample_srt(tmp_path):
     return make_srt(tmp_path / "show.srt")
 
 
+@pytest.fixture(autouse=True)
+def usage_dir(tmp_path_factory, monkeypatch):
+    """Where usage.py keeps its ledger, credit and session files during a test: a folder of its own (not the test's
+    tmp_path, which some tests check for stray files), never the real ones in ~/.config. Subprocesses inherit it."""
+    d = tmp_path_factory.mktemp("usage-data")
+    monkeypatch.setenv("CONTEXT_NOTES_USAGE_DIR", str(d))
+    return d
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """An empty HOME, so tests never touch (or read) the real API key."""

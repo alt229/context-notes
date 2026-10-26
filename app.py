@@ -42,6 +42,7 @@ import generate_notes  # noqa: E402  (where the API key lives)
 import languages  # noqa: E402
 import make_ass  # noqa: E402
 import prompts  # noqa: E402
+import usage  # noqa: E402  (what the API calls cost, and the credit left)
 import workfiles  # noqa: E402
 
 PAGE = HERE / "gui" / "index.html"
@@ -583,7 +584,7 @@ class App:
     def info(self):
         return {"system": system(), "home": str(Path.home()), "key": key_info(), "opensubtitles": opensubtitles_info(),
                 "vlc": vlc_info(), "dialogs": dialog_command("file") is not None,
-                "speech": find_subs.have_whisper(),
+                "speech": find_subs.have_whisper(), "usage": usage.summary(5),
                 "languages": [{"code": c, "name": n} for c, (n, _) in languages.LANGUAGES.items()],
                 "running": bool(self.job and self.job.running)}
 
@@ -621,6 +622,18 @@ class App:
                      "skipped": [e for e in events if e.get("type") == "tidy-skip"],
                      "done": next((e for e in events if e.get("type") == "tidy-done"), None),
                      "ok": code == 0, "lines": lines}
+
+    def set_credit(self, o):
+        """The credit left, as the page's Settings gives it (usage.py keeps the estimate from there)."""
+        low = str(o.get("low") or "").strip()
+        try:
+            got = usage.set_balance(usage.parse_dollars(o.get("balance")), usage.parse_dollars(low) if low else None)
+        except ValueError as e:
+            return {"ok": False, "message": str(e)}
+        except OSError as e:
+            return {"ok": False, "message": f"Couldn't save it: {e.strerror or e}"}
+        return {"ok": True, "message": f"Saved. Counting from now, about {usage.money(got['balance_usd'])} left.",
+                "usage": usage.summary(5)}
 
     def set_key(self, key):
         key = str(key or "").strip()
@@ -720,6 +733,8 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         if url.path == "/api/info":
             return self._send(200, self.app.info())
+        if url.path == "/api/usage":
+            return self._send(200, usage.summary(5))
         if url.path == "/api/browse":
             return self._send(200, browse(q.get("path", "")))
         if url.path == "/api/job":
@@ -763,6 +778,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, app.set_key(o.get("key")))
         if path == "/api/key/test":
             return self._send(200, app.test_key())
+        if path == "/api/credit":
+            return self._send(200, app.set_credit(o))
         if path == "/api/opensubtitles":
             return self._send(200, app.set_opensubtitles(o))
         if path == "/api/vlc/install":

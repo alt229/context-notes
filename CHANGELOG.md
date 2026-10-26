@@ -7,6 +7,23 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- `usage.py`: what the API calls cost, and the credit probably left. Every finished request is written to a ledger
+  (`~/.config/context-notes/usage.jsonl`) with its tokens and cost; `usage.py --set-balance 25` (or `--add-credit`)
+  gives it the console's figure, and the estimate counts down from there. Each request prints one line
+  (`$0.03 (run $0.11, film $0.42) · about $17.82 left`), the plan line says what's left and warns when a run may
+  outspend it, and the last line gives the film's total across steps. It warns below $2 (`--low`). When the API says
+  the credit is out, the estimate goes to $0 and the message says where to add credit. `usage.py` alone shows the
+  summary (spending today, this month and per film); `--json` gives it to other programs.
+- The Claude plan's session (the 5-hour and 7-day windows of Pro and Max): `.claude/statusline.py` is a Claude Code
+  status line that saves what Claude Code reports to `session.json` and shows
+  `[Opus 4.5] 5h 42% (resets 8:10 PM) · 7d 18% · API ~$17.82`. `usage.py --session` reads it back, and `/notes` repeats
+  it after each part. It is switched on in `.claude/settings.local.json` (not committed).
+- The week at a glance: `usage.py` adds API spending and requests over the last 7 days, the plan's 7-day figure, and
+  how many 5-hour sessions the status line has seen this week (and the busiest one's peak); the app shows them under
+  Settings, "This week", and the plan meter adds the week's percentage.
+- The app shows both: an API credit meter and a plan session meter in the header, a Settings section to enter the credit
+  left, and the credit left in the cost question (with a warning when the run may cost more). `GET /api/usage`,
+  `POST /api/credit`, a `usage` event, and `balance_usd` in the `estimate` event (`docs/gui-protocol.md`).
 - `tidy.py FOLDER [--recursive] [--dry-run] [--yes]` moves the working files earlier versions left beside the
   videos into their `context-notes` folders. It lists them first and asks (`tidy.move`); files are moved as they
   are, never overwritten, and one that could belong to two videos stays put. `context_notes.py --status` says

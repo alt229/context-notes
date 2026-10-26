@@ -58,8 +58,33 @@ This is sent before anything goes to the API. Unless `--yes` or `--estimate-only
 | `model`, `requests` | which Claude model, and how many API requests |
 | `input_tokens`, `output_tokens`, `cost_usd` | the estimate; `cost_usd` is `null` when the model's price isn't known |
 | `limit` | seconds, when `--limit` is in force; otherwise `null` |
+| `balance_usd` | the estimated credit left (see `usage` below), or `null` when no balance has been set |
 | `lines` | generate only: subtitle lines sent |
 | `mode`, `offset`, `images`, `notes` | refine only: `full` or `visual-only`; the sync offset used; how many contact-sheet images; how many existing notes |
+
+### `usage`
+
+Sent after each API request that finished, once the part it belongs to has been counted and saved (so a stop can't
+lose it). `usage.py` keeps the figures; `balance_usd` is an estimate, because Anthropic doesn't let a program ask for
+the real balance.
+
+```
+@context-notes {"v": 1, "type": "usage", "step": "generate", "film": "Amelie.mkv", "model": "claude-sonnet-5-5", "request": {"input_tokens": 2000, "output_tokens": 300, "cost_usd": 0.007}, "run": {"requests": 2, "input_tokens": 4000, "output_tokens": 600, "cost_usd": 0.014, "unpriced": 0}, "film_cost_usd": 0.014, "balance_usd": 9.986, "low": false}
+```
+
+| Field | Meaning |
+|---|---|
+| `step` | `generate` or `refine` (`null` for a request that isn't part of a film, such as the benchmark) |
+| `film` | the film's name in the ledger: its notes file without `notes-` and `.json` |
+| `request` | this request's tokens and cost; `cost_usd` is `null` when the model's price isn't known |
+| `run` | the totals for this step of this run; `unpriced` counts requests with no known price |
+| `film_cost_usd` | everything recorded for this film so far, across runs and steps |
+| `balance_usd`, `low` | the estimated credit left, and whether it is under the warning level; `null` and `false` when no balance has been set |
+
+The same figures are in `app.py`'s `GET /api/usage` (also inside `/api/info`), which adds `spent` (today, the last
+7 days with its request count, this month, all time), the latest `films` and the Claude plan's `session` (the 5-hour
+and 7-day windows, read from what Claude Code's status line saved, plus `week`: how many 5-hour sessions it has seen in
+the last 7 days and how full the busiest got). `POST /api/credit` with `{"balance": "25.00", "low": "2"}` sets the starting balance.
 
 ### `progress`
 
