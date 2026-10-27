@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 embed.py - put a film's notes inside the film, as a subtitle track (.mkv only, for now).
+Created 2026-10-24, modified 2026-10-26.
 
     python3 embed.py film.mkv                       one film: says what it would do, asks, then does it
     python3 embed.py "/Volumes/Movies"              every .mkv in the folder that has a .notes.ass beside it
@@ -37,6 +38,8 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import analyze  # noqa: E402
+import make_ass  # noqa: E402
 import prompts  # noqa: E402
 import tidy  # noqa: E402
 import workfiles  # noqa: E402
@@ -47,6 +50,12 @@ LANGUAGE = "eng"
 CONTAINERS = {".mkv"}
 SPACE_MARGIN = 0.02                      # free space needed: the film's size plus this much, plus 64 MB
 VERIFY_SIZE = 0.99                       # the new file can't be smaller than this much of the old one
+VERIFY_SIZE_CONVERTED = 0.9              # a converted film can differ in size a little from its .mp4 (container overhead)
+CONVERT_FROM = {".mp4"}                  # --convert: these become .mkv first; the .mp4 goes to context-notes/originals
+# How fast bytes move to and from the NAS: one 1 GB read and one 1 GB write, measured 2026-10-26 during a ZFS scrub.
+# Only for the rough time shown before embedding; it is not a promise.
+READ_MBPS = 48
+WRITE_MBPS = 62
 
 
 class Problem(Exception):
@@ -82,17 +91,47 @@ def backup_path(video):
     return workfiles.folder(video) / f"{video.stem}.original{video.suffix}"
 
 
+def originals_path(video):
+    """Where the .mp4 of a film converted to .mkv is kept: context-notes/originals/ beside it. Names are unique within
+    one folder, so one originals folder per folder is enough."""
+    video = Path(video)
+    return video.parent / workfiles.FOLDER / "originals" / video.name
+
+
+def move_working_folder(old, new):
+    """A converted film's working files (its notes, say) move to the folder named for its new .mkv."""
+    src, dst = workfiles.folder(old), workfiles.folder(new)
+    if src.is_dir() and not dst.exists():
+        os.rename(src, dst)
+
+
 def probe(path):
-    """ffprobe's view of a file: {"streams": [...], "chapters": [...], "format": {...}}."""
-    r = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_chapters", "-show_format", "-of", "json",
-                        str(path)], capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if r.returncode:
-        last = (r.stderr or "").strip().splitlines()[-1:] or [str(r.returncode)]
-        raise Problem(f"ffprobe couldn't read it: {last[0]}")
+    """ffprobe's view of a file: {"streams": [...], "chapters": [...], "format": {...}}. Kept by analyze.ffprobe_json,
+    so a film on a slow disk is read once, not on every look at it."""
     try:
-        return json.loads(r.stdout)
-    except ValueError:
-        raise Problem("ffprobe's answer couldn't be read")
+        return analyze.ffprobe_json(path, "-show_streams", "-show_chapters", "-show_format")
+    except SystemExit as e:
+        raise Problem(f"ffprobe couldn't read it: {str(e.code).splitlines()[-1]}")
+
+
+def look_of(ass):
+    """The look a notes .ass was built with (its "; Look:" line): {"background", "opacity", "wpm"}, or None."""
+    try:
+        with open(ass, encoding="utf-8-sig", errors="replace") as f:
+            m = make_ass.LOOK_LINE.search(f.read(2000))
+    except OSError:
+        return None
+    if not m:
+        return None
+    return {"background": m["background"], "opacity": float(m["opacity"]) if m["opacity"] else None,
+            "wpm": float(m["wpm"])}
+
+
+def film_state(video):
+    """For the page: what embedding would do for one film ("add", "update", "current" or "skip", and why), and the
+    look its notes were built with (look_of)."""
+    item = inspect(video)
+    return {"action": item["action"], "reason": item["reason"], "look": look_of(ass_path(video))}
 
 
 def tag(stream, name):
@@ -126,13 +165,15 @@ def partial_notes(video):
         return None
 
 
-def inspect(video):
+def inspect(video, convert=False):
     """What embedding would do for one video: {"video", "action", "reason", "size", ...}.
-    action: add, update, current (nothing to do), or skip (reason says why)."""
+    action: add, update, current (nothing to do), or skip (reason says why). convert: an .mp4 is rewritten as an
+    .mkv first (CONVERT_FROM), and its original goes to context-notes/originals."""
     video = Path(video)
-    out = {"video": video, "action": "skip", "reason": "", "size": 0, "sha1": None, "old": []}
+    out = {"video": video, "action": "skip", "reason": "", "size": 0, "sha1": None, "old": [], "convert": False}
     ass = ass_path(video)
-    if video.suffix.lower() not in CONTAINERS:
+    converting = convert and video.suffix.lower() in CONVERT_FROM
+    if video.suffix.lower() not in CONTAINERS and not converting:
         out["reason"] = (f"{video.suffix.lower() or 'this kind of file'} can't hold these subtitles without losing "
                          f"their styling, so it stays as it is (.mkv only for now)")
         return out
@@ -142,6 +183,13 @@ def inspect(video):
     if video.is_symlink():
         out["reason"] = "it is a link to a file elsewhere; embed the file itself"
         return out
+    if converting:
+        target, kept = video.with_suffix(".mkv"), originals_path(video)
+        if target.exists() or kept.exists():
+            out["reason"] = ("a .mkv of this name is already here" if target.exists()
+                             else f"its .mp4 is already kept in {workfiles.FOLDER}/originals")
+            return out
+        out["convert"] = True
     limit = partial_notes(video)
     if limit:
         out["reason"] = (f"the notes only cover the first {int(limit) // 60}:{int(limit) % 60:02d}; "
@@ -164,12 +212,12 @@ def inspect(video):
     return out
 
 
-def plan_for(path, recursive=False):
+def plan_for(path, recursive=False, convert=False):
     """([inspect() result for every video with a .notes.ass beside it], how many videos have no notes yet).
     For one video, just that video (whatever its state)."""
     path = Path(path)
     if path.is_file():
-        return [inspect(path)], 0
+        return [inspect(path, convert)], 0
     plan, without = [], 0
     for d in tidy.folders_under(path, recursive):
         try:
@@ -180,7 +228,7 @@ def plan_for(path, recursive=False):
             if p.suffix.lower() not in workfiles.VIDEO_EXTS or p.name.startswith(".") or not p.is_file():
                 continue
             if ass_path(p).exists():
-                plan.append(inspect(p))
+                plan.append(inspect(p, convert))
             else:
                 without += 1
     return plan, without
@@ -192,10 +240,41 @@ def describe(item, base):
     act = item["action"]
     if act in ("add", "update"):
         verb = "put the notes inside" if act == "add" else "replace the notes inside (the .notes.ass changed)"
-        return f"{name}: {verb}  ({size_text(item['size'])})"
+        if item.get("convert"):
+            verb = "convert to .mkv, then put the notes inside"
+        low, high = rewrite_seconds(item["size"])
+        return f"{name}: {verb}  ({size_text(item['size'])}, about {minutes_text(low)} to {minutes_text(high)})"
     if act == "current":
         return f"{name}: {item['reason']}"
     return f"{name}: skipped, {item['reason']}"
+
+
+def rewrite_seconds(size):
+    """(low, high) seconds to read a film and write a new copy of it. Low: the reads and writes overlap. High: they
+    don't, and it's doubled to allow for a busy disk. From the speeds above, so a rough guide only."""
+    read, write = size / (READ_MBPS * 1e6), size / (WRITE_MBPS * 1e6)
+    return max(read, write), 2 * (read + write)
+
+
+def minutes_text(seconds):
+    return f"{round(seconds)} s" if seconds < 60 else f"{seconds / 60:.0f} min"
+
+
+def warning_text(todo):
+    """What embedding these films costs, for the prompt, --dry-run and the page: time, the copy kept, and that no
+    Claude or API call is made."""
+    low = sum(rewrite_seconds(i["size"])[0] for i in todo)
+    high = sum(rewrite_seconds(i["size"])[1] for i in todo)
+    kept = [i for i in todo if i["action"] == "add"]
+    text = (f"About {minutes_text(low)} to {minutes_text(high)} (estimated from this NAS's speed): each film is read "
+            "and rewritten whole. No Claude or API calls are made.")
+    if kept:
+        text += (f" The original of {len(kept)} film(s) stays in its {workfiles.FOLDER} folder "
+                 f"({size_text(sum(i['size'] for i in kept))} more) until you run --delete-backups.")
+    if any(i.get("convert") for i in todo):
+        text += (" Films converted from .mp4 change name to .mkv, so media servers may list them as new; the .mp4s "
+                 f"wait in {workfiles.FOLDER}/originals.")
+    return text
 
 
 def check_space(video, size):
@@ -226,6 +305,11 @@ def build_command(video, ass, tmp, item, make_default):
         cmd += [f"-disposition:s:{n}", "default"]
     else:
         cmd += [f"-disposition:s:{n}", "0"]
+    if item.get("convert"):          # an MP4's text subtitles (mov_text) can't go into an MKV as they are: they become SRT
+        codecs = {s["index"]: s.get("codec_name") for s in item["info"]["streams"]}
+        for k, i in enumerate(kept_subs):
+            if codecs[i] == "mov_text":
+                cmd += [f"-c:s:{k}", "srt"]
     cmd += ["-default_mode", "passthrough", "-f", "matroska", str(tmp)]      # else the muxer flags a first subtitle track default
     return cmd
 
@@ -286,7 +370,9 @@ def verify(before, after, item, size_before, size_after):
         return "a track's format changed"
     kept_subs = [s for s in before["streams"] if s["index"] not in old and s.get("codec_type") == "subtitle"]
     now_subs = [s for s in after["streams"] if s.get("codec_type") == "subtitle"]
-    if [s.get("codec_name") for s in kept_subs] != [s.get("codec_name") for s in now_subs[:-1]]:
+    def sub_format(s):               # a converted film's mov_text subtitles come out as SRT
+        return "subrip" if item.get("convert") and s.get("codec_name") == "mov_text" else s.get("codec_name")
+    if [sub_format(s) for s in kept_subs] != [s.get("codec_name") for s in now_subs[:-1]]:
         return "an existing subtitle track changed"
     new = now_subs[-1] if now_subs else {}
     if new.get("codec_name") != "ass" or tag(new, "title") != TRACK_TITLE or tag(new, HASH_TAG) != item["sha1"]:
@@ -299,34 +385,41 @@ def verify(before, after, item, size_before, size_after):
         return "the length couldn't be read"
     if abs(d0 - d1) > max(1.0, 0.002 * d0):
         return f"the length differs ({d0:.1f} s before, {d1:.1f} s now)"
-    if size_after < VERIFY_SIZE * size_before:
+    floor = VERIFY_SIZE_CONVERTED if item.get("convert") else VERIFY_SIZE
+    if size_after < floor * size_before:
         return "the new file is smaller than the old one"
     return None
 
 
-def swap_in(video, tmp):
-    """The new file takes the film's place; the original goes to its context-notes folder. If anything goes wrong,
-    the original is back where it was."""
+def swap_in(video, tmp, target=None, away=None):
+    """The new file takes the film's place (target: its .mkv, for a converted film). The original goes to its
+    context-notes folder, or to away (a converted film's context-notes/originals). If anything goes wrong, the
+    original is back where it was."""
     video = Path(video)
+    target = Path(target) if target else video
     st = video.stat()
-    backup = backup_path(video)
     previous = None
-    if backup.exists():            # an earlier embed already kept the true original: this film (which has an
-        previous = workfiles.folder(video) / f"{video.stem}.previous{video.suffix}"     # older notes track) isn't kept
-        if previous.exists():
-            os.remove(previous)
-        away = previous
+    if away is None:
+        backup = backup_path(video)
+        if backup.exists():            # an earlier embed already kept the true original: this film (which has an
+            previous = workfiles.folder(video) / f"{video.stem}.previous{video.suffix}"     # older notes track) isn't kept
+            if previous.exists():
+                os.remove(previous)
+            away = previous
+        else:
+            away = backup
     else:
-        away = backup
+        away = Path(away)
+        away.parent.mkdir(parents=True, exist_ok=True)
     os.rename(video, away)
     try:
-        os.rename(tmp, video)
+        os.rename(tmp, target)
     except OSError:
         os.rename(away, video)
         raise
     try:
-        os.chmod(video, st.st_mode & 0o7777)
-        os.utime(video, ns=(st.st_atime_ns, st.st_mtime_ns))            # a media server sees the same date as before
+        os.chmod(target, st.st_mode & 0o7777)
+        os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns))            # a media server sees the same date as before
     except OSError:
         pass
     if previous is not None:
@@ -361,7 +454,11 @@ def embed_one(item, make_default=False):
         if video.stat().st_size != item["size"]:
             raise Problem(f"{video.name} changed while it was being copied; run it again")
         try:
-            swap_in(video, tmp)
+            if item.get("convert"):
+                swap_in(video, tmp, target=video.with_suffix(".mkv"), away=originals_path(video))
+                move_working_folder(video, video.with_suffix(".mkv"))
+            else:
+                swap_in(video, tmp)
         except OSError as e:
             raise Problem(f"couldn't swap the new file in: {e.strerror or e}")
     finally:
@@ -385,8 +482,12 @@ def embed_all(items, make_default):
             prompts.event("embed-result", path=str(v), result="stopped", reason=str(e))
             results.append((v, str(e)))
         else:
-            print(f"Done: the notes are inside {v.name}. The original is kept as "
-                  f"{os.path.join(workfiles.FOLDER, v.name, backup_path(v).name)}.", flush=True)
+            if item.get("convert"):
+                print(f"Done: {v.name} is now {v.with_suffix('.mkv').name}, with the notes inside. The .mp4 is kept as "
+                      f"{os.path.join(workfiles.FOLDER, 'originals', v.name)}.", flush=True)
+            else:
+                print(f"Done: the notes are inside {v.name}. The original is kept as "
+                      f"{os.path.join(workfiles.FOLDER, v.name, backup_path(v).name)}.", flush=True)
             prompts.event("embed-result", path=str(v), result="embedded", reason=None)
             results.append((v, None))
     return results
@@ -398,7 +499,10 @@ def delete_backups(items, a):
         v = item["video"]
         if item["action"] != "current":
             continue                  # only where the film now has the notes: that's when the original isn't needed
-        for p in (backup_path(v), workfiles.folder(v) / f"{v.stem}.previous{v.suffix}"):
+        kept = [backup_path(v), workfiles.folder(v) / f"{v.stem}.previous{v.suffix}"]
+        if v.suffix.lower() == ".mkv":          # a film converted from .mp4 keeps that .mp4 in originals
+            kept.append(originals_path(v.with_suffix(".mp4")))
+        for p in kept:
             if p.exists():
                 found.append(p)
     if not found:
@@ -437,6 +541,9 @@ def main(argv=None):
     ap.add_argument("--yes", action="store_true", help="don't ask first")
     ap.add_argument("--default", action="store_true",
                     help="make the notes the track that plays by default (otherwise it's there to choose)")
+    ap.add_argument("--convert", action="store_true",
+                    help="convert .mp4 films to .mkv first, so their notes can go inside; the .mp4 is kept in "
+                         f"{workfiles.FOLDER}/originals")
     ap.add_argument("--delete-backups", action="store_true",
                     help="delete the originals this kept, for films that now have the notes inside")
     a = ap.parse_args(argv)
@@ -445,12 +552,14 @@ def main(argv=None):
         sys.exit(f"Can't find {path}")
     if not have_ffmpeg():
         sys.exit("ffmpeg and ffprobe aren't installed; they're needed to embed (see the README).")
-    plan, without = plan_for(path, a.recursive)
+    plan, without = plan_for(path, a.recursive, a.convert)
     base = path if path.is_dir() else None
     for item in plan:
         print(describe(item, base))
+        low, high = rewrite_seconds(item["size"])
         prompts.event("embed-plan", video=str(item["video"]), action=item["action"], size=item["size"],
-                      reason=item["reason"] or None)
+                      reason=item["reason"] or None, seconds_low=round(low), seconds_high=round(high),
+                      convert=bool(item.get("convert")))
     if without:
         print(f"({without} video(s) here have no .notes.ass yet, so they're not listed.)")
     if a.delete_backups:
@@ -467,14 +576,14 @@ def main(argv=None):
     biggest = max(i["size"] for i in todo)
     if a.dry_run:
         print(f"\n{len(todo)} film(s), {size_text(total)}, would get their notes inside; the biggest needs "
-              f"{size_text(biggest)} free while it works. Nothing was changed (--dry-run).")
+              f"{size_text(biggest)} free while it works. {warning_text(todo)} Nothing was changed (--dry-run).")
         return 0
     if not a.yes and not prompts.interactive():
         sys.exit("Not an interactive terminal, so add --yes to embed (or --dry-run to only list).")
     prompts.event("estimate", step="embed", films=len(todo), bytes=total, biggest=biggest)
     if prompts.ask(f"\nPut the notes inside {len(todo)} film(s) ({size_text(total)} to copy)? Each is rewritten as a "
                    f"new file first (nothing is re-encoded), checked, then swapped in; the original is kept in its "
-                   f"{workfiles.FOLDER} folder until you delete it.",
+                   f"{workfiles.FOLDER} folder until you delete it. {warning_text(todo)}",
                    {"y": "yes, embed", "n": "no"}, "y", a.yes, id="embed.go") != "y":
         print("Nothing was changed.")
         return 0

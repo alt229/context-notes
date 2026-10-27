@@ -31,6 +31,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -39,9 +40,11 @@ HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 import analyze  # noqa: E402
+import embed  # noqa: E402  (whether a film's notes are inside its .mkv: --preview-rebuild)
 import languages  # noqa: E402
 import make_ass  # noqa: E402
 import prompts  # noqa: E402
+import settings  # noqa: E402  (this install's defaults: applied to the flags left out below)
 import workfiles  # noqa: E402
 
 SEASON_DIR = re.compile(r"^(season|series|saison|staffel|temporada|stagione|seizoen)\s*\d+$|^s\d{1,2}$", re.I)
@@ -400,6 +403,51 @@ def rebuild_subtitles(st, opts):
     return pick_subtitles(st["subs"], other, opts.limit)[0]
 
 
+def keep_old_ass(video):
+    """Before a build rewrites the film's .notes.ass, keep the one there now as <name>.bak (an older backup is never
+    overwritten)."""
+    ass = ass_path_for(video)
+    if ass.exists():
+        backup = make_ass.unique_backup(ass)
+        shutil.copy2(ass, backup)
+        say(f"Kept the old subtitles: {backup.name}")
+
+
+def rebuild_diff(st, opts):
+    """What a rebuild would change for one video, for the page to show before anything is written: the look now and
+    after, the subtitles, and the files that change beside the film."""
+    video, ass, spec = st["video"], st["ass"], st["spec"] or {}
+    have, want = ass_look(ass), wanted_look(st["spec"], opts)
+    rows = []
+
+    def row(name, now, after):
+        rows.append({"setting": name, "now": now, "after": after, "changed": now != after})
+
+    def shown(value, unit=""):
+        return "not recorded (made before 0.2.0)" if value is None else f"{value:g}{unit}"
+
+    row("Box behind the notes", have["background"] if have else "not recorded (made before 0.2.0)", want["background"])
+    if want["background"] == "see-through":
+        row("Box opacity", shown(have and have["opacity"], "% solid"), shown(want["opacity"], "% solid"))
+    row("Words a minute", shown(have and have["wpm"]), shown(want["wpm"]))
+    after_srt = rebuild_subtitles(st, opts)
+    row("Subtitles the notes are placed on", st["srt"].name if st["srt"] else "none",
+        after_srt.name if after_srt else "none")
+    bottom = spec.get("display_subtitles") or "the same as the notes"
+    row("Subtitles at the bottom", bottom, f"{opts.show_subs} (--show-subs)" if opts.show_subs else bottom)
+    files = []
+    if ass.exists():
+        files.append(f"Kept: {make_ass.unique_backup(ass).name} (the .notes.ass as it is now)")
+    files.append(f"Rebuilt: {ass.name}")
+    if ass.name.endswith(".notes.ass"):
+        files.append(f"Written beside the film: {ass.name[:-len('.notes.ass')]}.en.ass (the Plex copy, which is "
+                     "skipped if a file of that name isn't one of ours)")
+    embedded = video.suffix.lower() == ".mkv" and embed.inspect(video)["action"] == "current"
+    if embedded:
+        files.append(f"Out of date inside {video.name}: its Context Notes track (Embed rewrites the film)")
+    return {"video": str(video), "name": video.name, "rows": rows, "files": files, "embedded": embedded}
+
+
 def look_args(opts):
     """How the notes look on screen. Given to every build, which remembers them in the notes file."""
     out = []
@@ -650,6 +698,7 @@ def alignment_step(video, srt, notes, film, display_lang, original, opts):
     fixed = align_check.fixed_path(srt, video)
     if not fixed.exists():
         return srt
+    keep_old_ass(video)
     if run(script("make_ass.py", fixed, notes, "--video", video, *look_args(opts)), video.parent):
         raise Stop("Rebuilding the .ass from the corrected subtitles failed.")
     say(f"Rebuilt {ass_path_for(video).name} from {fixed.name}.")
@@ -681,6 +730,7 @@ def process(video, opts):
         say(f"The notes are done; rebuilding {st['ass'].name} (free: nothing is sent to Claude).")
         say(f"$ cd {shlex.quote(str(video.absolute().parent))}")
         prompts.event("step", step="build")
+        keep_old_ass(video)
         if run(script("make_ass.py", placed_on, st["notes"], "--video", video, *look_args(opts)), video.parent):
             raise Stop("Building the .ass failed.")
         say(f"Ready: play {video.name} in VLC; {st['ass'].name} is beside it.")
@@ -808,6 +858,7 @@ def process(video, opts):
     stale = not ass_current(ass, notes, load_notes(notes), opts)
     if not need_generate and not need_refine and (stale or display_args):
         prompts.event("step", step="build")
+        keep_old_ass(video)
         if run(script("make_ass.py", srt, notes, "--video", video, *display_args, *look_args(opts)), video.parent):
             raise Stop("Building the .ass failed.")
     alignment_step(video, srt, notes, film, display_lang, original, opts)
@@ -842,6 +893,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("path", help="a video file, or a folder of them")
     ap.add_argument("--status", action="store_true", help="show what's done and what's left, then stop")
+    ap.add_argument("--preview-rebuild", action="store_true",
+                    help="show what a rebuild would change (the settings now and after, and the files), and change nothing")
     ap.add_argument("--limit", type=make_ass.duration_arg, metavar="TIME",
                     help="only the first part of each video, e.g. 5:00, 300 or 5m (for testing)")
     ap.add_argument("--film-language", metavar="LANG",
@@ -861,7 +914,7 @@ def main(argv=None):
     ap.add_argument("--redo", action="store_true", help="write the notes again even if they exist (old ones kept as .bak)")
     ap.add_argument("--recursive", action="store_true", help="with a folder: include subfolders")
     ap.add_argument("--frames", choices=("keyframes", "dense"), default="keyframes", help="for the refine step")
-    ap.add_argument("--model", help="Claude model (default: claude-sonnet-5-5)")
+    ap.add_argument("--model", help="Claude model (default: from Settings, Opus unless changed)")
     ap.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"),
                     help="the model's effort setting (default: the model's own default; Haiku 4.5 doesn't support it)")
     ap.add_argument("--audience", help="who the notes are for")
@@ -890,6 +943,7 @@ def main(argv=None):
                            f"{make_ass.DEFAULT_OPACITY}")
     ap.add_argument("--api-key-file", help=argparse.SUPPRESS)
     ap.add_argument("--api-url", help=argparse.SUPPRESS)
+    ap.set_defaults(**settings.cli_defaults())      # the flags left out take this install's defaults
     opts = ap.parse_args(argv)
     if opts.reading_speed is not None and opts.reading_speed <= 0:
         ap.error("--reading-speed is words a minute, a number above 0 (the default, 150, is 0.4 s a word)")
@@ -907,6 +961,12 @@ def main(argv=None):
     if opts.title and len(videos) > 1:
         sys.exit("--title is for a single video. For a folder, use --show and the file names do the rest.")
 
+    if opts.preview_rebuild:                  # what a rebuild would change, for the page to show first: nothing is written
+        for v in videos:
+            st = inspect(v, opts)
+            if st["rebuild"]:
+                prompts.event("rebuild-diff", **rebuild_diff(st, opts))
+        return 0
     say(f"{len(videos)} video(s)" + (f", first {make_ass.fmt_limit(opts.limit)} of each" if opts.limit else "") + ":")
     old = left_beside(videos)
     for v in videos:

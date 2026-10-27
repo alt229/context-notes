@@ -51,6 +51,7 @@ Films not in English:
 Install the extras once:  brew install ffmpeg && pip3 install numpy pillow
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -66,6 +67,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import languages  # noqa: E402
 import make_ass  # noqa: E402  (SRT parsing and time formatting)
 import prompts  # noqa: E402
+import usage  # noqa: E402
 import workfiles  # noqa: E402
 
 SR = 16000          # audio sample rate used for analysis
@@ -120,14 +122,49 @@ TEXT_SUB_CODECS = {"mov_text", "subrip", "srt", "ass", "ssa", "webvtt", "text", 
 IMAGE_SUB_CODECS = {"dvd_subtitle", "hdmv_pgs_subtitle", "dvb_subtitle", "xsub", "dvb_teletext"}
 
 
-def subtitle_tracks(video):
-    """List the subtitle streams in a video file (empty list if none)."""
-    r = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams",
-                        "-select_streams", "s", str(video)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+PROBE_DIR = "probe-cache"       # in the config folder: one small file per answer
+
+
+def ffprobe_json(video, *options):
+    """What ffprobe says about a video, as JSON. The answer is kept in the config folder under the file's path, size,
+    time and the options asked, so a status check reads each film once: reading a file on a NAS is slow, and a
+    changed or moved file is a new key. Only the answer is kept, never any of the film."""
+    video = Path(video)
+    try:
+        st = video.stat()
+    except OSError:
+        st = None
+    key = path = None
+    if st is not None:
+        key = "|".join([os.path.abspath(video), str(st.st_size), str(st.st_mtime_ns), *options])
+        path = usage.data_dir() / PROBE_DIR / (hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            if saved.get("key") == key:
+                return saved["answer"]
+        except (OSError, ValueError, KeyError, AttributeError):
+            pass
+    r = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", *options, str(video)],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode:
         sys.exit(f"ffprobe couldn't read {video}:\n{r.stderr}")
+    answer = json.loads(r.stdout)
+    if path is not None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"key": key, "answer": answer}), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError:
+            pass                                  # no cache this time; the answer is still right
+    return answer
+
+
+def subtitle_tracks(video):
+    """List the subtitle streams in a video file (empty list if none)."""
+    info = ffprobe_json(video, "-show_streams", "-select_streams", "s")
     tracks = []
-    for n, s in enumerate(json.loads(r.stdout).get("streams", [])):
+    for n, s in enumerate(info.get("streams", [])):
         tags, disp = s.get("tags", {}) or {}, s.get("disposition", {}) or {}
         codec = s.get("codec_name", "?")
         tracks.append({
@@ -218,11 +255,7 @@ def extract_subtitles(video, track, out, sdh=False):
 
 # ---------------------------------------------------------------- video helpers
 def probe(video):
-    r = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format",
-                        "-show_streams", str(video)], capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if r.returncode:
-        sys.exit(f"ffprobe couldn't read {video}:\n{r.stderr}")
-    info = json.loads(r.stdout)
+    info = ffprobe_json(video, "-show_format", "-show_streams")
     dur = float(info["format"].get("duration", 0))
     audio = [s for s in info["streams"] if s.get("codec_type") == "audio"]
     video_s = [s for s in info["streams"] if s.get("codec_type") == "video"]

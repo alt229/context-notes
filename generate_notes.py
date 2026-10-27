@@ -34,6 +34,7 @@ from pathlib import Path
 import languages
 import make_ass
 import prompts
+import settings
 import usage
 
 API_URL = "https://api.anthropic.com/v1/messages"
@@ -50,7 +51,7 @@ PRICES = {
 CHUNK_CHARS = 10000        # transcript characters per request (about 2,500 tokens)
 CONTEXT_LINES = 6          # lines of the previous chunk shown for orientation
 MAX_TOKENS = 8000          # reply limit per request
-DEFAULT_AUDIENCE = "Fluent in English, didn't grow up in the UK"
+DEFAULT_AUDIENCE = "Fluent in American English"
 
 CATEGORIES = ["British English", "Idiom", "Wordplay", "Cultural reference", "Historical context",
               "IT in-joke", "Character", "Delivery", "Running gag", "Setup", "Payoff", "Trivia",
@@ -65,6 +66,9 @@ def is_foreign(film_language):
 
 
 def default_audience(film_language=None, situation=None):
+    custom = settings.custom_audience()          # set in the app's Settings: used for every film that has none of its own
+    if custom:
+        return custom
     if is_foreign(film_language):
         lang = languages.name(film_language)
         if situation == "original":

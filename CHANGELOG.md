@@ -7,11 +7,38 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- Defaults for this install, in Settings ("Defaults for every run"): the model, thinking effort, who the notes are for,
+  the language to write them in, seconds a word, the box and how solid it is, frames, the timing check, online subtitle
+  search, subfolders, the starting folder, and the auto-send choice. They're kept in
+  `~/.config/context-notes/settings.json`, and the Terminal scripts read the same file, so both start from the same
+  choices. A missing or damaged file gives the built-in defaults. A film's own saved look and audience still win, and
+  choices that rewrite or delete files, or that change which subtitles a film shows, are never defaults.
+- "Remember starting folder": the folder you choose opens next time (on by default; turn it off and the app opens
+  empty).
 - `embed.py` puts a film's notes inside the `.mkv` as a "Context Notes" subtitle track (ffmpeg copies every track,
   nothing is re-encoded). Works on any film with a `.notes.ass`, like `tidy.py`: a folder, `--recursive`,
   `--dry-run`, `--yes`, plus `--default` and `--delete-backups`. The new file is checked before it replaces the film;
   the original is kept in `context-notes/<film>/`. `.mp4` is skipped (MP4 can't hold ASS without losing its
   styling), and so are notes from a `--limit` run. `context_notes.py --embed` does it after the notes are done.
+- `embed.py --convert` (and "Also convert MP4 films to MKV" in the app): an `.mp4` with notes is rewritten as an `.mkv`
+  in one pass, its `mov_text` subtitles become SRT, and the `.mp4` is kept in `context-notes/originals/`. The film's
+  working folder follows the new name. It's refused when an `.mkv` of that name is already there. Media servers may
+  list a converted film as new.
+- Embedding says whether a film is already inside its `.mkv`, and the app's film cards show "Inside the film" with the
+  look the notes were built with. The Embed prompt only lists films that need adding or updating.
+- Embed and rebuild warnings give the time (a rough range from this NAS's measured read and write speeds), the space,
+  the copy kept, and that no Claude or API call is made.
+- "Change or delete…" in the app: delete kept originals (a dry run lists them first) and write the notes again (the old
+  notes are kept as `.bak`). Each has its own Go button.
+- Run options in the app: "Who the notes are for" (`--audience`), "Thinking effort" (`--effort`) and "Don't search
+  online for subtitles" (`--offline`).
+- Every rebuild keeps the `.notes.ass` it replaces as `<name>.notes.ass.bak` (`.bak2` and so on for later ones). Before a
+  rebuild the app shows what changes (`context_notes.py --preview-rebuild`): the box, opacity and speed now and after,
+  the subtitles, and the files written. Its dialog can also put the new notes inside the `.mkv` (`--embed`).
+- ffprobe's answers are cached in `~/.config/context-notes/probe-cache/`, keyed on each file's path, size and time, so
+  a film on a NAS is read once.
+- The app's status check runs in the background and the page polls for it, so a slow folder no longer hits the old
+  120-second limit (it now allows an hour).
 - `usage.py`: what the API calls cost, and the credit probably left. Every finished request is written to a ledger
   (`~/.config/context-notes/usage.jsonl`) with its tokens and cost; `usage.py --set-balance 25` (or `--add-credit`)
   gives it the console's figure, and the estimate counts down from there. Each request prints one line
@@ -89,6 +116,16 @@ All notable changes to this project are recorded here. The format follows
   (`/notes`, `/check`).
 
 ### Changed
+- The Terminal scripts take their defaults from Settings, so they match the app. With no `--model` they now use Opus
+  (the app's "best"), where they used Sonnet before, and with no `--effort` they use high. Set Settings to Cheaper, or
+  pass `--model claude-sonnet-5-5`, to keep the old choice.
+- The app no longer remembers the form in the browser (the port changes each start, so it was lost). Choices are saved
+  as defaults in Settings instead. "Send 10 seconds after showing the cost" moved there and is on by default: notes are
+  sent after 10 seconds unless you press Don't send. Untick it to be asked each time.
+- The default "who the notes are for" is "Fluent in American English" (films in English; films in another language keep
+  their own default).
+- "Write the notes again" moved into "Change or delete…", and it's no longer remembered between sessions, so it can't
+  stay ticked by accident.
 - A reply Claude sends that can't be read no longer loses that part's notes for good. Its lines are recorded in the
   notes file (`unreadable`, with the saved reply); the next run asks (`notes.unreadable`) and sends just those lines
   again, with the lines before them for context and only the notes before them, and puts the new notes in film
@@ -142,6 +179,7 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- Embed offered films whose notes were already inside them. It now says so, and only offers films that need the notes put in.
 - Choosing other subtitles to show at the bottom (`--show-subs`, "Subtitles shown at the bottom" in the app) on a
   finished film did nothing in the app: the film counted as done, so the button was off. `--status` now counts
   it as a free rebuild ("needs rebuilding (free) to show the English subtitles"), and the page checks again

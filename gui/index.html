@@ -54,6 +54,10 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--surface); color: var(--ink); cursor: pointer; }
 .btn:hover:not(:disabled) { border-color: var(--muted); }
 .btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.btn.danger { background: #b3261e; border-color: #b3261e; color: #fff; }
+table.diff { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.diff th, table.diff td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.diff tr.changed td { font-weight: 600; color: var(--primary); }
 .btn.quiet { background: transparent; border-color: transparent; padding-left: 6px; padding-right: 6px;
   text-decoration: underline; text-underline-offset: 3px; }
 .btn:disabled { opacity: .5; cursor: default; }
@@ -327,21 +331,26 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
             <input id="show" type="text" placeholder="Worked out from the folders"></label>
           <label class="field" id="titleField"><span>Full title (one film only)</span>
             <input id="titleInput" type="text" placeholder="Worked out from the file name"></label>
+          <label class="field"><span>Who the notes are for</span>
+            <input id="audience" type="text" placeholder="Default: fluent in American English"></label>
+          <label class="field"><span>Thinking effort</span>
+            <select id="effort"><option value="">The preset's (high)</option><option value="low">Low</option>
+              <option value="medium">Medium</option><option value="high">High</option>
+              <option value="xhigh">Extra high</option><option value="max">Max</option></select></label>
+          <label class="check"><input type="checkbox" id="offline">
+            <span>Don't search online for subtitles<small>When a film has none beside it or inside it, it isn't searched for on OpenSubtitles.com.</small></span></label>
           <label class="check"><input type="checkbox" id="check_alignment">
             <span>Check every note's timing against the speech<small id="speechHint">Slow the first time; free.</small></span></label>
           <label class="check"><input type="checkbox" id="dense">
             <span>Look at more frames<small>Catches more sight gags; costs several times more.</small></span></label>
-          <label class="check"><input type="checkbox" id="redo">
-            <span>Write the notes again<small>Starts over. The old notes are kept as a backup.</small></span></label>
+          <input type="checkbox" id="redo" hidden>
         </details>
       </fieldset>
       <div class="runrow">
         <button type="button" class="btn primary" id="runBtn" disabled>Write the notes</button>
         <button type="button" class="btn" id="cancelBtn" hidden>Cancel</button>
+        <button type="button" class="btn quiet" id="dangerBtn">Change or delete…</button>
       </div>
-      <label class="check"><input type="checkbox" id="autoSend" checked>
-        <span>Send 10 seconds after showing the cost<small>You always see what it costs first. Wait or Don't send
-          stops it.</small></span></label>
     </section>
   </div>
 
@@ -372,6 +381,8 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
   <div class="dbody">
     <p id="embedIntro"></p>
     <ul class="entries" id="embedList"></ul>
+    <label class="check"><input type="checkbox" id="embedConvert">
+      <span>Also convert MP4 films to MKV<small>MP4 can't hold the notes' styling, so these are rewritten as MKV first. The .mp4 is kept in context-notes/originals, and media servers may list the film as new.</small></span></label>
     <label class="check" id="embedDefaultRow"><input type="checkbox" id="embedDefault">
       <span>Play with the notes on<small>Otherwise the track is there to choose in your player's subtitle menu.</small></span></label>
     <p class="msg" id="embedMsg" role="status"></p>
@@ -379,6 +390,42 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
   <div class="dfoot">
     <button type="button" class="btn" id="embedNo">Not now</button>
     <button type="button" class="btn primary" id="embedBtn">Put them inside</button>
+  </div>
+</dialog>
+
+<dialog id="rebuild" aria-labelledby="rebuildTitle">
+  <div class="dhead"><h2 id="rebuildTitle">Rebuild the subtitles</h2>
+    <button type="button" class="btn quiet" data-close>Close</button></div>
+  <div class="dbody">
+    <p id="rebuildIntro"></p>
+    <div id="rebuildDiffs"></div>
+    <label class="check" id="rebuildEmbedRow" hidden><input type="checkbox" id="rebuildEmbed">
+      <span>Then put the new notes inside the .mkv<small>The whole film is read and written again (minutes on a NAS), and its Context Notes track is replaced. Its original stays as it is.</small></span></label>
+    <p class="msg" id="rebuildMsg" role="status"></p>
+  </div>
+  <div class="dfoot">
+    <button type="button" class="btn" id="rebuildNo">Not now</button>
+    <button type="button" class="btn primary" id="rebuildGo" disabled>Rebuild (free)</button>
+  </div>
+</dialog>
+
+<dialog id="danger" aria-labelledby="dangerTitle">
+  <div class="dhead"><h2 id="dangerTitle">Change or delete</h2>
+    <button type="button" class="btn quiet" data-close>Close</button></div>
+  <div class="dbody">
+    <section class="dsection">
+      <h3>Delete kept originals</h3>
+      <p id="backupsIntro"></p>
+      <ul class="entries" id="backupsList"></ul>
+      <p class="msg" id="backupsMsg" role="status"></p>
+      <div class="dfoot"><button type="button" class="btn danger" id="backupsGo" hidden>Delete them</button></div>
+    </section>
+    <section class="dsection">
+      <h3>Write the notes again</h3>
+      <p id="redoIntro"></p>
+      <ul class="entries" id="redoList"></ul>
+      <div class="dfoot"><button type="button" class="btn danger" id="redoGo">Write them again</button></div>
+    </section>
   </div>
 </dialog>
 
@@ -400,6 +447,37 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
   <div class="dhead"><h2 id="settingsTitle">Settings</h2>
     <button type="button" class="btn quiet" data-close>Close</button></div>
   <div class="dbody">
+    <section id="defaultsSection">
+      <h2>Defaults for every run</h2>
+      <p class="hint">The app and the Terminal scripts both start from these. A film that already has notes keeps its own
+        look and audience; these apply to new notes and to new films.</p>
+      <label class="field"><span>Model</span>
+        <select id="d_quality"><option value="best">Best (Claude Opus)</option><option value="cheaper">Cheaper (Claude Sonnet)</option></select></label>
+      <label class="field"><span>Thinking effort</span>
+        <select id="d_effort"><option value="">High (the usual)</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Max</option></select></label>
+      <label class="field"><span>Who the notes are for</span>
+        <input id="d_audience" type="text" placeholder="Empty: each film's built-in default"></label>
+      <label class="field"><span>Write the notes in</span>
+        <input id="d_notes_language" type="text" placeholder="English"></label>
+      <label class="field"><span>Seconds a word</span>
+        <input id="d_spw" type="text" inputmode="decimal" placeholder="Empty: 0.4 (each film's own)"></label>
+      <label class="field"><span>Box behind the notes</span>
+        <select id="d_background"><option value="see-through">See-through box</option><option value="dark">Dark box (before 0.2.0)</option><option value="none">No box, outlined text</option></select></label>
+      <label class="field"><span>How solid the see-through box is (%)</span>
+        <input id="d_opacity" type="text" inputmode="numeric" placeholder="30"></label>
+      <label class="check"><input type="checkbox" id="d_frames"><span>Look at more frames<small>Catches more sight gags; costs several times more.</small></span></label>
+      <label class="check"><input type="checkbox" id="d_check_alignment"><span>Check every note's timing against the speech<small>Slow the first time; free.</small></span></label>
+      <label class="check"><input type="checkbox" id="d_offline"><span>Don't search online for subtitles<small>Subtitles are looked for inside the video only.</small></span></label>
+      <label class="check"><input type="checkbox" id="d_recursive"><span>Include subfolders</span></label>
+      <label class="check"><input type="checkbox" id="d_remember_start"><span>Remember starting folder<small>The folder you choose opens next time. Off: the app opens empty and doesn't record folders.</small></span></label>
+      <p class="hint">Starting folder: <span id="d_start_folder"></span></p>
+      <label class="check"><input type="checkbox" id="d_autosend"><span>Send automatically 10 seconds after showing the cost<small>Untick to be asked each time instead. With this on, notes go to Claude and are billed to your account after 10 seconds, unless you press Don't send. You always see the cost first.</small></span></label>
+      <div class="row">
+        <button type="button" class="btn primary" id="d_save">Save defaults</button>
+        <button type="button" class="btn" id="d_reset">Reset to built-in</button>
+      </div>
+      <p class="msg" id="d_msg" role="status"></p>
+    </section>
     <section>
       <h2>Anthropic API key</h2>
       <p id="keyStatus"></p>
@@ -597,29 +675,85 @@ function options() {
     notes_language: $("notes_language").value.trim(), show: $("show").value.trim(),
     title: videos.length === 1 ? $("titleInput").value.trim() : "",
     check_alignment: $("check_alignment").checked, frames: $("dense").checked ? "dense" : "keyframes",
-    redo: $("redo").checked, seconds_per_word: $("spw").value.trim(), note_background: $("note_background").value,
+    redo: $("redo").checked, audience: $("audience").value.trim(), offline: $("offline").checked,
+    effort: $("effort").value, seconds_per_word: $("spw").value.trim(), note_background: $("note_background").value,
     box_opacity: $("note_background").value === "see-through" ? $("opacity").value.trim() : "",
   };
 }
-const REMEMBERED = ["recursive", "film_language", "refine", "limit", "subs_language", "show_subs", "notes_language",
-                    "show", "check_alignment", "dense", "redo", "autoSend", "spw", "note_background", "opacity"];
 function showOpacity() { $("opacityField").hidden = $("note_background").value !== "see-through"; }
-function remember() {
-  const o = {};
-  for (const id of REMEMBERED) o[id] = $(id).type === "checkbox" ? $(id).checked : $(id).value;
-  o.quality = document.querySelector("input[name=quality]:checked").value;
-  store.set("options", o);
-  store.set("path", $("path").value.trim());
-}
-function restore() {
-  const o = store.get("options", {});
-  for (const id of REMEMBERED) {
-    if (!(id in o)) continue;
-    if ($(id).type === "checkbox") $(id).checked = !!o[id]; else $(id).value = o[id];
-  }
-  const q = document.querySelector(`input[name=quality][value="${o.quality}"]`);
+// The form starts from this install's defaults (settings.json, from the Settings page). Nothing is remembered in the
+// browser any more: the app picks a new port each start, so a browser would forget it anyway.
+function applySettings() {
+  const s = info.settings;
+  const q = document.querySelector(`input[name=quality][value="${s.quality}"]`);
   if (q) q.checked = true;
-  $("path").value = store.get("path", "");
+  $("effort").value = s.effort;
+  $("audience").value = s.audience;
+  $("notes_language").value = s.notes_language;
+  $("spw").value = s.seconds_per_word == null ? "" : String(s.seconds_per_word);
+  $("note_background").value = s.note_background;
+  $("opacity").value = String(s.note_opacity);
+  $("dense").checked = s.frames === "dense";
+  $("check_alignment").checked = s.check_alignment;
+  $("offline").checked = s.offline;
+  $("recursive").checked = s.recursive;
+  $("path").value = s.remember_start_folder ? s.start_folder : "";
+}
+function autoSendOn() { return !!info && info.settings.autosend; }
+// The folder you choose opens next time, when "Remember starting folder" is on in Settings.
+function rememberStartFolder(p) {
+  if (!info || !info.settings.remember_start_folder || p === info.settings.start_folder) return;
+  info.settings.start_folder = p;
+  api("/api/settings", { start_folder: p });               // the page doesn't wait for it
+}
+function settingsMsg(text, ok) { $("d_msg").textContent = text; $("d_msg").className = ok ? "msg" : "msg bad"; }
+function renderDefaults() {
+  const s = info.settings;
+  $("d_quality").value = s.quality;
+  $("d_effort").value = s.effort;
+  $("d_audience").value = s.audience;
+  $("d_notes_language").value = s.notes_language;
+  $("d_spw").value = s.seconds_per_word == null ? "" : String(s.seconds_per_word);
+  $("d_background").value = s.note_background;
+  $("d_opacity").value = String(s.note_opacity);
+  $("d_frames").checked = s.frames === "dense";
+  $("d_check_alignment").checked = s.check_alignment;
+  $("d_offline").checked = s.offline;
+  $("d_recursive").checked = s.recursive;
+  $("d_remember_start").checked = s.remember_start_folder;
+  $("d_start_folder").textContent = s.start_folder || "none yet";
+  $("d_autosend").checked = s.autosend;
+  settingsMsg("", true);
+}
+// A number that isn't one is sent as typed, so the app refuses it with a message instead of saving an empty value.
+function numberOrText(text) {
+  const n = Number(text);
+  return Number.isFinite(n) ? n : text;
+}
+async function saveDefaults() {
+  const spw = $("d_spw").value.trim();
+  const body = {
+    quality: $("d_quality").value, effort: $("d_effort").value, audience: $("d_audience").value.trim(),
+    notes_language: $("d_notes_language").value.trim(), seconds_per_word: spw === "" ? null : numberOrText(spw),
+    note_background: $("d_background").value, note_opacity: numberOrText($("d_opacity").value.trim()),
+    frames: $("d_frames").checked ? "dense" : "keyframes", check_alignment: $("d_check_alignment").checked,
+    offline: $("d_offline").checked, recursive: $("d_recursive").checked,
+    remember_start_folder: $("d_remember_start").checked, autosend: $("d_autosend").checked,
+  };
+  const r = await api("/api/settings", body);
+  if (r.error) return settingsMsg(r.error, false);
+  info.settings = r.settings;
+  renderDefaults();
+  applySettings();
+  settingsMsg("Saved. The app and the Terminal scripts use these from now on.", true);
+}
+async function resetDefaults() {
+  const r = await api("/api/settings/reset", {});
+  if (r.error) return settingsMsg(r.error, false);
+  info.settings = r.settings;
+  renderDefaults();
+  applySettings();
+  settingsMsg("Back to the built-in defaults.", true);
 }
 
 function fillLanguages() {
@@ -649,6 +783,17 @@ function describe(v) {
   const subs = v.subtitles ? `Subtitles: ${v.subtitles}` : "No subtitles beside it yet; it will look inside the video, then online";
   return `${notes}. ${subs}.`;
 }
+function lookText(look) {
+  if (!look) return "its look isn't recorded";
+  const solid = look.opacity == null ? "" : `, ${Math.round(look.opacity)}% solid`;
+  return `box: ${look.background}${solid}; ${Math.round(look.wpm)} words a minute`;
+}
+function insideText(i) {
+  if (i.action === "current") return `Inside the film: yes, these notes. Look: ${lookText(i.look)}. To change it, set the look under How the notes look, press Rebuild (free), then Embed.`;
+  if (i.action === "update") return `Inside the film: older notes. They changed since they went in, so Embed puts them in again (a full rewrite). Look inside now: ${lookText(i.look)}.`;
+  if (i.action === "add") return "Inside the film: not yet. Embed can put them in.";
+  return `Inside the film: no (${i.reason}).`;
+}
 function renderVideos() {
   const list = $("videoList");
   list.replaceChildren();
@@ -663,6 +808,7 @@ function renderVideos() {
       el("div", { class: "name" }, v.name),
       el("div", { class: `state ${v.state}` }, v.stateText || STATES[v.state]),
       el("div", { class: "meta" }, v.reason ? v.reason : describe(v)),
+      v.inside ? el("div", { class: "meta inside" }, insideText(v.inside)) : null,
       acts.length ? el("div", { class: "acts" }, acts) : null));
   }
   $("titleField").hidden = videos.length > 1;
@@ -706,8 +852,8 @@ function readyScreen() {
   if (old) note("right", "Tidy up", (one ? "This film still has its" : `${plural(old, "film")} here still have their`)
     + " working files beside the video, where an earlier version left them. They work there; Tidy moves them into a "
     + "context-notes folder.", [el("button", { type: "button", class: "primary", onclick: openTidy }, "Tidy…")]);
-  const mkvs = videos.filter((v) => v.ass && v.limit == null && /\.mkv$/i.test(v.name)).length;
-  if (!old && mkvs) note("right", "Embed", (one ? "This film's" : `${plural(mkvs, "film")}'s`) + " notes can go inside the .mkv "
+  const toEmbed = videos.filter((v) => v.inside && (v.inside.action === "add" || v.inside.action === "update")).length;
+  if (!old && toEmbed) note("right", "Embed", (one ? "This film's" : `${plural(toEmbed, "film")}'s`) + " notes can go inside the .mkv "
     + "as a subtitle track, so the notes travel with the film. It's free and nothing is re-encoded.",
     [el("button", { type: "button", onclick: openEmbed }, "Embed…")]);
   if (!keepNote) {
@@ -725,8 +871,16 @@ async function refresh() {
   const seq = ++statusSeq;
   if (!o.path) { videos = []; renderVideos(); idleScreen(); return; }
   $("pathHint").classList.remove("bad");
-  const slow = setTimeout(() => { if (seq === statusSeq) $("pathHint").textContent = "Looking…"; }, 350);
-  const r = await api("/api/status", o);
+  const slow = setTimeout(() => { if (seq === statusSeq) $("pathHint").textContent = "Looking… a network drive can take minutes"; }, 350);
+  let r = await api("/api/status", o);
+  if (r.id) {
+    const id = r.id;
+    for (r = { pending: true }; r.pending; ) {
+      await new Promise((done) => setTimeout(done, 1500));
+      if (seq !== statusSeq) { clearTimeout(slow); return; }
+      r = await api(`/api/status?id=${encodeURIComponent(id)}`);
+    }
+  }
   clearTimeout(slow);
   if (seq !== statusSeq) return;
   if (r.error) {
@@ -744,7 +898,7 @@ async function refresh() {
 }
 function setPath(p) {
   $("path").value = p;
-  remember();
+  rememberStartFolder(p);
   keepNote = false;
   refresh();
 }
@@ -768,13 +922,52 @@ function log(line) {
 }
 function videoRow(path) { return videos.find((v) => v.path === path); }
 
+// A rebuild rewrites the .notes.ass, so the page shows what changes first. Its own Go starts the run.
 async function run() {
-  remember();
+  if (videos.some((v) => v.state === "rebuild")) { await openRebuildPreview(); return; }
+  await startRun();
+}
+let embedAfterRebuild = false;
+async function startRun() {
   keepNote = false;
-  const r = await api("/api/run", options());
+  const r = await api("/api/run", { ...options(), embed: embedAfterRebuild });
+  embedAfterRebuild = false;
   if (r.error) { note("left", "Can't start", r.error); return; }
   $("log").dataset.fresh = "yes";
   startPolling(true);
+}
+async function openRebuildPreview() {
+  $("rebuildIntro").textContent = "Looking…";
+  $("rebuildDiffs").replaceChildren();
+  $("rebuildMsg").textContent = "";
+  $("rebuildMsg").className = "msg";
+  $("rebuildEmbedRow").hidden = true;
+  $("rebuildEmbed").checked = false;
+  $("rebuildGo").disabled = true;
+  $("rebuild").showModal();
+  const r = await api("/api/rebuild-preview", options());
+  if (r.error) { $("rebuildIntro").textContent = r.error; return; }
+  const films = r.films || [];
+  if (!films.length) { $("rebuildIntro").textContent = "Nothing to rebuild here."; return; }
+  $("rebuildIntro").textContent = `${plural(films.length, "subtitle file")} will be rebuilt from the notes. This is free: `
+    + "nothing is sent to Claude. Each old .notes.ass is kept as a .bak first. Settings that change are marked.";
+  $("rebuildDiffs").replaceChildren(...films.map(rebuildBlock));
+  $("rebuildEmbedRow").hidden = !r.embedded;
+  $("rebuildGo").disabled = false;
+}
+function rebuildBlock(f) {
+  return el("section", { class: "dsection" },
+    el("h3", {}, f.name),
+    el("table", { class: "diff" },
+      el("thead", {}, el("tr", {}, el("th", {}, "Setting"), el("th", {}, "Now"), el("th", {}, "After rebuild"))),
+      el("tbody", {}, ...f.rows.map((x) => el("tr", { class: x.changed ? "changed" : "" },
+        el("th", {}, x.setting), el("td", {}, x.now), el("td", {}, x.after))))),
+    el("ul", { class: "entries" }, ...f.files.map((t) => el("li", {}, t))));
+}
+async function rebuildGo() {
+  embedAfterRebuild = $("rebuildEmbed").checked;
+  $("rebuild").close();
+  await startRun();
 }
 function startPolling(fresh) {
   if (fresh) job = { next: 0 };
@@ -883,7 +1076,7 @@ function ask(ev) {
                           onclick: () => answer(c.key) }, name);
   });
   const sendBtn = buttons.find((b) => b.dataset.key === "y");
-  if (send && sendBtn && $("autoSend").checked) {
+  if (send && sendBtn && autoSendOn()) {
     const wait = el("button", { type: "button", onclick: () => {
       stopCountdown();
       sendBtn.textContent = "Send to Claude";
@@ -1035,8 +1228,69 @@ async function doTidy() {
 
 // ---------------------------------------------------------------- embed (embed.py)
 const sizeText = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.round(n / 1e3)} KB`;
-function embedTarget() { return { path: $("path").value.trim(), recursive: $("recursive").checked }; }
+const minsText = (s) => s < 60 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`;
+function embedTarget() {
+  return { path: $("path").value.trim(), recursive: $("recursive").checked, convert: $("embedConvert").checked };
+}
+// ---------------------------------------------------------------- change or delete (each action has its own Go)
+function openDanger() {
+  $("backupsIntro").textContent = "Looking…";
+  $("backupsList").replaceChildren();
+  $("backupsMsg").textContent = "";
+  $("backupsMsg").className = "msg";
+  $("backupsGo").hidden = true;
+  $("backupsGo").disabled = false;
+  renderRedo();
+  $("danger").showModal();
+  listBackups();
+}
+async function listBackups() {
+  const r = await api("/api/backups", { path: $("path").value.trim(), recursive: $("recursive").checked });
+  if (r.error) { $("backupsIntro").textContent = r.error; return; }
+  const found = r.backups || [];
+  if (!found.length) { $("backupsIntro").textContent = "No kept originals to delete here."; return; }
+  const total = found.reduce((n, b) => n + b.size, 0);
+  $("backupsIntro").textContent = `${plural(found.length, "kept original")} (${sizeText(total)}) will be deleted. Each is the `
+    + "original file from before its notes went inside or before it became an MKV, so the films keep their notes. "
+    + "This can't be undone.";
+  $("backupsList").replaceChildren(...found.map((b) => el("li", {},
+    el("p", { class: "tidyvideo" }, baseName(b.path)), el("p", { class: "tidyfiles" }, sizeText(b.size)))));
+  $("backupsGo").hidden = false;
+}
+function renderRedo() {
+  const films = videos.filter((v) => v.notes > 0);
+  $("redoList").replaceChildren(...films.map((v) => el("li", {},
+    el("p", { class: "tidyvideo" }, v.name),
+    el("p", { class: "tidyfiles" }, `${plural(v.notes, "note")} now; the current notes are kept as a .bak`))));
+  $("redoIntro").textContent = films.length
+    ? `Writes the notes again for ${plural(films.length, "film")}, with the settings above. The notes they have now are kept `
+      + "as a backup (.bak), and no film is deleted. Claude is sent the subtitles and frames again, so this costs money; "
+      + "the cost is shown before anything is sent."
+    : "None of the films here have notes yet, so there's nothing to write again.";
+  $("redoGo").disabled = films.length === 0;
+}
+async function backupsGo() {
+  $("backupsGo").disabled = true;
+  const r = await api("/api/backups", { path: $("path").value.trim(), recursive: $("recursive").checked, go: true });
+  if (r.error) { $("backupsMsg").textContent = r.error; $("backupsMsg").className = "msg bad"; $("backupsGo").disabled = false; return; }
+  $("danger").close();
+  embedding = true;
+  $("log").dataset.fresh = "yes";
+  startPolling(true);
+}
+async function redoGo() {
+  $("redo").checked = true;               // read by the run that starts now, then cleared
+  $("danger").close();
+  await startRun();
+  $("redo").checked = false;
+}
+
 async function openEmbed() {
+  $("embedConvert").checked = false;
+  $("embed").showModal();
+  await listEmbed();
+}
+async function listEmbed() {
   $("embedIntro").textContent = "Looking…";
   $("embedList").replaceChildren();
   $("embedMsg").textContent = "";
@@ -1044,7 +1298,6 @@ async function openEmbed() {
   $("embedDefaultRow").hidden = true;
   $("embedBtn").hidden = false;
   $("embedBtn").disabled = true;
-  $("embed").showModal();
   const r = await api("/api/embed", embedTarget());
   if (r.error) { $("embedIntro").textContent = r.error; $("embedBtn").hidden = true; return; }
   const todo = r.videos.filter((v) => v.action === "add" || v.action === "update");
@@ -1056,10 +1309,15 @@ async function openEmbed() {
   $("embedIntro").textContent = `${plural(todo.length, "film")} (${sizeText(total)}) get their notes inside as a subtitle `
     + `track called "Context Notes". Nothing is re-encoded and nothing is sent to Claude. Each film is rewritten as a `
     + `new file first, checked, then swapped in; your original is kept in its context-notes folder until you delete `
-    + `it. It needs about ${sizeText(biggest)} free while it works.`;
+    + `it. It needs about ${sizeText(biggest)} free while it works. `
+    + `About ${minsText(todo.reduce((n, v) => n + (v.seconds_low || 0), 0))} to `
+    + `${minsText(todo.reduce((n, v) => n + (v.seconds_high || 0), 0))} on this NAS, estimated from its speed: each film `
+    + `is read and rewritten whole. No Claude or API calls are made.`;
+  const converting = todo.filter((v) => v.convert).length;
+  if (converting) $("embedIntro").textContent += ` ${plural(converting, "MP4 film")} become MKV first; each .mp4 is kept in context-notes/originals.`;
   $("embedList").replaceChildren(...todo.map((v) => el("li", {},
     el("p", { class: "tidyvideo" }, baseName(v.video)),
-    el("p", { class: "tidyfiles" }, `${v.action === "update" ? "Replaces the earlier notes inside" : "Adds the notes"} · ${sizeText(v.size)}`))));
+    el("p", { class: "tidyfiles" }, `${v.convert ? "Converts to MKV, then adds the notes" : v.action === "update" ? "Replaces the earlier notes inside" : "Adds the notes"} · ${sizeText(v.size)}`))));
   $("embedDefaultRow").hidden = false;
   $("embedBtn").disabled = false;
   $("embedBtn").focus();
@@ -1198,6 +1456,7 @@ async function reloadInfo() {
   if (r.error) { note("left", "Problem", r.error); return false; }
   info = r;
   renderSettings();
+  renderDefaults();
   return true;
 }
 function msg(id, text, ok) {
@@ -1250,18 +1509,25 @@ $("tidyBtn").addEventListener("click", doTidy);
 $("tidyNo").addEventListener("click", () => $("tidy").close());
 $("embedBtn").addEventListener("click", doEmbed);
 $("embedNo").addEventListener("click", () => $("embed").close());
+$("embedConvert").addEventListener("change", listEmbed);
+$("dangerBtn").addEventListener("click", openDanger);
+$("backupsGo").addEventListener("click", backupsGo);
+$("redoGo").addEventListener("click", redoGo);
+$("rebuildGo").addEventListener("click", rebuildGo);
+$("rebuildNo").addEventListener("click", () => $("rebuild").close());
+$("d_save").addEventListener("click", saveDefaults);
+$("d_reset").addEventListener("click", resetDefaults);
 $("pickFile").addEventListener("click", () => pick("file"));
 $("pickFolder").addEventListener("click", () => pick("folder"));
 $("browseBtn").addEventListener("click", openBrowser);
 $("useFolderBtn").addEventListener("click", () => { $("browser").close(); setPath(browsing); });
-$("path").addEventListener("change", () => { remember(); refresh(); });
-$("path").addEventListener("keydown", (e) => { if (e.key === "Enter") { remember(); refresh(); } });
+$("path").addEventListener("change", () => refresh());
+$("path").addEventListener("keydown", (e) => { if (e.key === "Enter") refresh(); });
 $("note_background").addEventListener("change", showOpacity);
 for (const id of ["recursive", "film_language", "subs_language", "show_subs", "limit", "refine", "redo", "spw",
                   "note_background", "opacity"]) {
-  $(id).addEventListener("change", () => { remember(); refresh(); });
+  $(id).addEventListener("change", () => refresh());
 }
-for (const id of ["notes_language", "show", "check_alignment", "dense", "autoSend"]) $(id).addEventListener("change", remember);
 for (const r of document.querySelectorAll("input[name=quality]")) r.addEventListener("change", remember);
 $("runBtn").addEventListener("click", run);
 $("cancelBtn").addEventListener("click", cancel);
@@ -1269,7 +1535,7 @@ $("cancelBtn").addEventListener("click", cancel);
 (async () => {
   if (!(await reloadInfo())) return;
   fillLanguages();
-  restore();
+  applySettings();
   showOpacity();
   if (info.running) {
     await refresh();

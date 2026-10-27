@@ -5,7 +5,7 @@ A notes file is plain JSON. `make_ass.py` merges it with an SRT to produce the `
 ```json
 {
   "title": "Show - S01E01 - Title",
-  "audience": "Fluent in English, didn't grow up in the UK",
+  "audience": "Fluent in American English",
   "video_offset": 0.0,
   "notes": [ ... ]
 }

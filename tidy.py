@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 tidy.py - move the working files earlier versions left beside your videos into their context-notes folders.
+Created 2026-10-24, modified 2026-10-26.
 
     python3 tidy.py "/Volumes/Movies"               one folder: lists what would move, asks, then moves it
     python3 tidy.py "/Volumes/Movies" --recursive   that folder and every folder under it

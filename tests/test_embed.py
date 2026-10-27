@@ -221,3 +221,96 @@ def test_the_wrapper_embeds_mkv_and_leaves_mp4_alone(tmp_path, monkeypatch, caps
     assert "--yes" not in ran[0]
     monkeypatch.setattr(cn, "run", lambda cmd, cwd: 1)
     assert cn.embed_step(tmp_path / "Film.mkv", Opts()) is False
+
+
+def test_rewrite_time_is_a_range_from_the_measured_speeds():
+    size = 2_100_000_000
+    low, high = embed.rewrite_seconds(size)
+    assert low == pytest.approx(max(size / (embed.READ_MBPS * 1e6), size / (embed.WRITE_MBPS * 1e6)))
+    assert high == pytest.approx(2 * (size / (embed.READ_MBPS * 1e6) + size / (embed.WRITE_MBPS * 1e6)))
+    assert 0 < low < high
+
+
+def test_warning_gives_time_no_api_and_the_copy_kept_only_for_new_films():
+    new = {"size": 2_000_000_000, "action": "add"}
+    old = {"size": 1_000_000_000, "action": "update"}
+    text = embed.warning_text([new, old])
+    assert "About 1 min to 4 min" in text
+    assert "No Claude or API calls are made." in text
+    assert "The original of 1 film(s) stays in its" in text and "--delete-backups" in text
+    assert "stays in its" not in embed.warning_text([old])          # replacing a film keeps no new copy
+
+
+def test_look_of_reads_the_look_line(tmp_path):
+    ass = tmp_path / "Film.notes.ass"
+    ass.write_text("[Script Info]\n; Look: build 2, background see-through, opacity 30%, 150 words a minute\n",
+                   encoding="utf-8")
+    assert embed.look_of(ass) == {"background": "see-through", "opacity": 30.0, "wpm": 150.0}
+    ass.write_text("[Script Info]\n; Look: build 2, background none, 150 words a minute\n", encoding="utf-8")
+    assert embed.look_of(ass) == {"background": "none", "opacity": None, "wpm": 150.0}
+    assert embed.look_of(tmp_path / "missing.ass") is None
+
+
+@needs_ffmpeg
+def test_film_state_says_whether_the_notes_are_inside(tmp_path, clip):
+    video = film(tmp_path, clip)
+    assert embed.film_state(video)["action"] == "add"
+    assert run_cli("embed.py", video, "--yes", cwd=tmp_path).returncode == 0
+    state = embed.film_state(video)
+    assert state["action"] == "current" and "look" in state
+    mp4 = film(tmp_path, clip, "plain.mp4", name="Other")
+    state = embed.film_state(mp4)
+    assert state["action"] == "skip" and ".mkv only" in state["reason"]
+
+
+def subbed_mp4(tmp_path, clips, name="Film"):
+    """An .mp4 with a text subtitle track (mov_text, as MP4 files carry them) and its notes beside it."""
+    video = tmp_path / f"{name}.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(clips / "plain.mp4"), "-i", str(clips / "subs.srt"),
+                    "-map", "0", "-map", "1", "-c", "copy", "-c:s", "mov_text", str(video)], check=True)
+    video.with_suffix(".notes.ass").write_text(ASS, encoding="utf-8-sig")
+    return video
+
+
+@needs_ffmpeg
+def test_mp4_is_skipped_unless_converting(tmp_path, clip):
+    video = subbed_mp4(tmp_path, clip)
+    r = run_cli("embed.py", video, "--dry-run", cwd=tmp_path)
+    assert ".mkv only" in r.stdout and "convert" not in r.stdout
+
+
+@needs_ffmpeg
+def test_convert_makes_an_mkv_and_keeps_the_mp4_in_originals(tmp_path, clip):
+    video = subbed_mp4(tmp_path, clip)
+    before = digest(video)
+    r = run_cli("embed.py", video, "--convert", "--dry-run", cwd=tmp_path)
+    assert "convert to .mkv, then put the notes inside" in r.stdout
+    r = run_cli("embed.py", video, "--convert", "--yes", cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    mkv = tmp_path / "Film.mkv"
+    assert mkv.exists() and not video.exists()
+    assert digest(tmp_path / "context-notes" / "originals" / "Film.mp4") == before
+    track = notes_track(mkv)
+    assert track["codec_name"] == "ass" and embed.tag(track, "title") == "Context Notes"
+    subs = [s["codec_name"] for s in embed.probe(mkv)["streams"] if s["codec_type"] == "subtitle"]
+    assert subs == ["subrip", "ass"]              # the film's own subtitles became SRT; the notes track is last
+    assert embed.film_state(mkv)["action"] == "current"
+    assert (tmp_path / "context-notes" / ".plexignore").exists()
+
+
+@needs_ffmpeg
+def test_delete_backups_also_removes_the_kept_mp4(tmp_path, clip):
+    video = subbed_mp4(tmp_path, clip)
+    assert run_cli("embed.py", video, "--convert", "--yes", cwd=tmp_path).returncode == 0
+    kept = tmp_path / "context-notes" / "originals" / "Film.mp4"
+    assert kept.exists()
+    assert run_cli("embed.py", tmp_path / "Film.mkv", "--delete-backups", "--yes", cwd=tmp_path).returncode == 0
+    assert not kept.exists()
+
+
+@needs_ffmpeg
+def test_convert_is_refused_when_an_mkv_of_that_name_is_there(tmp_path, clip):
+    video = subbed_mp4(tmp_path, clip)
+    film(tmp_path, clip, name="Film")                    # Film.mkv already exists
+    r = run_cli("embed.py", video, "--convert", "--dry-run", cwd=tmp_path)
+    assert "a .mkv of this name is already here" in r.stdout and "Nothing to do" in r.stdout

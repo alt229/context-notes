@@ -247,13 +247,27 @@ def episode(tmp_path, clip):
     return folder
 
 
+def check_folder(server, body):
+    """What the page gets for a folder: start the status check, then ask for its result until it's ready."""
+    import time
+    _, started = call(server, "/api/status", body)
+    if "id" not in started:
+        return started
+    while True:
+        _, r = call(server, f"/api/status?id={started['id']}")
+        if not r.get("pending"):
+            return r
+        time.sleep(0.05)
+
+
 @needs_ffmpeg
 def test_status_of_a_folder(server, episode):
     make_srt(episode / "S01E01 Pilot.srt", n=24)
-    _, r = call(server, "/api/status", {"path": str(episode)})
+    r = check_folder(server, {"path": str(episode)})
     (v,) = r["videos"]
     assert v["name"] == "S01E01 Pilot.mp4" and not v["done"] and v["notes"] == 0 and v["subtitles"] == "S01E01 Pilot.srt"
-    _, r = call(server, "/api/status", {"path": str(episode / "nothing here")})
+    assert call(server, "/api/status?id=nothing-like-this")[1]["error"].startswith("That check isn't here")
+    r = check_folder(server, {"path": str(episode / "nothing here")})
     assert "Can't find" in r["error"]
 
 
@@ -271,7 +285,7 @@ def test_a_whole_run_from_the_page(server, api, api_key_file, episode):
     assert {e["id"] for e in events if e["type"] == "question"} == {"generate.send", "refine.send", "alignment.check"}
     assert (episode / "S01E01 Pilot.notes.ass").exists()
     assert {c["body"]["model"] for c in api.calls} == {"claude-sonnet-5-5"}             # "Cheaper"
-    _, r = call(server, "/api/status", {"path": str(episode)})
+    r = check_folder(server, {"path": str(episode)})
     assert r["videos"][0]["done"] and r["videos"][0]["refined"] == "yes"
 
 
@@ -354,3 +368,47 @@ def test_embed_lists_then_runs_as_a_job(server, tmp_path):
     assert view["returncode"] == 0 and "embed-video" in types and "question" not in types, view
     assert any(i.get("event", {}).get("result") == "embedded" for i in view["items"])
     assert (films / "context-notes" / "A.mkv" / "A.original.mkv").exists() and not (films / "context-notes" / "B.mp4").exists()
+
+
+@needs_ffmpeg
+def test_backups_lists_then_deletes_the_kept_originals(server, tmp_path):
+    from conftest import run_cli
+    clips = make_clips(tmp_path / "clips")
+    folder = tmp_path / "Show"
+    folder.mkdir()
+    shutil.copyfile(clips / "plain.mkv", folder / "Film.mkv")
+    (folder / "Film.notes.ass").write_text(ASS, encoding="utf-8-sig")
+    assert run_cli("embed.py", folder / "Film.mkv", "--yes", cwd=tmp_path).returncode == 0
+    kept = folder / "context-notes" / "Film.mkv" / "Film.original.mkv"
+    assert kept.exists()
+    status, r = call(server, "/api/backups", {"path": str(folder)})
+    assert status == 200 and [Path(b["path"]).name for b in r["backups"]] == ["Film.original.mkv"]
+    assert kept.exists()                                       # listing deletes nothing
+    status, r = call(server, "/api/backups", {"path": str(folder), "go": True})
+    assert status == 200 and r.get("ok"), r
+    state, _, log = run_job(server, {})
+    assert state["returncode"] == 0, log
+    assert not kept.exists() and (folder / "Film.mkv").exists()
+
+
+def test_audience_offline_and_effort_are_passed_on():
+    args = app.common_args({"path": str(Path.home()), "audience": "kids", "offline": True})
+    assert args[args.index("--audience") + 1] == "kids" and "--offline" in args
+    assert app.effort_args({"effort": "max"}) == ["--effort", "max"]
+    assert app.effort_args({"effort": ""}) == []
+    with pytest.raises(app.BadRequest):
+        app.effort_args({"effort": "turbo"})
+
+
+def test_the_defaults_page_saves_refuses_and_resets(server):
+    status, r = call(server, "/api/settings", {"quality": "turbo"})
+    assert status == 400 and "quality" in r["error"]
+    status, r = call(server, "/api/settings", {"quality": "cheaper", "start_folder": "/Volumes/Media/Movies"})
+    assert status == 200 and r["settings"]["quality"] == "cheaper"
+    assert r["settings"]["start_folder"] == "/Volumes/Media/Movies"
+    _, info = call(server, "/api/info")
+    assert info["settings"]["quality"] == "cheaper" and info["settings"]["remember_start_folder"] is True
+    status, r = call(server, "/api/settings", {"redo": True})                 # never a default
+    assert status == 400
+    _, r = call(server, "/api/settings/reset", {})
+    assert r["settings"]["quality"] == "best" and r["settings"]["start_folder"] == ""

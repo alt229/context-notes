@@ -319,3 +319,30 @@ def test_subtitles_in_another_language_are_named_in_the_message(tmp_path):
     assert subs[0]["lang"] == "pt"
     msg = cn.no_subtitles_message(v, "en")
     assert "Casablanca.1942.srt (looks Portuguese)" in msg and "Casablanca.1942.en.srt" in msg
+
+
+def test_a_rebuild_keeps_a_backup_of_the_ass_it_replaces(tmp_path):
+    video = tmp_path / "Film.mkv"
+    (tmp_path / "Film.notes.ass").write_text("old look", encoding="utf-8")
+    cn.keep_old_ass(video)
+    assert (tmp_path / "Film.notes.ass.bak").read_text(encoding="utf-8") == "old look"
+    cn.keep_old_ass(video)                                          # a second rebuild keeps this one too
+    assert (tmp_path / "Film.notes.ass.bak2").exists()
+
+
+def test_the_rebuild_diff_shows_the_look_now_and_after(tmp_path):
+    from argparse import Namespace
+    ass = tmp_path / "Film.notes.ass"
+    ass.write_text("[Script Info]\nTitle: old\n", encoding="utf-8")       # made before 0.2.0: no look line
+    st = {"video": tmp_path / "Film.mp4", "ass": ass, "spec": {"note_background": "dark"}, "srt": None,
+          "film_language": "en", "display_lang": "en", "subs": []}
+    opts = Namespace(reading_speed=None, note_background=None, note_opacity=None, show_subs=None, limit=None)
+    diff = cn.rebuild_diff(st, opts)
+    rows = {r["setting"]: r for r in diff["rows"]}
+    assert rows["Box behind the notes"] == {"setting": "Box behind the notes",
+                                            "now": "not recorded (made before 0.2.0)", "after": "dark", "changed": True}
+    assert "Box opacity" not in rows                                 # the dark box has no opacity setting
+    assert rows["Words a minute"]["after"] == "150"
+    assert any(f.startswith("Kept: Film.notes.ass.bak") for f in diff["files"])
+    assert any("Film.en.ass" in f for f in diff["files"])
+    assert diff["embedded"] is False

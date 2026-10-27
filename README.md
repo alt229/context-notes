@@ -138,7 +138,8 @@ python3 app.py
 
 - **Choose** a film or a folder of episodes. The list shows what's already done for each video.
 - **Pick how the notes are written:** best (Claude Opus) or cheaper (Claude Sonnet), whether Claude also looks at the
-  frames, and how much of the film. More options has the rest, such as subtitles in another language.
+  frames, and how much of the film. More options has the rest: subtitles in another language, who the notes are for
+  (the default is fluent in American English), how hard the model thinks, and whether to search online for subtitles.
 - **On screen:** how long notes stay up, in seconds a word (empty keeps each film's own, 0.4 unless you changed it),
   and what's behind them: a see-through box (and how solid it is, 30% unless you change it), the dark box from
   before, or no box with outlined text. Changing these for a film that's already done is free: the list says "Needs
@@ -150,6 +151,9 @@ python3 app.py
 - **Tidy up.** Films that an earlier version worked on may still have their working files beside the video. The page
   says so, and Tidy lists what would move into the `context-notes` folder, then moves it when you say (see
   [Where the files go](#where-the-files-go)).
+- **Change or delete…** holds the two actions that remove or rewrite files, each with its own Go button: deleting
+  the kept originals (a dry run lists them with their sizes first), and writing the notes again (the notes they
+  replace are kept as `.bak`).
 - **Watch:** open a finished video in VLC from the list.
 - **Credit and session.** Two small meters sit beside Settings. **API credit** is about how much of your prepaid
   credit is left; it counts down as notes are written and turns red below your warning level. **Plan session**
@@ -158,6 +162,12 @@ python3 app.py
   much credit you have left, and warns if the run may cost more.
 - **Settings** has your Anthropic API key (saved in the usual place), the credit you have left, the OpenSubtitles
   login, and a button that installs the VLC extension.
+- **Defaults for every run** (in Settings): the model, thinking effort, who the notes are for, the language to write
+  them in, seconds a word, the box and how solid it is, frames, the timing check, online subtitle search, subfolders,
+  and the starting folder. They're saved on this computer, and the Terminal scripts read them too, so both start from
+  the same choices. A film that already has notes keeps its own look and audience. Subtitle choices and anything that
+  rewrites or deletes files stay per run. Send-after-10-seconds is on by default: notes go to Claude after 10 seconds
+  unless you press Don't send. Untick it in Settings to be asked each time instead.
 
 Keep the Terminal window open while you use it; Ctrl-C there stops it. It runs the same scripts described below, so
 anything it does you can also do by hand. Only your computer can reach it: it listens on 127.0.0.1, and the page's
@@ -212,6 +222,7 @@ colours, positions and fades.
 ```bash
 python3 context_notes.py "film.mkv" --embed          # after the notes are written (or already done)
 python3 embed.py "film.mkv"                          # a film that already has a .notes.ass
+python3 embed.py "film.mp4" --convert                # an .mp4: make an .mkv first (the .mp4 goes to context-notes/originals)
 python3 embed.py "/Volumes/Movies" --recursive       # every .mkv with a .notes.ass under a folder
 python3 embed.py "/Volumes/Movies" --dry-run         # only list what it would do
 python3 embed.py film.mkv --default                  # play with the notes on (otherwise: pick the track)
@@ -223,8 +234,12 @@ python3 embed.py "/Volumes/Movies" --delete-backups  # free the space the kept o
   it. It needs about the film's size in free space while it works.
 - Existing subtitle tracks, chapters and fonts are kept. If the notes change later (a rebuild, or a new
   `--reading-speed`), run it again: it replaces its own track and never adds a second.
-- `.mp4` files are left as they are: MP4 can't hold these subtitles without losing their styling. Notes that only
-  cover the first part of a film (`--limit`) aren't embedded.
+- `.mp4` files are left as they are unless you add `--convert`: MP4 can't hold these subtitles without losing their
+  styling, so `--convert` rewrites the film as an `.mkv` first. The `.mp4` is kept in `context-notes/originals/`, the
+  film's name changes, and its `mov_text` subtitles become SRT. Media servers may list it as a new film. Notes that
+  only cover the first part of a film (`--limit`) aren't embedded.
+- Each run states the time it takes (a rough range from this NAS's read and write speed), the space it needs, and the
+  copy it keeps. No Claude or API calls are made. The app's Embed dialog lists only films whose notes are not yet inside.
 
 Files are moved as they are, never changed or overwritten. A file whose name is already taken in the folder, or that
 could belong to two videos (`film.mkv` and `film.mp4`), stays where it is and is listed.
@@ -365,6 +380,11 @@ video's `.ass` when that line is missing or differs from what you asked for. So 
 each finished video once, for free. Options given only to `make_ass.py` by hand (`--layout stack`,
 `--keep-duplicates`) aren't remembered; give them again if you used them.
 
+Before a rebuild the app shows what will change: the box, the opacity and the speed now and after, the subtitles,
+and the files written (`context_notes.py --preview-rebuild` gives the same list in Terminal). Every rebuild keeps the
+`.notes.ass` it replaces as `<name>.notes.ass.bak`, then `.bak2` and so on, so an older look can always be found
+again. The same dialog can also put the new notes inside the `.mkv` afterwards.
+
 ### Checking every note's timing
 
 ```bash
@@ -387,7 +407,7 @@ A notes file is JSON: a title, an audience, and a list of notes. A note attaches
 ```json
 {
   "title": "Show - S01E01",
-  "audience": "Fluent in English, didn't grow up in the UK",
+  "audience": "Fluent in American English",
   "notes": [
     {"match": "taking the mickey", "category": "British English",
      "text": "To “take the mickey” is to tease someone. Mildly cheeky, never harsh."},

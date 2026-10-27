@@ -65,6 +65,7 @@ from pathlib import Path
 
 import languages
 import prompts  # noqa: F401  (on Windows, lets a GUI's Cancel stop this script cleanly)
+import settings  # the install's defaults for the look (settings.json; the built-in ones when there's no file)
 import workfiles
 
 PLAY_X, PLAY_Y = 1920, 1080
@@ -310,7 +311,7 @@ def escape_note(t):
 # the film's own subtitles competing for the same eyes). Later defaults (150 words a minute, 6 s floor, 24 s
 # ceiling, 0.4 s a word) were set for Erin's films, after friends found the notes went by too fast.
 # Change per film with --reading-speed etc.
-DEFAULT_TIMING = {"wpm": 150, "settle": 2.0, "min": 6.0, "max": 24.0}
+DEFAULT_TIMING = {"wpm": settings.look_defaults()["wpm"], "settle": 2.0, "min": 6.0, "max": 24.0}
 
 
 def timing_settings(spec=None, **overrides):
@@ -394,10 +395,10 @@ BACKGROUNDS = {
     "dark": {"left": "&H38101010,&H38101010", "right": "&H38281810,&H38281810", "border": "3,14,0"},
     "none": {"left": "&H00101010,&H80000000", "right": "&H00101010,&H80000000", "border": "1,2,1"},
 }
-DEFAULT_BACKGROUND = "see-through"
+DEFAULT_BACKGROUND = settings.look_defaults()["background"]          # "see-through" unless settings.json says otherwise
 # How solid the see-through box is, in percent: 0 invisible, 100 solid. 30 (Erin, 2026-10-24; it was 50 for an
 # hour). Chosen with --note-opacity; remembered in the notes file as "note_opacity".
-DEFAULT_OPACITY = 30
+DEFAULT_OPACITY = settings.look_defaults()["opacity"]
 
 
 def box_style(background, opacity=DEFAULT_OPACITY):
@@ -742,7 +743,7 @@ def create_blank_notes(path, srt):
     stem = Path(srt).stem
     skeleton = {
         "title": f"{stem} (context notes)",
-        "audience": "Fluent in English, didn't grow up in the UK",
+        "audience": "Fluent in American English",
         "scope": "Dialogue notes come from the subtitles; visual notes (kind: visual) come from frames of the video",
         "notes": [],
     }
@@ -883,7 +884,7 @@ def main():
                    help="save your Anthropic API key to ~/.config/context-notes/api-key (hidden prompt) and exit")
     g.add_argument("--title", help="show/film and episode, e.g. 'The IT Crowd - S01E02 - Calamity Jen' "
                                    "(helps Claude get the facts right; default: the subtitle file name)")
-    g.add_argument("--audience", help="who the notes are for (default: fluent in English, didn't grow up in the UK)")
+    g.add_argument("--audience", help="who the notes are for (default: fluent in American English)")
     g.add_argument("--year", help="release year, e.g. 1974 (films more than 40 years old get extra attention to "
                                   "their words, people, places and period). Default: read from the title, the file's "
                                   "tags, the file name or the folder name")

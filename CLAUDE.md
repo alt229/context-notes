@@ -8,6 +8,47 @@ know because the film is old or foreign.
 
 Read `README.md` for the full command reference. This file holds what we've learned and the rules.
 
+## Where things left off
+
+Last updated 2026-10-27. Replace this section when a session changes the project (see rule 10).
+It's the first thing to read when picking the work up on another computer or after losing the connection.
+
+- **Nothing is committed.** `git status` shows the changed or new files on `master` (last commit `9789e942`). Ask Erin
+  before committing.
+- **Done on 2026-10-27:** the install's defaults. `settings.py` keeps them in `~/.config/context-notes/settings.json`
+  (built-in defaults when the file is missing or damaged). The Settings page has a "Defaults for every run" section, and
+  the page no longer remembers choices in the browser (the port changes each start). The Terminal scripts read the same
+  defaults (`cli_defaults`, through argparse's `set_defaults`); the look is read by `make_ass.py` from `look_defaults`,
+  so a film's saved look is never overwritten. Auto-send moved into Settings and is on by default (untick to be asked
+  each time). "Remember starting folder" saves the folder you choose.
+- **Done in this session:** `embed.py --convert` (an `.mp4` becomes an `.mkv`, and the `.mp4` goes to
+  `context-notes/originals/`), the "already inside" check, the time and space warnings, the "Change or delete…" panel
+  (delete kept originals, write the notes again), the run options for audience, effort and offline subtitles, the
+  rebuild preview with a `.bak` kept on every rebuild and an optional re-embed, the new default audience ("Fluent in
+  American English"), a probe cache, the background status check, and the docs and changelog to match.
+- **Tested:** the full suite passes (`python3 -m pytest -q`), `ruff check .` is clean, and the page's script parses.
+  The new dialogs have not been looked at in a browser yet.
+- **Waiting on Erin:**
+  0. Confirmed by Erin (2026-10-27): with no `--model`, scripts use Opus (the app's "best") and with no `--effort` they
+     use high, where the Terminal used Sonnet before. Auto-send is on by default, with no warning gate; Erin chose this
+     (2026-10-27), and the warning is in the Settings text. Untick it to be asked each time.
+  1. The Plex copy `<film>.en.ass`: keep writing it, skip it on GUI rebuilds, or keep it and ask what Plex shows for
+     IT Crowd (see Known pitfalls). There are 22 copies on the share, 19 of them for IT Crowd.
+  2. The Akira rebuild, which waits on 1. Akira's `.ass` has no look line. A rebuild keeps the old file as a `.bak`,
+     writes the Plex copy, and makes the Context Notes track inside `Akira.mkv` out of date. Re-embedding would
+     rewrite the 2.8 GB film.
+- **Ideas, not built:** store the look as a Matroska track tag (`CONTEXT_NOTES_LOOK`, which ffmpeg writes and ffprobe reads back,
+  checked on a test file); add the min, max and settle timing to the `Look:` line; show the old box for files made
+  before 0.2.0 (Akira's "now" column says "not recorded").
+- **Not in the GUI yet:** `--window`, `--align-model`, and `find_subs.py --transcribe`.
+- **Test media:** the temporary test folders on the NAS (`Movies/.embed-rewrite-test` and `TV Shows/.convert-test`)
+  were deleted. Nothing in the library was changed.
+- **New computer:** Python 3 with `pytest`, `ruff`, `numpy` and `pillow` in a virtual environment. `ffmpeg` and
+  `ffprobe` are needed. MKVToolNix (`mkvpropedit`, `mkvmerge`) is installed here for checks; the code doesn't use it yet.
+  The Media share is mounted
+  at `/Volumes/Media`. The probe cache lives in `~/.config/context-notes/probe-cache/` and isn't in the repo.
+- **Next step:** Erin's answer on the Plex copy, then a browser check of the new dialogs.
+
 ## The pipeline (one command per step; `context_notes.py` runs them all)
 
 1. **Subtitles.** An `.srt` beside the video, or a track inside it. If there's none, `find_subs.py` looks in `Subs/`
@@ -150,20 +191,33 @@ Read `README.md` for the full command reference. This file holds what we've lear
     (Plex `.plexignore`, Jellyfin/Emby 4.8 `.ignore`, Emby 4.9+ `.embyignore`; from their docs, 2026-10-24).
   - Checked by running the old and new code side by side on synthetic films (13 wrapper runs: same output,
     requests and files once the paths are mapped), and on films the old code started, untidied and tidied.
-- **Notes inside the film: `embed.py`, `.mkv` only** (Erin, 2026-10-26: "leave the mp4s as is for now"; optional,
-  both after a run (`--embed`) and as a tidy-style command for films that already have a `.notes.ass`).
+- **Notes inside the film: `embed.py`, `.mkv` only** (optional, both after a run (`--embed`) and as a tidy-style
+  command for films that already have a `.notes.ass`). Erin, 2026-10-26: at first "leave the mp4s as is for now"; then
+  an opt-in `--convert` (and the app's checkbox) that makes the `.mkv` and keeps the `.mp4` in `context-notes/originals/`.
   - ffmpeg stream copy adds the `.ass` as a track titled "Context Notes", language eng, with the `.notes.ass`'s SHA-1
     in a track tag (`CONTEXT_NOTES_SHA1`): that is how it knows a film is current, or needs its track replaced
     (never a second). Off by default (`-default_mode passthrough`, else the muxer flags a lone subtitle track default);
-    `--default` turns it on. MP4 can only take `mov_text`, which loses the styling, so it is skipped, not converted.
+    `--default` turns it on. MP4 can only take `mov_text`, which loses the styling, so without `--convert` it is skipped.
+  - `--convert` (`CONVERT_FROM`): the film is written as `<stem>.mkv` in one pass; kept `mov_text` tracks become
+    `subrip` (`-c:s:N srt`, checked by `verify`). The `.mp4` goes to `context-notes/originals/<name>.mp4` (names are
+    unique per folder); the film's `context-notes/<stem>.mp4` working folder moves to `<stem>.mkv`, so its notes are
+    still found. Refused if a `.mkv` of that name, or the kept `.mp4`, is already there. `--delete-backups` also deletes
+    the kept `.mp4` of a converted film that now has its notes.
   - Never edits the film in place: builds `context-notes/<film>/<stem>.embedding.mkv`, checks it (`verify`: track
     counts and codecs, existing subtitle tracks, chapters, length, size), then `swap_in` moves the original to
     `<stem>.original.mkv` (kept; a later update drops only the earlier embedded version) and renames the new file in,
     restoring the original if that fails. It needs the film's size in free space. `--delete-backups` only deletes
     originals of films that now carry the notes (`action == "current"`), and `--yes` there is the answer, not the default.
-  - Skips: not `.mkv`, no `.notes.ass`, a symlink, or notes from a `--limit` run (`partial_notes`).
-  - Events (`embed-plan`, `embed-video`, `embed-result`, `progress` task `embed`) are in docs/gui-protocol.md. The app's
-    Embed button lists with `--dry-run`, then starts `embed.py --yes` as a job (`App.embed`, `/api/embed`).
+  - Skips: not `.mkv` (unless `--convert` makes it one), no `.notes.ass`, a symlink, or notes from a `--limit` run
+    (`partial_notes`). `film_state()` gives the page one film's action and the look its `.ass` says it was built with.
+  - Events (`embed-plan` with `convert` and `seconds_low`/`seconds_high`, `embed-video`, `embed-result`, `progress` task
+    `embed`, `embed-backup`) and `rebuild-diff` (`context_notes.py --preview-rebuild`) are in docs/gui-protocol.md.
+    The app's Embed button lists with `--dry-run`, then starts `embed.py --yes` as a job (`App.embed`, `/api/embed`).
+    "Change or delete…" uses `App.backups` (`/api/backups`: a dry run lists kept originals, `go` deletes them as a job).
+    The rebuild dialog calls `/api/rebuild-preview` (read-only), and its Go runs `/api/run`, with `--embed` if asked.
+  - Time and space warnings use `READ_MBPS`/`WRITE_MBPS` (measured on this NAS during a scrub, 2026-10-26): a rough
+    range, not a promise. ffprobe answers come from `analyze.ffprobe_json`, cached per file in
+    `~/.config/context-notes/probe-cache/` (keyed on path, size, mtime and the options asked).
 
 ## Known pitfalls
 
@@ -211,6 +265,10 @@ Read `README.md` for the full command reference. This file holds what we've lear
    `make_ass.write_text_safely()` or `make_ass.replacing()`, so Ctrl-C or a GUI's Cancel can't leave half a file.
 9. **Write for Erin.** Plain English in messages and docs, and say what to do next. She runs macOS (Apple
    Silicon, Homebrew, Python 3.14) and works in Terminal. Her friends use the app on macOS, Windows and Linux.
+10. **Update "Where things left off" before a session ends.** Any chat that changes this project rewrites that section
+    in place: what changed, what's uncommitted, what was tested, what's waiting on Erin, and what's next. Replace
+    stale lines rather than adding a log, and keep it short enough to read in a minute. Do this even when the session
+    ends with a question instead of a change.
 
 ## The app (`app.py` and `gui/index.html`)
 
@@ -219,9 +277,16 @@ Read `README.md` for the full command reference. This file holds what we've lear
 - Standard library only. One HTML file, with no external scripts, fonts or images.
 - Security: it listens on 127.0.0.1 only, every request needs the random key, and `Host` and `Origin` are checked.
   The API key never goes to the page; it only shows the last 4 characters. Keep all of this when changing it.
+- Defaults live in `settings.py` (`settings.json`). A new default goes in `BUILT_IN` and `KEYS` (what it allows), and
+  is read in one of three places: `cli_defaults()` (flags left out, via `set_defaults` in `context_notes.py`),
+  `look_defaults()` (`make_ass.py`), or `custom_audience()` (`generate_notes.py`). Never add a key that rewrites,
+  deletes or changes a film's subtitles. Subtitle choices and the look of a film with saved notes stay per film.
 - New options friends should reach go in the page's form, and in `common_args` / `App.run` in `app.py`. Options
   that change how a finished film looks (seconds a word, the background) go in `common_args`, so `--status`
-  reports "Needs a rebuild" for them.
+  reports "Needs a rebuild" for them. Options that only affect new notes (`--audience`, `--effort`) or the run
+  (`--offline`) also go there, but a rebuild ignores them. "Write the notes again" (`redo`) is never remembered.
+- Rebuilds keep a backup of the `.ass` they replace (`keep_old_ass` → `<name>.notes.ass.bak`, `.bak2`, ...). The GUI
+  shows the change first (`rebuild_diff` → `--preview-rebuild`), so keep that list in step with what a build writes.
 - Windows runs natively (Erin, 2026-10-24: friends keep their media on NAS drives, which WSL makes a chore). WSL
   still works, through a small layer: Windows paths, `explorer.exe`, `vlc.exe`, and PowerShell file dialogs.
 - Tests: `tests/test_app.py` (HTTP, whole runs, cancel). To look at the page, run it with `--api-url` pointing at the

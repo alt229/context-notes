@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 app.py - Context Notes in your web browser, on this computer only.
+Created 2026-10-24, modified 2026-10-26.
 
     python3 app.py                   start it and open the page in your browser
     python3 app.py --no-browser      only print the page's address
@@ -37,20 +38,23 @@ HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 import analyze  # noqa: E402  (the video file types)
+import embed  # noqa: E402  (whether a film's notes are inside it)
 import find_subs  # noqa: E402  (where the OpenSubtitles login lives)
 import generate_notes  # noqa: E402  (where the API key lives)
 import languages  # noqa: E402
 import make_ass  # noqa: E402
 import prompts  # noqa: E402
+import settings  # noqa: E402  (this install's defaults, shared with the terminal)
 import usage  # noqa: E402  (what the API calls cost, and the credit left)
 import workfiles  # noqa: E402
 
 PAGE = HERE / "gui" / "index.html"
 QUALITY = {"best": ["--model", "claude-opus-5-5", "--effort", "high"],
            "cheaper": ["--model", "claude-sonnet-5-5", "--effort", "high"]}
+EFFORTS = ("low", "medium", "high", "xhigh", "max")      # context_notes.py --effort
 TEXT_OPTIONS = (("film_language", "--film-language"), ("subs_language", "--subs-language"),
                 ("show_subs", "--show-subs"), ("show", "--show"), ("title", "--title"),
-                ("notes_language", "--notes-language"))
+                ("notes_language", "--notes-language"), ("audience", "--audience"))
 WINDOWS_PATH = re.compile(r"^(?:[a-zA-Z]:[\\/]|\\\\)")
 MAX_BODY = 1 << 20
 
@@ -475,7 +479,22 @@ def common_args(o):
         args.append("--no-refine")
     if o.get("redo"):
         args.append("--redo")
+    if o.get("offline"):
+        args.append("--offline")
     return args
+
+
+def effort_args(o):
+    """--effort from the page's choice ("" keeps the quality preset's)."""
+    effort = str(o.get("effort") or "").strip()
+    if not effort:
+        return []
+    if effort not in EFFORTS:
+        raise BadRequest(f"That doesn't look right: {effort}")
+    return ["--effort", effort]
+
+
+STATUS_TIMEOUT = 3600    # a folder on a NAS can take minutes; the page waits for it in the background (App.start_check)
 
 
 def status(o):
@@ -483,11 +502,25 @@ def status(o):
         args = common_args({**o, "title": None})
     except BadRequest as e:
         return {"error": str(e)}
-    code, lines, events = run_quietly(script("context_notes.py", *args, "--status"), timeout=120)
+    try:
+        code, lines, events = run_quietly(script("context_notes.py", *args, "--status"), timeout=STATUS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return {"error": "Checking this folder took over an hour. Try a smaller folder.", "videos": []}
     videos = [e for e in events if e.get("type") == "status"]
     if code and not videos:
         return {"error": next((ln for ln in reversed(lines) if ln.strip()), "Couldn't read that folder."), "videos": []}
+    for v in videos:
+        if v.get("ass"):                          # a film with notes: are they inside it, and how do they look there
+            v["inside"] = inside_state(v["path"])
     return {"videos": videos, "lines": lines}
+
+
+def inside_state(path):
+    """Whether a film's notes are inside it (embed.film_state), for the page. A film that can't be read says why."""
+    try:
+        return embed.film_state(Path(path))
+    except (OSError, embed.Problem) as e:
+        return {"action": "skip", "reason": f"couldn't check it: {e}", "look": None}
 
 
 class Job:
@@ -580,12 +613,43 @@ class App:
         self.api_url = api_url
         self.job = None
         self.lock = threading.Lock()
+        self.checks = {}                      # status checks running or waiting to be read: id -> result (None: running)
+
+    def start_check(self, o):
+        """Run a folder's status in the background, so the page's request doesn't time out on a slow disk. Returns
+        the id to ask for the result with (GET /api/status?id=...)."""
+        try:
+            common_args({**o, "title": None})     # a bad request is answered at once, not in the background
+        except BadRequest as e:
+            return {"error": str(e)}
+        cid = secrets.token_urlsafe(12)
+        with self.lock:
+            self.checks[cid] = None
+        threading.Thread(target=self._check, args=(cid, o), daemon=True).start()
+        return {"id": cid}
+
+    def _check(self, cid, o):
+        result = status(o)
+        with self.lock:
+            self.checks[cid] = result
+
+    def check_result(self, cid):
+        with self.lock:
+            if cid not in self.checks:
+                return {"error": "That check isn't here any more. Look at the folder again."}
+            result = self.checks[cid]
+            if result is None:
+                return {"pending": True}
+            del self.checks[cid]
+            return result
 
     def info(self):
         return {"system": system(), "home": str(Path.home()), "key": key_info(), "opensubtitles": opensubtitles_info(),
                 "vlc": vlc_info(), "dialogs": dialog_command("file") is not None,
                 "speech": find_subs.have_whisper(), "usage": usage.summary(5),
                 "languages": [{"code": c, "name": n} for c, (n, _) in languages.LANGUAGES.items()],
+                "settings": settings.effective(), "settings_built_in": settings.BUILT_IN,
+                "settings_warnings": settings.warnings(),
                 "running": bool(self.job and self.job.running)}
 
     def run(self, o):
@@ -594,17 +658,52 @@ class App:
                 return 409, {"error": "Something is already running. Wait for it to finish, or cancel it."}
             try:
                 args = common_args(o)
+                effort = effort_args(o)
             except BadRequest as e:
                 return 400, {"error": str(e)}
             args += QUALITY.get(o.get("quality"), QUALITY["best"])
+            args += effort                      # after the preset: argparse keeps the last --effort
             if o.get("frames") == "dense":
                 args += ["--frames", "dense"]
             if o.get("check_alignment"):
                 args.append("--check-alignment")
+            if o.get("embed"):                  # put the new notes inside the .mkv once they're built
+                args.append("--embed")
             if self.api_url:
                 args += ["--api-url", self.api_url]
             self.job = Job(script("context_notes.py", *args))
             return 200, {"ok": True}
+
+    def rebuild_preview(self, o):
+        """What a rebuild would change (context_notes.py --preview-rebuild), for the page to show before it runs.
+        Nothing is written."""
+        with self.lock:
+            if self.job and self.job.running:
+                return 409, {"error": "Something is already running. Wait for it to finish, or cancel it."}
+            try:
+                args = common_args(o)
+            except BadRequest as e:
+                return 400, {"error": str(e)}
+        code, lines, events = run_quietly(script("context_notes.py", *args, "--preview-rebuild"), timeout=600)
+        films = [e for e in events if e.get("type") == "rebuild-diff"]
+        return 200, {"films": films, "ok": code == 0, "lines": lines,
+                     "embedded": any(f.get("embedded") for f in films)}
+
+    def backups(self, o):
+        """Kept originals that could be deleted (embed.py --delete-backups): listed, or with o["go"] deleted as a job.
+        Not while a run is going: it may be using those files."""
+        with self.lock:
+            if self.job and self.job.running:
+                return 409, {"error": "Something is already running. Wait for it to finish, or cancel it."}
+            p = clean_path(o.get("path"))
+            if p is None or not p.exists():
+                return 400, {"error": "Choose a film or a folder first."}
+            args = [p, *(["--recursive"] if o.get("recursive") and p.is_dir() else [])]
+            if o.get("go"):
+                self.job = Job(script("embed.py", *args, "--delete-backups", "--yes"))
+                return 200, {"ok": True}
+            code, lines, events = run_quietly(script("embed.py", *args, "--delete-backups", "--dry-run"), timeout=600)
+        return 200, {"backups": [e for e in events if e.get("type") == "embed-backup"], "ok": code == 0, "lines": lines}
 
     def tidy(self, o):
         """What earlier versions left beside the videos (tidy.py): listed, or with o["move"] moved into their
@@ -632,12 +731,20 @@ class App:
             p = clean_path(o.get("path"))
             if p is None or not p.exists():
                 return 400, {"error": "Choose a film or a folder first."}
-            args = [p, *(["--recursive"] if o.get("recursive") and p.is_dir() else [])]
+            args = [p, *(["--recursive"] if o.get("recursive") and p.is_dir() else []),
+                    *(["--convert"] if o.get("convert") else [])]
             if o.get("go"):
                 self.job = Job(script("embed.py", *args, "--yes", *(["--default"] if o.get("default") else [])))
                 return 200, {"ok": True}
             code, lines, events = run_quietly(script("embed.py", *args, "--dry-run"), timeout=600)
         return 200, {"videos": [e for e in events if e.get("type") == "embed-plan"], "ok": code == 0, "lines": lines}
+
+    def save_settings(self, o):
+        """The Defaults in the Settings page: checked as a whole, then written. A wrong value changes nothing."""
+        try:
+            return 200, {"settings": settings.save(o)}
+        except ValueError as e:
+            return 400, {"error": str(e)}
 
     def set_credit(self, o):
         """The credit left, as the page's Settings gives it (usage.py keeps the estimate from there)."""
@@ -753,6 +860,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, usage.summary(5))
         if url.path == "/api/browse":
             return self._send(200, browse(q.get("path", "")))
+        if url.path == "/api/status":
+            return self._send(200, self.app.check_result(q.get("id", "")))
         if url.path == "/api/job":
             job = self.app.job
             if job is None:
@@ -777,13 +886,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": "That wasn't a JSON object."})
         app, path = self.app, url.path
         if path == "/api/status":
-            return self._send(200, status(o))
+            return self._send(200, app.start_check(o))
         if path == "/api/run":
             return self._send(*app.run(o))
         if path == "/api/tidy":
             return self._send(*app.tidy(o))
         if path == "/api/embed":
             return self._send(*app.embed(o))
+        if path == "/api/rebuild-preview":
+            return self._send(*app.rebuild_preview(o))
+        if path == "/api/backups":
+            return self._send(*app.backups(o))
         if path == "/api/answer":
             ok = bool(app.job and app.job.answer(o.get("answer", "")))
             return self._send(200 if ok else 409, {"ok": ok})
@@ -796,6 +909,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, app.set_key(o.get("key")))
         if path == "/api/key/test":
             return self._send(200, app.test_key())
+        if path == "/api/settings":
+            return self._send(*app.save_settings(o))
+        if path == "/api/settings/reset":
+            return self._send(200, {"settings": settings.reset()})
         if path == "/api/credit":
             return self._send(200, app.set_credit(o))
         if path == "/api/opensubtitles":
