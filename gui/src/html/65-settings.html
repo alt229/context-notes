@@ -1,0 +1,128 @@
+<dialog id="settings" aria-labelledby="settingsTitle">
+  <div class="dhead"><h2 id="settingsTitle">Settings</h2>
+    <button type="button" class="btn quiet" data-close>Close</button></div>
+  <div class="dbody">
+    <section id="claudeSection">
+      <h2>Claude</h2>
+      <p class="hint">Where the notes are written. On your Claude plan (Pro or Max), Claude Code writes them in the
+        background, with no API credits; it needs to be installed and signed in on this computer.</p>
+      <label class="choice"><input type="radio" name="d_route" value="plan">
+        <span>Your Claude plan, through Claude Code<small>No API credits. Uses your plan's 5-hour session, as chatting
+          does.</small></span></label>
+      <label class="choice"><input type="radio" name="d_route" value="api">
+        <span>API credits<small>Billed to your Anthropic account: the key and credit below.</small></span></label>
+      <p id="claudeStatus"></p>
+      <label class="check"><input type="checkbox" id="d_api_fallback"><span>Use API credits when the plan runs out<small>When
+        the plan's 5-hour session is 90% used, its limit is reached, or Claude Code can't be used. Off: you're asked
+        first, and a run nobody is watching stops (what's written is kept, and the next run picks up).</small></span></label>
+      <div class="field" id="d_fallbackField">
+        <span>Up to</span>
+        <div class="inline"><span>$</span><input id="d_api_fallback_usd" type="text" inputmode="decimal" placeholder="5.00"
+          aria-label="The most API credit a run may use, in dollars"><span>a run</span></div>
+        <small>A run is one press of Write the notes: every film and step in it.</small>
+      </div>
+      <div class="row">
+        <button type="button" class="btn primary" id="c_save">Save</button>
+        <button type="button" class="btn" id="claudeCheckBtn">Check Claude Code again</button>
+      </div>
+      <p class="msg" id="c_msg" role="status"></p>
+    </section>
+    <section id="defaultsSection">
+      <h2>Defaults for every run</h2>
+      <p class="hint">The app and the Terminal scripts both start from these. A film that already has notes keeps its own
+        look and audience; these apply to new notes and to new films.</p>
+      <label class="field"><span>Model</span>
+        <select id="d_quality"><option value="best">Best (Claude Opus)</option><option value="cheaper">Cheaper (Claude Sonnet)</option></select></label>
+      <label class="field"><span>Thinking effort</span>
+        <select id="d_effort"><option value="">High (the usual)</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Max</option></select></label>
+      <label class="field"><span>Who the notes are for</span>
+        <input id="d_audience" type="text" placeholder="Empty: each film's built-in default"></label>
+      <label class="field"><span>Write the notes in</span>
+        <input id="d_notes_language" type="text" placeholder="English"></label>
+      <label class="field"><span>Seconds a word</span>
+        <input id="d_spw" type="text" inputmode="decimal" placeholder="Empty: 0.4 (each film's own)"></label>
+      <label class="field"><span>Box behind the notes</span>
+        <select id="d_background"><option value="see-through">See-through box</option><option value="dark">Dark box (before 0.2.0)</option><option value="none">No box, outlined text</option></select></label>
+      <label class="field"><span>How solid the see-through box is (%)</span>
+        <input id="d_opacity" type="text" inputmode="numeric" placeholder="30"></label>
+      <label class="check"><input type="checkbox" id="d_frames"><span>Look at more frames<small>Catches more sight gags; costs several times more.</small></span></label>
+      <label class="check"><input type="checkbox" id="d_check_alignment"><span>Check every note's timing against the speech<small>Slow the first time; free.</small></span></label>
+      <label class="check"><input type="checkbox" id="d_offline"><span>Don't search online for subtitles<small>Subtitles are looked for inside the video only.</small></span></label>
+      <label class="check"><input type="checkbox" id="d_recursive"><span>Include subfolders</span></label>
+      <label class="check"><input type="checkbox" id="d_remember_start"><span>Remember starting folder<small>The folder you choose opens next time. Off: the app opens empty and doesn't record folders.</small></span></label>
+      <p class="hint">Starting folder: <span id="d_start_folder"></span></p>
+      <label class="check"><input type="checkbox" id="d_autosend"><span>Send automatically 10 seconds after showing the cost<small>Untick to be asked each time instead. With this on, the notes go to Claude after 10 seconds unless you press Don't send (on API credits, they're billed to your account). You always see the cost first. It never answers the question about moving to API credits.</small></span></label>
+      <div class="row">
+        <button type="button" class="btn primary" id="d_save">Save defaults</button>
+        <button type="button" class="btn" id="d_reset">Reset to built-in</button>
+      </div>
+      <p class="msg" id="d_msg" role="status"></p>
+    </section>
+    <section>
+      <h2>Anthropic API key</h2>
+      <p id="keyStatus"></p>
+      <label class="field local-only"><span>Paste a new key</span>
+        <input id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
+      <p class="hint remote-only">To save or change the key, use a browser on the computer running the app: from here it
+        would cross your network unencrypted.</p>
+      <div class="row">
+        <button type="button" class="btn primary local-only" id="saveKeyBtn">Save the key</button>
+        <button type="button" class="btn" id="testKeyBtn">Check the key</button>
+      </div>
+      <p class="msg" id="keyMsg" role="status"></p>
+      <p class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a>.
+        API use is billed to your Anthropic account, separately from a Claude subscription.</p>
+    </section>
+    <section id="creditSection">
+      <h2>API credit</h2>
+      <p id="creditStatus"></p>
+      <label class="field"><span>Credit left, from Billing in the Anthropic console ($)</span>
+        <input id="creditInput" type="text" inputmode="decimal" autocomplete="off" placeholder="25.00"></label>
+      <label class="field"><span>Warn me when it drops below ($)</span>
+        <input id="lowInput" type="text" inputmode="decimal" autocomplete="off" placeholder="2.00 (leave empty to keep it)"></label>
+      <button type="button" class="btn primary" id="saveCreditBtn">Save</button>
+      <p class="msg" id="creditMsg" role="status"></p>
+      <p class="hint">Anthropic doesn't let programs ask for your balance. So this counts down from the figure you give,
+        as notes are written, and it's an estimate: it leaves out anything else spent on the same account. Type the console's
+        figure in again after you add credit.</p>
+    </section>
+    <section id="weekSection">
+      <h2>This week</h2>
+      <ul id="weekList" class="weeklist"></ul>
+      <p class="hint">The plan figures come from Claude Code: its status line while it's open here, and every request this
+        app sends on your plan. They cover everything on your plan (chat as well). Click the Plan meter at the top for a
+        fresh reading (one tiny request, no API credits). Sessions used elsewhere are in the percentages but not in the count.</p>
+    </section>
+    <section>
+      <h2>OpenSubtitles.com</h2>
+      <p>Optional. Used to find subtitles for videos that have none. You need a free account and an API key from
+        <a href="https://www.opensubtitles.com/consumers" target="_blank" rel="noreferrer noopener">opensubtitles.com/consumers</a>.</p>
+      <p id="osStatus"></p>
+      <div class="local-only">
+        <label class="field"><span>API key</span><input id="osKey" type="password" autocomplete="off"></label>
+        <label class="field"><span>Username</span><input id="osUser" type="text" autocomplete="off"></label>
+        <label class="field"><span>Password</span><input id="osPass" type="password" autocomplete="off"></label>
+        <button type="button" class="btn" id="saveOsBtn">Save and test the login</button>
+      </div>
+      <p class="hint remote-only">To save the login, use a browser on the computer running the app: from here the
+        password would cross your network unencrypted.</p>
+      <p class="msg" id="osMsg" role="status"></p>
+    </section>
+    <section>
+      <h2>VLC extension</h2>
+      <p>Loads the notes when you play a video in VLC, with a checkbox for each kind of note.</p>
+      <p id="vlcStatus"></p>
+      <button type="button" class="btn local-only" id="installVlcBtn">Install the VLC extension</button>
+      <p class="msg" id="vlcMsg" role="status"></p>
+      <p class="hint">For the computer you watch on: <a id="vlcDownload" download="context_notes.lua">download the
+        extension</a> and put it in VLC's extensions folder there, then restart VLC. On a Mac:
+        <code>~/Library/Application Support/org.videolan.vlc/lua/extensions/</code>. On Windows:
+        <code>%APPDATA%\vlc\lua\extensions\</code>. On Linux: <code>~/.local/share/vlc/lua/extensions/</code>.</p>
+    </section>
+    <section>
+      <h2>This computer</h2>
+      <p id="aboutText"></p>
+    </section>
+  </div>
+</dialog>
+

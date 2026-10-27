@@ -1,0 +1,16 @@
+<dialog id="rebuild" aria-labelledby="rebuildTitle">
+  <div class="dhead"><h2 id="rebuildTitle">Rebuild the subtitles</h2>
+    <button type="button" class="btn quiet" data-close>Close</button></div>
+  <div class="dbody">
+    <p id="rebuildIntro"></p>
+    <div id="rebuildDiffs"></div>
+    <label class="check" id="rebuildEmbedRow" hidden><input type="checkbox" id="rebuildEmbed">
+      <span>Then put the new notes inside the .mkv<small>The whole film is read and written again (minutes on a NAS), and its Context Notes track is replaced. Its original stays as it is.</small></span></label>
+    <p class="msg" id="rebuildMsg" role="status"></p>
+  </div>
+  <div class="dfoot">
+    <button type="button" class="btn" id="rebuildNo">Not now</button>
+    <button type="button" class="btn primary" id="rebuildGo" disabled>Rebuild (free)</button>
+  </div>
+</dialog>
+

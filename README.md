@@ -35,7 +35,7 @@ Notes appear as small boxed overlays while you watch, in VLC (or any player that
 
 | File | What it does |
 |---|---|
-| `app.py` | The same workflow in your web browser, for anyone who'd rather not use Terminal: `python3 app.py`. The page is in `gui/`. |
+| `app.py` | The same workflow in your web browser, for anyone who'd rather not use Terminal: `python3 app.py`. The page is kept in parts in `gui/src` (see `gui/README.md`), joined on each request. |
 | `context_notes.py` | **Start here** in Terminal. Runs the whole workflow for one video or a folder: finds the subtitles, checks sync (offers `--align` if needed), `--generate`, `--refine`, builds the `.ass`. Skips steps already done. |
 | `analyze.py` | Prepares an episode: numbered transcript, pulls embedded subtitles out of an MP4/MKV, checks whether an SRT matches the video, finds loud moments with no dialogue, builds contact sheets, optionally re-aligns subtitles. |
 | `make_ass.py` | Merges an SRT and a notes file into one `.ass`. Also the front door for `--generate` and `--refine`. |
@@ -193,6 +193,17 @@ python3 app.py
 Keep the Terminal window open while you use it; Ctrl-C there stops it. It runs the same scripts described below, so
 anything it does you can also do by hand. Only your computer can reach it: it listens on 127.0.0.1, and the page's
 address (printed when it starts) carries a random key.
+
+**From your phone or another computer at home:** `python3 app.py --hosted`. It then answers devices on your own
+network (private addresses only: home Wi-Fi, Tailscale and the like; `--allow 10.8.0.0/24` adds a range such as a
+WireGuard subnet), on a fixed port (8229) with a key that's kept between starts, so a bookmark keeps working
+(`--new-key` makes a new one). It prints the address to use from another device. From there you can choose films
+(with "Browse here"), write notes, rebuild, embed and tidy, and change Settings. Opening a film in VLC, Show in
+folder, the file dialogs, installing the VLC extension, deleting kept originals and saving the API key or the
+OpenSubtitles login only work in a browser on the computer running the app (they would act on that computer's
+desktop, can't be undone, or would send a key across your network unencrypted). Settings offers the VLC extension as
+a download for the computer you watch on. `--public` is only for a server behind your own HTTPS proxy: it answers
+any address, and the key is all that guards it.
 
 On Windows, run it in PowerShell (see [Windows](#windows)); network drives such as `Y:\Movies` and `\\nas\Movies`
 work as they are. It also runs inside WSL, but there a network drive has to be mounted first
@@ -446,6 +457,10 @@ This folder is also a Claude Code project. Run `claude` in it and:
   note-writer agent (Opus) takes the film one part at a time; the result goes through `chat_notes.py collect`, then
   the `.ass` is built and checked for repeats and timing. (`context_notes.py` and the app also use your plan by
   default, through Claude Code in the background; `/notes` is for watching it work part by part.)
+- `/refine "<film>.mkv"`: the frames step the same way, one stretch of the video at a time. A frame-reviewer agent
+  (Opus) opens each contact sheet, adds notes about what's on screen and fixes the dialogue notes the frames show to
+  be wrong; `chat_notes.py collect-frames` then applies its replies exactly as `--refine` would (backups, a report of
+  every change, and it picks up where it stopped). Handy for trying settings on a show as you go.
 - `/check "<film>.mkv"`: subtitles found and synced, every note's timing checked, fixes offered.
 
 `CLAUDE.md` holds what the project has learned so far (benchmark results, defaults, pitfalls). The agents are in

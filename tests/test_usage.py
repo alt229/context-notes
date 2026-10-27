@@ -10,6 +10,7 @@ from test_app import call, server  # noqa: F401  (the app fixture)
 from test_generate_notes import notes_for_each_part
 from test_progress_and_cancel import LONG
 
+import app
 import generate_notes as gn
 import prompts
 import usage
@@ -395,7 +396,7 @@ def test_the_app_reports_usage_and_takes_a_balance(server, usage_dir):      # no
 
 
 def test_the_page_has_what_the_app_fills_in():
-    page = (ROOT / "gui" / "index.html").read_text(encoding="utf-8")
+    page = app.page()
     for needle in ('id="apiMeter"', 'id="sessionMeter"', 'id="creditInput"', 'id="saveCreditBtn"', 'id="weekList"',
                    '"/api/usage"', '"/api/credit"', 'ev.type === "usage"', "creditText("):
         assert needle in page, needle
@@ -547,7 +548,7 @@ def test_the_pages_script_only_uses_what_the_page_has():
     """Cheap checks a browser would make on load: every $("id") is an element of the page, and every handler given by
     name is defined. (A handler left behind once stopped the whole script, so the page never loaded.)"""
     import re
-    page = (ROOT / "gui" / "index.html").read_text(encoding="utf-8")
+    page = app.page()
     script = page[page.index("<script>"):]
     markup = page[:page.index("<script>")]
     ids = set(re.findall(r'\bid="([^"]+)"', markup)) | set(re.findall(r'\bid: "([^"]+)"', script))

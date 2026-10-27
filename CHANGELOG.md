@@ -7,6 +7,17 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- `app.py --hosted`: use the app from a phone or another computer on your network. It answers private addresses only
+  (`--allow` adds a range), on port 8229 with a key kept between starts, and prints the address to use. Opening films
+  in VLC, Show in folder, the file dialogs, installing the VLC extension, deleting kept originals and saving the API
+  key or OpenSubtitles login stay on the computer running it (hidden elsewhere, and refused if asked for); the VLC
+  extension can be downloaded from Settings instead. `--public` is for a server behind your own HTTPS proxy.
+- `/refine` in Claude Code: the frames step on your plan, one stretch of the video at a time, by a frame-reviewer agent
+  that opens each contact sheet itself. `chat_notes.py show-frames --part 0` begins (it analyses the video and keeps
+  the notes as they are), `--part K` prints stretch K exactly as the API's frames step would send it (with the
+  replies for the earlier parts applied), and `collect-frames` applies the replies the same way `--refine` does: the
+  same notes for the same replies, a backup, a report of every change, and where it stopped, so `/refine` or
+  `--refine` picks up there. A reply that isn't the JSON asked for is recorded and the rest applied.
 - Notes written on your Claude plan by default, with no API credits. With a Pro or Max plan and Claude Code installed
   and signed in, `--generate` and `--refine` (and so `context_notes.py` and the app) send each part through Claude
   Code in the background (`claude -p`, in `claude_code.py`). It never sees the API key, the dialogue step gets no tools,
@@ -133,6 +144,9 @@ All notable changes to this project are recorded here. The format follows
   (`/notes`, `/check`).
 
 ### Changed
+- The app's page is kept in parts in `gui/src` (the frame, styles, one HTML file per dialog, scripts by section), which
+  `app.py` joins each time the page is asked for: one copy, nothing to rebuild, and the browser gets the same page,
+  byte for byte. `gui/index.html` is gone; see `gui/README.md`.
 - The code is split into modules, so each job lives in one place: `claude_api.py` (the API key, requests and prices),
   `sending.py` (the estimate, the question and the part-by-part loop that `--generate` and `--refine` share),
   `cli_common.py` (the options `context_notes.py` and `make_ass.py` share), `fileio.py`, `subtitles.py` and

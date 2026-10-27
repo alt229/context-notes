@@ -1,0 +1,28 @@
+/* ---------- dialogs ---------- */
+dialog { width: min(660px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); color: var(--ink); }
+dialog::backdrop { background: rgba(10, 14, 20, .5); }
+.dhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px;
+  border-bottom: 1px solid var(--line); }
+.dhead h2 { margin: 0; }
+.dbody { padding: 6px 16px 18px; max-height: min(72vh, 720px); overflow: auto; }
+.dbody section { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.dbody section:last-child { border-bottom: 0; }
+.dbody p { margin: 4px 0 10px; max-width: 64ch; }
+.dbody .field input { width: 100%; }
+.msg { font-size: 14px; margin: 8px 0 0; white-space: pre-line; }
+.msg.ok { color: var(--ready); }
+.msg.bad { color: var(--problem); }
+.places { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.places .btn { font-size: 14px; padding: 4px 10px; }
+.where { font-size: 14px; color: var(--muted); overflow-wrap: anywhere; margin: 4px 0 8px; }
+ul.entries { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+ul.entries li { border-bottom: 1px solid var(--line); }
+ul.entries button { display: block; width: 100%; text-align: left; padding: 8px 4px; background: none; border: 0;
+  cursor: pointer; overflow-wrap: anywhere; }
+ul.entries button:hover { background: var(--bg); }
+ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
+.dfoot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
+.tidyvideo { margin: 8px 0 2px; font-weight: 600; overflow-wrap: anywhere; }
+.tidyfiles { margin: 0 0 8px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+

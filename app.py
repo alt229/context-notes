@@ -1,21 +1,36 @@
 #!/usr/bin/env python3
 """
-app.py - Context Notes in your web browser, on this computer only.
-Created 2026-10-24, modified 2026-10-26.
+app.py - Context Notes in your web browser.
+Created 2026-10-24, modified 2026-10-27.
 
-    python3 app.py                   start it and open the page in your browser
+    python3 app.py                   start it and open the page in your browser (this computer only)
     python3 app.py --no-browser      only print the page's address
     python3 app.py --port 8765       use this port (default: any free one)
+    python3 app.py --hosted          also from a phone or another computer on your network (see below)
 
 The page runs the same scripts as Terminal (context_notes.py and the rest, as described in docs/gui-protocol.md). It
 asks the same questions and shows the same cost estimate before anything is sent. Press Ctrl-C here to stop it.
 
-Only this computer can reach it: it listens on 127.0.0.1, and every request must carry the random key in the address
-it prints. Standard library only.
+Who can reach it:
+- By default only this computer: it listens on 127.0.0.1, and every request must carry the random key in the address
+  it prints (a new one each start).
+- --hosted: devices on your own network too. It listens on every network address of this computer but answers only
+  private ones: 127/8, 10/8, 172.16/12, 192.168/16, 100.64/10 (Tailscale), 169.254/16, ::1, fc00::/7 and fe80::/10
+  (--allow 203.0.113.0/24 adds a range, a WireGuard subnet say). The port is fixed (8229 unless --port) and the key is
+  kept (~/.config/context-notes/app-key, readable only by you), so a bookmark on a phone keeps working; --new-key
+  makes a new one. It prints the addresses to use. Opening a film in VLC, Show in folder, the file dialogs, installing
+  the VLC extension, deleting kept originals and saving the API key or the OpenSubtitles login only work from a
+  browser on this computer; elsewhere they're hidden, and refused if asked for. The VLC extension can be downloaded
+  instead.
+- --public (for a server behind your own HTTPS proxy, never a laptop): any address may connect; the key is all that
+  guards it.
+The page's key is always needed, and the Host and Origin headers are checked against DNS rebinding. Standard library
+only.
 """
 import argparse
 import base64
 import hmac
+import ipaddress
 import json
 import os
 import platform
@@ -23,6 +38,7 @@ import re
 import secrets
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -51,7 +67,9 @@ import settings  # noqa: E402  (this install's defaults, shared with the termina
 import usage  # noqa: E402  (what the API calls cost, and the credit left)
 import workfiles  # noqa: E402
 
-PAGE = HERE / "gui" / "index.html"
+PAGE_SRC = HERE / "gui" / "src"                 # the page, in parts: joined on each request (page())
+PAGE_PARTS = (("/* include: styles/ */\n", "styles", ".css"), ("<!-- include: html/ -->\n", "html", ".html"),
+              ("// include: js/\n", "js", ".js"))
 QUALITY = {"best": ["--model", "claude-opus-5-5", "--effort", "high"],
            "cheaper": ["--model", "claude-sonnet-5-5", "--effort", "high"]}
 EFFORTS = ("low", "medium", "high", "xhigh", "max")      # context_notes.py --effort
@@ -627,8 +645,8 @@ class Job:
 
 
 class App:
-    def __init__(self, api_url=None):
-        self.token = secrets.token_urlsafe(24)
+    def __init__(self, api_url=None, token=None):
+        self.token = token or secrets.token_urlsafe(24)
         self.api_url = api_url
         self.job = None
         self.lock = threading.Lock()
@@ -662,8 +680,9 @@ class App:
             del self.checks[cid]
             return result
 
-    def info(self):
-        return {"system": system(), "home": str(Path.home()), "key": key_info(), "opensubtitles": opensubtitles_info(),
+    def info(self, local=True, mode="local"):
+        return {"local": local, "mode": mode,         # local: the browser is on this computer (see LOCAL_ONLY)
+                "system": system(), "home": str(Path.home()), "key": key_info(), "opensubtitles": opensubtitles_info(),
                 "vlc": vlc_info(), "dialogs": dialog_command("file") is not None,
                 "speech": find_subs.have_whisper(), "usage": usage.summary(5),
                 "languages": [{"code": c, "name": n} for c, (n, _) in languages.LANGUAGES.items()],
@@ -849,17 +868,32 @@ class Handler(BaseHTTPRequestHandler):
     def app(self):
         return self.server.app
 
+    @property
+    def access(self):
+        return getattr(self.server, "access", None) or Access()
+
     def _hosts(self):
         port = self.server.server_address[1]
         return {f"127.0.0.1:{port}", f"localhost:{port}"}
 
     def _allowed(self):
-        """Only this computer, only this page: guards against other web pages and DNS rebinding."""
-        hosts = self._hosts()
-        if self.headers.get("Host") not in hosts:
+        """Only addresses this mode allows, and only this page: guards against other web pages and DNS rebinding."""
+        access, host = self.access, self.headers.get("Host") or ""
+        if not access.client_ok(self.client_address[0]):
+            return False
+        if access.mode == "local":
+            if host not in self._hosts():
+                return False
+        elif not access.host_ok(host, self.server.server_address[1]):
             return False
         origin = self.headers.get("Origin")
-        return origin is None or origin in {f"http://{h}" for h in hosts}
+        schemes = ("http", "https") if access.mode == "public" else ("http",)
+        return origin is None or origin in {f"{s}://{host}" for s in schemes}
+
+    @property
+    def local(self):
+        """The request comes from this computer's own browser."""
+        return Access.loopback(self.client_address[0])
 
     def _key_ok(self, given):
         return hmac.compare_digest(str(given or ""), self.app.token)
@@ -880,7 +914,7 @@ class Handler(BaseHTTPRequestHandler):
     def _page(self):
         csp = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; "
                "img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-        self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8", {"Content-Security-Policy": csp})
+        self._send(200, page().encode("utf-8"), "text/html; charset=utf-8", {"Content-Security-Policy": csp})
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -891,13 +925,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(403, "This page needs the address app.py printed when it started (it ends in ?k=...).",
                                   "text/plain; charset=utf-8")
             return self._page()
+        if url.path == "/api/vlc/extension":             # a link to click: the key comes in the address
+            if not self._key_ok(parse_qs(url.query).get("k", [""])[0]):
+                return self._send(403, {"error": "Not allowed."})
+            return self._send(200, (HERE / "vlc" / "context_notes.lua").read_bytes(), "text/plain; charset=utf-8",
+                              {"Content-Disposition": 'attachment; filename="context_notes.lua"'})
         if not url.path.startswith("/api/"):
             return self._send(404, {"error": "Not found."})
         if not self._key_ok(self.headers.get("X-Key")):
             return self._send(403, {"error": "Not allowed."})
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         if url.path == "/api/info":
-            return self._send(200, self.app.info())
+            return self._send(200, self.app.info(local=self.local, mode=self.access.mode))
         if url.path == "/api/usage":
             return self._send(200, usage.summary(5))
         if url.path == "/api/browse":
@@ -927,6 +966,9 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(o, dict):
             return self._send(400, {"error": "That wasn't a JSON object."})
         app, path = self.app, url.path
+        if not self.local and (path in LOCAL_ONLY or (path == "/api/backups" and o.get("go"))):
+            return self._send(403, {"error": LOCAL_ONLY.get(path, "Deleting kept originals") + " only works in a "
+                                    "browser on the computer running the app."})
         if path == "/api/status":
             return self._send(200, app.start_check(o))
         if path == "/api/run":
@@ -980,11 +1022,175 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "Not found."})
 
 
-def make_server(port=0, api_url=None):
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+# What only a browser on this computer may do (--hosted, --public): it acts on this computer's desktop, deletes
+# for good, or would send a key or password across the network unencrypted.
+LOCAL_ONLY = {"/api/pick": "Choosing with the file dialog", "/api/vlc/open": "Opening a film in VLC",
+              "/api/reveal": "Show in folder", "/api/vlc/install": "Installing the VLC extension",
+              "/api/key": "Saving the API key", "/api/opensubtitles": "Saving the OpenSubtitles login"}
+PRIVATE = ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16",
+           "::1/128", "fc00::/7", "fe80::/10")
+HOSTED_PORT = 8229
+
+
+class Access:
+    """Who may use the app. "local" (the default): this computer only. "hosted": private addresses (PRIVATE) and any
+    --allow ranges. "public": any address (a server behind your own proxy); the key is what guards it."""
+
+    def __init__(self, mode="local", allow=()):
+        self.mode = mode
+        self.nets = [ipaddress.ip_network(n, strict=False) for n in (*PRIVATE, *allow)]
+
+    @staticmethod
+    def address(text):
+        """An IP address from a client address or a Host header's host part (IPv4 inside IPv6 unwrapped, a zone
+        like %en0 left off), or None."""
+        try:
+            ip = ipaddress.ip_address(str(text).strip("[]").split("%")[0])
+        except ValueError:
+            return None
+        return ip.ipv4_mapped if ip.version == 6 and ip.ipv4_mapped else ip
+
+    @classmethod
+    def loopback(cls, client):
+        ip = cls.address(client)
+        return bool(ip and ip.is_loopback)
+
+    def client_ok(self, client):
+        if self.mode == "public":
+            return True
+        ip = self.address(client)
+        if ip is None:
+            return False
+        if self.mode == "local":
+            return ip.is_loopback
+        return any(ip in n for n in self.nets if n.version == ip.version)
+
+    def host_ok(self, host, port):
+        """The Host header: an IP address, or this computer's own name, with our port. A made-up name pointing here
+        (DNS rebinding) is refused. With --public, any name (the proxy's)."""
+        if self.mode == "public":
+            return bool(host)
+        name, _, given = host.rpartition(":") if not host.endswith("]") else (host, "", "")
+        if given != str(port):
+            return False
+        return self.address(name) is not None or name.lower() in own_names()
+
+
+def own_names():
+    names = {"localhost"}
+    for n in (socket.gethostname(), socket.getfqdn()):
+        n = (n or "").lower().rstrip(".")
+        if n:
+            names.add(n)
+            short = n.split(".")[0]
+            names.update({short, short + ".local"})
+    return names
+
+
+def lan_addresses():
+    """This computer's addresses on its networks (for the printed links): the one it uses to reach the network,
+    and any others its name points at, private ones only."""
+    found = []
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))                # nothing is sent: it only picks the route
+            found.append(s.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        found += socket.gethostbyname_ex(socket.gethostname())[2]
+    except OSError:
+        pass
+    access = Access("hosted")
+    return [a for i, a in enumerate(found) if a not in found[:i] and not Access.loopback(a) and access.client_ok(a)]
+
+
+class DualStackServer(ThreadingHTTPServer):
+    """IPv6 and IPv4 on one socket ("::"), so a phone can use either."""
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        try:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        except (OSError, AttributeError):
+            pass
+        super().server_bind()
+
+
+def make_server(port=0, api_url=None, mode="local", allow=(), token=None):
+    if mode == "local":
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    else:
+        try:
+            server = DualStackServer(("::", port), Handler)
+        except OSError:                                    # no IPv6 here: every IPv4 address, then
+            server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     server.daemon_threads = True
-    server.app = App(api_url)
+    server.access = Access(mode, allow)
+    server.app = App(api_url, token)
     return server
+
+
+def app_key(new=False):
+    """The page's key for --hosted and --public, kept so bookmarks keep working: ~/.config/context-notes/app-key,
+    readable only by you. A new one with new=True (--new-key)."""
+    path = fileio.config_dir() / "app-key"
+    if not new:
+        try:
+            key = path.read_text(encoding="utf-8").strip()
+            if len(key) >= 20:
+                os.chmod(path, 0o600)
+                return key
+        except OSError:
+            pass
+    key = secrets.token_urlsafe(24)
+    workfiles.make_dirs(path.parent)
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(key + "\n")
+    os.replace(tmp, path)
+    return key
+
+
+def page():
+    """The app's page, joined from gui/src each time it's asked for: page.html with the files of styles/, html/ and
+    js/ put in where it says, each folder's files in name order (their numbers fix the order). So there's one copy
+    of everything, nothing to rebuild after an edit (reload the page), and the browser still gets one self-contained
+    page."""
+    text = (PAGE_SRC / "page.html").read_text(encoding="utf-8")
+    for marker, folder, suffix in PAGE_PARTS:
+        if marker not in text:
+            raise ValueError(f"gui/src/page.html has lost its line {marker.strip()}")
+        files = sorted((PAGE_SRC / folder).glob("*" + suffix), key=lambda p: p.name)
+        text = text.replace(marker, "".join(p.read_text(encoding="utf-8") for p in files), 1)
+    return text
+
+
+def network_arg(text):
+    try:
+        return str(ipaddress.ip_network(text, strict=False))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} isn't an address range, like 10.8.0.0/24") from None
+
+
+def hosted_message(server, url, mode):
+    """What --hosted and --public print at the start: the addresses to use, and what only works on this computer."""
+    port, key = server.server_address[1], server.app.token
+    names = sorted({n for n in own_names() if n.endswith(".local")})
+    others = [f"http://{a}:{port}/?k={key}" for a in lan_addresses()]
+    others += [f"http://{n}:{port}/?k={key}" for n in names[:1]]
+    who = "any address (--public)" if mode == "public" else "this computer and the other devices on your network"
+    lines = [f"Context Notes is running, for {who}.", "", f"  On this computer:    {url}"]
+    lines += [f"  From another device: {u}" for u in others] or ["  (Couldn't work out this computer's address.)"]
+    lines += ["", "Anyone with this address can use it" + (" from your network" if mode == "hosted" else "")
+              + ", so keep it to yourself. --new-key makes a new key (bookmarks then need the new address).",
+              "Opening films in VLC, Show in folder, the file dialogs, installing the VLC extension, deleting kept "
+              "originals and saving the API key or the OpenSubtitles login only work in a browser on this computer.",
+              "Keep this window open while you use it. Press Ctrl-C here to stop."]
+    if mode == "public":
+        lines.insert(0, "! --public answers every address: use it only on a server behind your own HTTPS proxy.")
+    return "\n".join(lines)
 
 
 def address(server):
@@ -994,20 +1200,37 @@ def address(server):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--port", type=int, default=0, help="port to listen on (default: any free one)")
+    ap.add_argument("--port", type=int, default=None,
+                    help=f"port to listen on (default: any free one; {HOSTED_PORT} with --hosted or --public)")
     ap.add_argument("--no-browser", action="store_true", help="don't open the page; just print its address")
+    ap.add_argument("--hosted", action="store_true",
+                    help="also answer devices on your own network (private addresses only), with a fixed port and a "
+                         "kept key, so a phone's bookmark keeps working")
+    ap.add_argument("--allow", action="append", default=[], metavar="CIDR", type=network_arg,
+                    help="with --hosted: also answer this range, e.g. a WireGuard subnet (can be given more than once)")
+    ap.add_argument("--public", action="store_true",
+                    help="for a server behind your own HTTPS proxy only: answer any address (the key is the only guard)")
+    ap.add_argument("--new-key", action="store_true", help="with --hosted or --public: make a new key (old links stop "
+                                                          "working)")
     ap.add_argument("--api-url", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
-    if not PAGE.exists():
-        sys.exit(f"Can't find the page {PAGE}. Is the gui folder next to app.py?")
+    mode = "public" if a.public else "hosted" if a.hosted else "local"
+    if mode == "local" and (a.allow or a.new_key):
+        ap.error("--allow and --new-key go with --hosted (or --public)")
+    if not (PAGE_SRC / "page.html").exists():
+        sys.exit(f"Can't find the page in {PAGE_SRC}. Is the gui folder next to app.py?")
+    port = a.port if a.port is not None else (0 if mode == "local" else HOSTED_PORT)
     try:
-        server = make_server(a.port, a.api_url)
+        server = make_server(port, a.api_url, mode, a.allow, app_key(a.new_key) if mode != "local" else None)
     except OSError as e:
-        sys.exit(f"Couldn't start on port {a.port}: {e.strerror or e}. Try another with --port, or leave it out.")
+        sys.exit(f"Couldn't start on port {port}: {e.strerror or e}. Is it already running? Try another with --port.")
     url = address(server)
     threading.Thread(target=claude_code.status, daemon=True).start()     # ready by the time the page asks
-    print(f"Context Notes is running. Open this address in your browser if it doesn't open by itself:\n\n  {url}\n\n"
-          "Keep this window open while you use it. Press Ctrl-C here to stop.", flush=True)
+    if mode == "local":
+        print(f"Context Notes is running. Open this address in your browser if it doesn't open by itself:\n\n  {url}\n\n"
+              "Keep this window open while you use it. Press Ctrl-C here to stop.", flush=True)
+    else:
+        print(hosted_message(server, url, mode), flush=True)
     if not a.no_browser:
         open_browser(url)
     try:

@@ -1,0 +1,22 @@
+<dialog id="danger" aria-labelledby="dangerTitle">
+  <div class="dhead"><h2 id="dangerTitle">Change or delete</h2>
+    <button type="button" class="btn quiet" data-close>Close</button></div>
+  <div class="dbody">
+    <section class="dsection">
+      <h3>Delete kept originals</h3>
+      <p id="backupsIntro"></p>
+      <ul class="entries" id="backupsList"></ul>
+      <p class="msg" id="backupsMsg" role="status"></p>
+      <p class="hint remote-only">Deleting them can't be undone, so it only works in a browser on the computer running
+        the app.</p>
+      <div class="dfoot local-only"><button type="button" class="btn danger" id="backupsGo" hidden>Delete them</button></div>
+    </section>
+    <section class="dsection">
+      <h3>Write the notes again</h3>
+      <p id="redoIntro"></p>
+      <ul class="entries" id="redoList"></ul>
+      <div class="dfoot"><button type="button" class="btn danger" id="redoGo">Write them again</button></div>
+    </section>
+  </div>
+</dialog>
+

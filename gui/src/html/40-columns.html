@@ -1,0 +1,90 @@
+  <div class="columns">
+    <section>
+      <h2>Videos</h2>
+      <ul class="videos" id="videoList"></ul>
+      <p class="empty" id="videosEmpty">Choose a film or a folder, and its videos show up here with what's already done.</p>
+    </section>
+
+    <section>
+      <h2>How to write the notes</h2>
+      <fieldset id="optionsSet">
+        <fieldset>
+          <legend>Quality</legend>
+          <label class="choice"><input type="radio" name="quality" value="best" checked>
+            <span>Best notes<small>Claude Opus. Most accurate, especially on history and culture.</small></span></label>
+          <label class="choice"><input type="radio" name="quality" value="cheaper">
+            <span>Cheaper<small>Claude Sonnet. Good for series; a few more mistakes.</small></span></label>
+        </fieldset>
+        <div class="field" id="fallbackRun">
+          <label class="check"><input type="checkbox" id="api_fallback"><span>Use API credits if the plan runs
+            out<small>This run only; the usual choice is in Settings.</small></span></label>
+          <div class="inline"><span>up to $</span><input id="api_fallback_usd" type="text" inputmode="decimal"
+            placeholder="5.00" aria-label="The most API credit this run may use, in dollars"></div>
+        </div>
+        <label class="field"><span>The film's language</span>
+          <select id="film_language"><option value="">Work it out from the video</option></select></label>
+        <label class="check spaced"><input type="checkbox" id="refine" checked>
+          <span>Also look at the video's frames<small>Adds notes about what's on screen. Costs more.</small></span></label>
+        <div class="field">
+          <span>How much of it</span>
+          <div class="inline"><label for="limit">Only the first</label><input id="limit" type="text" inputmode="decimal"
+            placeholder="all"><span>minutes</span></div>
+          <small>Leave it empty for the whole thing. Try 5 to test cheaply.</small>
+        </div>
+        <fieldset>
+          <legend>On screen</legend>
+          <div class="field">
+            <span>How long notes stay up</span>
+            <div class="inline"><input id="spw" type="text" inputmode="decimal" placeholder="0.4"
+              aria-label="Seconds a word"><span>seconds a word</span></div>
+            <small>Plus 2 seconds to notice each note, kept between 6 and 24 seconds. Empty keeps each film's own
+              (0.4 unless you changed it). Changing it later is free: only the subtitle file is rebuilt.</small>
+          </div>
+          <label class="field"><span>Behind the notes</span>
+            <select id="note_background">
+              <option value="see-through">A see-through box</option>
+              <option value="dark">A dark box (as before)</option>
+              <option value="none">No box: outlined text</option>
+            </select></label>
+          <div class="field" id="opacityField">
+            <span>How solid the box is</span>
+            <div class="inline"><input id="opacity" type="text" inputmode="decimal" placeholder="30"
+              aria-label="How solid the box is, in percent"><span>%</span></div>
+            <small>0 is invisible, 100 is solid. Empty keeps each film's own (30% unless you changed it).</small>
+          </div>
+        </fieldset>
+        <details class="more">
+          <summary>More options</summary>
+          <label class="field"><span>Subtitles the notes are written from</span>
+            <select id="subs_language"><option value="">The film's own language</option></select></label>
+          <label class="field"><span>Subtitles shown at the bottom</span>
+            <select id="show_subs"><option value="">The same ones</option></select></label>
+          <label class="field"><span>Write the notes in</span>
+            <input id="notes_language" type="text" placeholder="English"></label>
+          <label class="field"><span>Name of the show</span>
+            <input id="show" type="text" placeholder="Worked out from the folders"></label>
+          <label class="field" id="titleField"><span>Full title (one film only)</span>
+            <input id="titleInput" type="text" placeholder="Worked out from the file name"></label>
+          <label class="field"><span>Who the notes are for</span>
+            <input id="audience" type="text" placeholder="Default: fluent in American English"></label>
+          <label class="field"><span>Thinking effort</span>
+            <select id="effort"><option value="">The preset's (high)</option><option value="low">Low</option>
+              <option value="medium">Medium</option><option value="high">High</option>
+              <option value="xhigh">Extra high</option><option value="max">Max</option></select></label>
+          <label class="check"><input type="checkbox" id="offline">
+            <span>Don't search online for subtitles<small>When a film has none beside it or inside it, it isn't searched for on OpenSubtitles.com.</small></span></label>
+          <label class="check"><input type="checkbox" id="check_alignment">
+            <span>Check every note's timing against the speech<small id="speechHint">Slow the first time; free.</small></span></label>
+          <label class="check"><input type="checkbox" id="dense">
+            <span>Look at more frames<small>Catches more sight gags; costs several times more.</small></span></label>
+          <input type="checkbox" id="redo" hidden>
+        </details>
+      </fieldset>
+      <div class="runrow">
+        <button type="button" class="btn primary" id="runBtn" disabled>Write the notes</button>
+        <button type="button" class="btn" id="cancelBtn" hidden>Cancel</button>
+        <button type="button" class="btn quiet" id="dangerBtn">Change or delete…</button>
+      </div>
+    </section>
+  </div>
+

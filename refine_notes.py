@@ -411,6 +411,19 @@ def where_to_start(spec, notes_path, limit, auto):
                                  carried=carried, retry=retry, only_again=only_again)
 
 
+def film_setup(cues, spec, srt_path, video, film_language=None, original_srt=None, title=None, audience=None, year=None):
+    """What the prompt needs about the film, from the options and else the notes file: (film_language,
+    original_srt, title, situation, extra, audience, year). Shared with chat_notes.py's frames step."""
+    film_language = film_language or spec.get("film_language")
+    if not original_srt and spec.get("original_subtitles"):
+        original_srt = workfiles.find_near(srt_path, spec["original_subtitles"], video)
+    title = title or re.sub(r"\s*\(context notes\)\s*$", "", str(spec.get("title") or Path(srt_path).stem))
+    situation, extra = gn.subtitle_setup(cues, film_language, original_srt)
+    audience = audience or spec.get("audience") or gn.default_audience(film_language, situation)
+    year = year or spec.get("year") or gn.resolve_year(None, video, title)
+    return film_language, original_srt, title, situation, extra, audience, year
+
+
 def look_at_video(cues, video, frames, spec, limit, assume_synced):
     """Analyse the video (analyze.py: the sync, the contact sheets, the loud moments) and record the measured offset
     in `spec`. Returns (the analysis, the sync message for the report, whether only on-screen notes can be added)."""
@@ -618,13 +631,8 @@ def refine(srt_path, notes_path, video, model=claude_api.DEFAULT_MODEL, frames="
                             max_tokens=max_tokens, timeout=600, key_file=key_file, api_url=api_url,
                             assume_yes=assume_yes, workdir=notes_path.resolve().parent)
     sender.ready(estimate_only)                  # fail early if there is no usable key (or say Claude Code can't be used)
-    film_language = film_language or spec.get("film_language")
-    if not original_srt and spec.get("original_subtitles"):
-        original_srt = workfiles.find_near(srt_path, spec["original_subtitles"], video)
-    title = title or re.sub(r"\s*\(context notes\)\s*$", "", str(spec.get("title") or Path(srt_path).stem))
-    situation, extra = gn.subtitle_setup(cues, film_language, original_srt)
-    audience = audience or spec.get("audience") or gn.default_audience(film_language, situation)
-    year = year or spec.get("year") or gn.resolve_year(None, video, title)
+    film_language, original_srt, title, situation, extra, audience, year = film_setup(
+        cues, spec, srt_path, video, film_language, original_srt, title, audience, year)
 
     an, sync_msg, visual_only = look_at_video(cues, video, frames, spec, limit, assume_synced)
     offset = an["offset"]

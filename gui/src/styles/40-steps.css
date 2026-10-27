@@ -1,0 +1,10 @@
+/* ---------- the steps of a run (a real sequence, so they're numbered) ---------- */
+ol.steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 22px; padding: 0; list-style: none; counter-reset: step; }
+ol.steps[hidden] { display: none; }
+ol.steps li { flex: 1 1 0; min-width: 96px; padding-top: 6px; border-top: 3px solid var(--line);
+  font-size: 14px; color: var(--muted); }
+ol.steps li::before { counter-increment: step; content: counter(step) ". "; }
+ol.steps li.done { border-color: var(--ink); color: var(--ink); }
+ol.steps li.active { border-color: var(--gold); color: var(--ink); font-weight: 650; }
+ol.steps li.skipped { opacity: .55; }
+

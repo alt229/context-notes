@@ -6,6 +6,8 @@
       "Bash(python3 chat_notes.py year *)",
       "Bash(python3 chat_notes.py prepare *)",
       "Bash(python3 chat_notes.py collect *)",
+      "Bash(python3 chat_notes.py show-frames *)",
+      "Bash(python3 chat_notes.py collect-frames *)",
       "Bash(python3 usage.py)",
       "Bash(python3 usage.py --session*)",
       "Bash(python3 usage.py --parts-estimate *)",

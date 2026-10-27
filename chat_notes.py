@@ -21,13 +21,32 @@ Or let Claude Code write them on your subscription: /notes in this project folde
 per part (chat_notes.py show prints a part for it), each reply saved as <folder>/part-<k>.txt; collect takes the folder.
 (Everything this writes goes in the video's working folder: see workfiles.py.)
 
+The frames step the same way: /refine runs the frame-reviewer agent once per stretch of the video.
+  show-frames film.mkv film.srt --part 0 [--frames dense --limit 30:00 ...]
+        analyses the video (cached), keeps the notes as they are now (a backup beside them, which every later step
+        starts from), and says how many parts there are and which already have replies. Its options are kept for
+        the later steps, in context-notes/film.mkv/frame-replies/start.json.
+  show-frames film.mkv film.srt --part K
+        prints part K for the agent: the instructions, the contact sheets to open, and the stretch, as the API's
+        frames step would send it, with the replies for parts 1 to K-1 already applied. The agent writes
+        frame-replies/frames-K.txt.
+  collect-frames film.mkv film.srt
+        applies the replies in order (up to the first one missing) to the notes as they were, writes the notes file
+        and a report of every change, and keeps the old .ass; make_ass.py then rebuilds it. If parts are missing,
+        the notes file says where it stopped, so the next /refine (or the API's --refine) picks up there.
+
 For a film not in English that you watch with English subtitles: give the English file as SRT and the original as
 --original-subs, with --film-language (e.g. de). Use the same files and options in both steps.
 """
 import argparse
+import contextlib
+import datetime
+import io
 import json
 import re
+import shutil
 import sys
+import types
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -237,6 +256,209 @@ def collect(a):
         print("  - " + p)
 
 
+# ---------------------------------------------------------------- the frames step, in a Claude Code conversation
+FRAMES_DIR = "frame-replies"
+START = "start.json"
+FRAME_OPTIONS = ("frames", "limit", "assume_synced", "film_language", "original_subs", "title", "year", "audience",
+                 "notes_language")
+
+
+def frames_dir(video, given=None):
+    return Path(given) if given else workfiles.place(Path(video)) / FRAMES_DIR
+
+
+def frame_files(folder):
+    """frames-1.txt, frames-2.txt, ... in a replies folder: {k: path}, in part order."""
+    out = {}
+    for p in Path(folder).glob("frames-*.txt"):
+        m = re.fullmatch(r"frames-(\d+)\.txt", p.name)
+        if m:
+            out[int(m.group(1))] = p
+    return dict(sorted(out.items()))
+
+
+def read_start(folder):
+    try:
+        start = json.loads((Path(folder) / START).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return start if isinstance(start, dict) and start.get("notes") and start.get("backup") else None
+
+
+def frames_state(a, start):
+    """What every part, and collect-frames, is made from, the same way each time: the notes as they were when /refine
+    started (the backup named in start.json), the video's analysis (cached after part 0), the stretches and the
+    instructions, all from the options part 0 was given."""
+    import refine_notes as rn
+    video, srt = Path(a.video), Path(a.srt)
+    notes_path = Path(start["notes"])
+    pristine = notes_path.with_name(start["backup"])
+    try:
+        spec = json.loads(fileio.read_text(pristine))
+    except (OSError, ValueError):
+        sys.exit(f"Can't read {pristine}, the notes as they were when /refine started. Start again with "
+                 f"show-frames --part 0 --fresh.")
+    if not isinstance(spec, dict):
+        spec = {"notes": spec}
+    cues = subtitles.parse_srt(srt)
+    if not cues:
+        sys.exit(f"No subtitle lines found in {srt}")
+    o = start.get("options") or {}
+    film_language, original_srt, title, situation, extra, audience, year = rn.film_setup(
+        cues, spec, srt, video, o.get("film_language"), o.get("original_subs"), o.get("title"), o.get("audience"),
+        o.get("year"))
+    an, sync_msg, visual_only = rn.look_at_video(cues, video, o.get("frames") or "keyframes", spec, o.get("limit"),
+                                                 bool(o.get("assume_synced")))
+    wins = rn.make_windows(an["sheets"], an["duration"])
+    if not wins:
+        sys.exit("No contact sheets were produced, so there is nothing to look at.")
+    return types.SimpleNamespace(
+        cues=cues, spec=spec, notes=spec["notes"], notes_path=notes_path, an=an, offset=an["offset"],
+        moments=an["moments"], sync_msg=sync_msg, visual_only=visual_only, wins=wins, title=title, extra=extra,
+        limit=o.get("limit"), sys_prompt=rn.system_prompt(audience, o.get("notes_language") or "English", visual_only,
+                                                          film_language, situation, year))
+
+
+def apply_frames(st, folder, upto, log, dropped, unread):
+    """The replies for parts 1 to `upto` applied in order, as the API's frames step applies its replies (the later
+    parts were shown the notes as the earlier ones left them). Stops at the first part with no reply.
+    Returns (the last part applied, [added, revised, retimed, dropped], the notes' times now)."""
+    import refine_notes as rn
+    files = frame_files(folder)
+    times = rn.note_times(st.cues, st.notes, st.offset)
+    done, counts = 0, [0, 0, 0, 0]
+    for k in range(1, upto + 1):
+        if k not in files:
+            break
+        win = st.wins[k - 1]
+        _, listed = rn.window_text(win, st.cues, st.offset, st.moments, st.notes, times, st.title, k, len(st.wins),
+                                   st.visual_only, st.extra, dropped)
+        text = files[k].read_text(encoding="utf-8")
+        parsed = rn.parse_reply(text)
+        if not any(parsed.values()) and text.strip() not in ("{}", ""):
+            unread.append({"from": round(win["lo"], 3), "to": round(win["hi"], 3),
+                           "reply": f"{Path(folder).name}/{files[k].name}"})
+        got = rn.apply_reply(parsed, win, st.cues, st.offset, st.notes, times, listed, log, dropped, st.visual_only)
+        counts = [x + y for x, y in zip(counts, got)]
+        times = rn.note_times(st.cues, st.notes, st.offset)
+        done = k
+    return done, counts, times
+
+
+def frames_start(a, folder):
+    """--part 0: begin (or pick up) a /refine: keep the notes as they are, analyse the video, say what's to do."""
+    video, srt = Path(a.video), Path(a.srt)
+    start = read_start(folder)
+    if start and a.fresh:
+        n = 1
+        while folder.with_name(f"{FRAMES_DIR}.old-{n}").exists():
+            n += 1
+        folder.rename(folder.with_name(f"{FRAMES_DIR}.old-{n}"))
+        print(f"Started again: the earlier replies are kept in {FRAMES_DIR}.old-{n}.")
+        start = None
+    if start is None:
+        import refine_notes as rn
+        notes_path = Path(a.notes) if a.notes else workfiles.notes_path(video, srt)
+        if not notes_path.exists():
+            sys.exit(f"There are no notes for {video.name} yet ({notes_path.name}). Write them first (/notes, or "
+                     f"context_notes.py).")
+        rn.check_same_episode(video, srt, notes_path)
+        backup = fileio.unique_backup(notes_path)
+        shutil.copy2(notes_path, backup)
+        options = {k: getattr(a, k, None) for k in FRAME_OPTIONS}
+        options["limit"] = timecode.duration_arg(a.limit) if a.limit else None
+        start = {"notes": str(notes_path.resolve()), "backup": backup.name,
+                 "started": datetime.datetime.now().isoformat(timespec="seconds"), "options": options}
+        workfiles.make_dirs(folder)
+        fileio.write_text_safely(folder / START, json.dumps(start, indent=1) + "\n")
+        print(f"Kept the notes as they are now: {backup.name} (every part starts from these).")
+    else:
+        print(f"Picking up the /refine started {start.get('started', '')} (its options are kept in "
+              f"{FRAMES_DIR}/{START}; --fresh starts again).")
+    st = frames_state(a, start)
+    n = len(st.wins)
+    have = [k for k in frame_files(folder) if k <= n]
+    todo = [k for k in range(1, n + 1) if k not in have]
+    print(f"Parts: {n}")
+    print("Mode: " + ("full (the subtitles are in step with the video)" if not st.visual_only else
+                      "on-screen notes only (the subtitles aren't in step with this video)"))
+    print(f"Contact sheets: {sum(len(w['sheets']) for w in st.wins)}")
+    print(f"Replies: {folder}")
+    print("Done: " + (", ".join(map(str, have)) if have else "none"))
+    print(f"Next: part {todo[0]}" if todo else "All parts have replies: run collect-frames.")
+
+
+def show_frames(a):
+    """One stretch for the frame-reviewer agent (or --part 0: begin)."""
+    import refine_notes as rn
+    folder = frames_dir(a.video, a.replies)
+    if a.part == 0:
+        return frames_start(a, folder)
+    start = read_start(folder)
+    if start is None:
+        sys.exit(f"Begin with  chat_notes.py show-frames \"{a.video}\" \"{a.srt}\" --part 0  (it keeps the notes as "
+                 f"they are and analyses the video).")
+    with contextlib.redirect_stdout(io.StringIO()):         # the analysis is cached; its lines are noise here
+        st = frames_state(a, start)
+    n = len(st.wins)
+    if not 1 <= a.part <= n:
+        sys.exit(f"No part {a.part}: there are parts 1 to {n}.")
+    files = frame_files(folder)
+    missing = [k for k in range(1, a.part) if k not in files]
+    if missing:
+        sys.exit(f"Part {a.part} needs the replies for part(s) {', '.join(map(str, missing))} first: they change what "
+                 f"it sees.")
+    log, dropped, unread = [], {}, []
+    _, _, times = apply_frames(st, folder, a.part - 1, log, dropped, unread)
+    win = st.wins[a.part - 1]
+    text, _ = rn.window_text(win, st.cues, st.offset, st.moments, st.notes, times, st.title, a.part, n,
+                             st.visual_only, st.extra, dropped)
+    out = [f"PART {a.part} OF {n}: {timecode.hms(win['lo'])} to {timecode.hms(win['hi'])} of the video.",
+           f"Write your reply to: {folder / f'frames-{a.part}.txt'}", "",
+           "=== INSTRUCTIONS (follow these exactly) ===", st.sys_prompt, "",
+           "=== CONTACT SHEETS (open every one with the Read tool before you answer) ==="]
+    for path, t0, t1 in win["sheets"]:
+        out.append(f"{Path(path).resolve()}   frames from {timecode.hms(t0)} to {timecode.hms(t1)}")
+    out += ["", "=== THIS STRETCH ===", text]
+    print("\n".join(out))
+
+
+def collect_frames(a):
+    """Apply the replies (frames-1.txt ...) to the notes as they were, and write the notes file and the report."""
+    import refine_notes as rn
+    video = Path(a.video)
+    folder = frames_dir(video, a.replies)
+    start = read_start(folder)
+    if start is None:
+        sys.exit(f"Nothing to collect: {folder / START} isn't there. Begin with show-frames --part 0.")
+    st = frames_state(a, start)
+    n = len(st.wins)
+    log, dropped, unread = [], {}, []
+    done, (added, revised, retimed, _), _ = apply_frames(st, folder, n, log, dropped, unread)
+    if not done:
+        sys.exit(f"No replies yet in {folder} (frames-1.txt ...): nothing was changed.")
+    ass = Path(str(video.with_suffix("")) + ".notes.ass")
+    if ass.exists():                                       # the .ass is rebuilt next: keep the one there now
+        ass_backup = fileio.unique_backup(workfiles.place(video) / ass.name)
+        workfiles.make_dirs(ass_backup.parent)
+        shutil.copy2(ass, ass_backup)
+        print(f"Kept the old subtitles: {ass_backup.name}")
+    stopped = None if done == n else {"time": round(st.wins[done - 1]["hi"], 3), "part": done, "parts": n,
+                                      "backup": start["backup"]}
+    sync_msg = st.sync_msg + (f"; stopped after part {done} of {n}" if stopped else "")
+    report = rn._save(st.spec, st.notes, dropped, st.notes_path, log, st.notes_path.with_name(start["backup"]),
+                      sync_msg=sync_msg, model=a.model_label, sheets=sum(len(w["sheets"]) for w in st.wins),
+                      limit=st.limit, stopped=stopped, unreadable=unread)
+    print(f"Applied the replies for {done} of {n} part(s) to {st.notes_path.name}: {added} added, {revised} revised, "
+          f"{retimed} retimed, {len(dropped)} dropped; {sync_msg}.")
+    print(f"Report of every change: {report}")
+    for u in unread:
+        print(f"  ! couldn't read {u['reply']}: nothing from it was applied (the next refine offers that stretch again)")
+    if stopped:
+        print(f"  The replies for part {done + 1} on aren't there yet. The notes file says where this stopped, so the "
+              f"next /refine (or the API's --refine) picks up there.")
+
+
 def year_cmd(a):
     """Print the release year for the /notes command to show Erin, or "none" so it can offer a lookup."""
     year, where = gn.find_year(a.video, a.title)
@@ -250,6 +472,27 @@ def main():
     sh.add_argument("upload")
     sh.add_argument("--part", type=int, required=True)
     sh.add_argument("--covered", metavar="DIR", help="folder of part-<k>.txt replies: list what earlier parts covered")
+    sf = sub.add_parser("show-frames", help="the frames step in Claude Code: --part 0 begins (or picks up); --part K "
+                                            "prints stretch K for the frame-reviewer agent")
+    cf = sub.add_parser("collect-frames", help="apply the frame-reviewer's replies to the notes")
+    for p in (sf, cf):
+        p.add_argument("video")
+        p.add_argument("srt", help="the subtitles the notes are placed on")
+        p.add_argument("--replies", metavar="DIR", help=f"the replies folder (default: the video's working folder's "
+                                                        f"{FRAMES_DIR})")
+    sf.add_argument("--part", type=int, required=True)
+    sf.add_argument("--fresh", action="store_true", help="with --part 0: start again (the old replies are kept, renamed)")
+    sf.add_argument("--notes", help="with --part 0: the notes file (default: the video's own)")
+    sf.add_argument("--frames", choices=("keyframes", "dense"), default="keyframes", help="with --part 0")
+    sf.add_argument("--limit", help="with --part 0: only the first part of the video, e.g. 30:00")
+    sf.add_argument("--assume-synced", action="store_true", help="with --part 0: trust that the subtitles are in step")
+    sf.add_argument("--film-language", help="with --part 0: language spoken in the film (default: the notes file's)")
+    sf.add_argument("--original-subs", help="with --part 0: the original-language subtitles")
+    sf.add_argument("--title")
+    sf.add_argument("--year")
+    sf.add_argument("--audience")
+    sf.add_argument("--notes-language", default="English")
+    cf.add_argument("--model-label", default="Opus in Claude Code (/refine)")
     sy = sub.add_parser("year", help="print the film's release year and where it was found (or none)")
     sy.add_argument("video")
     sy.add_argument("--title")
@@ -272,7 +515,8 @@ def main():
         p.add_argument("--limit", help="only the first part, e.g. 30:00")
         p.add_argument("-o", "--out")
     a = ap.parse_args()
-    {"prepare": prepare, "collect": collect, "show": show, "year": year_cmd}[a.cmd](a)
+    {"prepare": prepare, "collect": collect, "show": show, "year": year_cmd, "show-frames": show_frames,
+     "collect-frames": collect_frames}[a.cmd](a)
 
 
 if __name__ == "__main__":

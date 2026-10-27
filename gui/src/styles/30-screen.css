@@ -1,0 +1,38 @@
+/* ---------- the screen: the notes' own look (gold labels, pale text on dark boxes) ---------- */
+.screen { position: relative; display: grid; margin: 14px 0 10px; padding: 16px 18px 14px; min-height: 300px;
+  grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr auto;
+  grid-template-areas: "left right" "title title" "sub sub"; gap: 12px 20px;
+  border-radius: 8px; overflow: hidden; color: #F0F0F0;
+  background: linear-gradient(105deg, #1E2A38 0%, #2A2C42 55%, #3D2E48 100%); }
+.note { max-width: min(46ch, 100%); font-family: var(--overlay); }
+.note[hidden] { display: none; }
+.note.left { grid-area: left; justify-self: start; }
+.note.right { grid-area: right; justify-self: end; text-align: right; }
+.note .label, .note .text, .note .acts { background: rgba(12, 12, 18, .76); padding: 3px 10px; }
+.note .label { display: inline-block; color: #FFC85A; font-weight: 700; font-size: 12.5px; letter-spacing: .03em;
+  text-transform: uppercase; padding-top: 5px; }
+.note .text { font-size: 15.5px; line-height: 1.35; padding-bottom: 7px; white-space: pre-line; }
+.note .acts { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 10px; }
+.note.right .acts { justify-content: flex-end; }
+.note .acts button { font: 600 14px/1.2 var(--overlay); padding: 7px 12px; border-radius: 3px; cursor: pointer;
+  border: 1px solid rgba(255, 200, 90, .65); background: transparent; color: #FFC85A; }
+.note .acts button.primary { background: #FFC85A; color: #1A1E26; border-color: #FFC85A; }
+.note .acts button:disabled { opacity: .5; cursor: default; }
+.note .acts input { flex: 1 1 200px; padding: 6px 8px; border-radius: 3px; border: 1px solid rgba(255,255,255,.3);
+  background: rgba(0,0,0,.35); color: #F0F0F0; }
+.note .acts :focus-visible, .screen :focus-visible { outline-color: #FFC85A; }
+.note.show { animation: fade .25s ease-out; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+.bar { height: 3px; margin-top: 6px; background: rgba(255, 255, 255, .18); overflow: hidden; }
+.bar span { display: block; height: 100%; width: 0; background: #FFC85A; transition: width .3s ease-out; }
+.bar.unknown span { width: 35%; animation: slide 1.4s ease-in-out infinite alternate; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.titlecard { grid-area: title; align-self: center; justify-self: center; text-align: center; max-width: 38ch; padding: 10px 0; }
+.titlecard .title { font: 500 clamp(28px, 4.4vw, 46px)/1.12 var(--serif); letter-spacing: .005em; overflow-wrap: anywhere;
+  text-wrap: balance; }
+.titlecard .sub { margin-top: 8px; font: 15px/1.4 var(--sans); color: rgba(240, 240, 240, .72); }
+.subline { grid-area: sub; justify-self: center; text-align: center; max-width: 64ch; min-height: 1.3em;
+  font: 600 clamp(15px, 1.9vw, 19px)/1.3 var(--overlay); color: #FFFFFF; overflow-wrap: anywhere;
+  text-shadow: 0 0 3px #000, 0 0 3px #000, 0 1px 2px #000;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+

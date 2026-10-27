@@ -13,10 +13,10 @@ Read `README.md` for the full command reference. This file holds what we've lear
 Last updated 2026-10-27. Replace this section when a session changes the project (see rule 10).
 It's the first thing to read when picking the work up on another computer or after losing the connection.
 
-- **Committed:** Erin committed step 1 (the modules) on 2026-10-27. Step 2 below is not committed yet. Ask Erin
+- **Committed:** Erin committed step 1 (the modules) on 2026-10-27. Steps 2 to 5 below are not committed yet. Ask Erin
   before committing, and never push (`.claude/settings.json` denies it).
 - **In progress: the ideas from PR #1, done our way** (the plan is the project doc `claude/pr1-plan.md`; none of the
-  PR's code is used). Steps 1 and 2 of 5 are done:
+  PR's code is used). All 5 steps are done:
   1. The modules (see "Where the code lives"); `make_ass.py` by hand takes the model and effort from Settings too.
   2. The plan by default (`--route plan`, Settings "Claude"): both steps through Claude Code in the background, with
      `--api-fallback USD` ("Use API credits when the plan runs out, up to $___ a run") or the `plan.fallback` question,
@@ -27,11 +27,19 @@ It's the first thing to read when picking the work up on another computer or aft
      lasted one step (now the whole run, `usage.approve_api_for_run`), Claude Code left running after a stop (own
      process group, `claude_code._stop`), the limit words read from the model's reply (now only Claude Code's own),
      and a dollar figure printed for plan requests.
-  Also (Erin, 2026-10-27): every plan request saves the plan's windows it reports (`--output-format stream-json`,
+     Also (Erin, 2026-10-27): every plan request saves the plan's windows it reports (`--output-format stream-json`,
   `rate_limit_event.rate_limit_info.unifiedWindows`, utilization 0 to 1, read as a fraction: check it against the
   status line's figures) via `usage.save_plan_reading`; the app's Plan meter is a button that gets a fresh reading
   (`POST /api/plan/refresh`, `claude_code.ping`: one Haiku request, not in the ledger).
-  Next: step 3, `/refine` with a frame-reviewer agent; then the page built from parts, and `--hosted`.
+  3. `/refine` (2026-10-27): the frames step in a Claude Code conversation (see the pipeline, step 4). Not tried with
+     a real agent yet: Erin's first `/refine` is the check (Claude Code will ask to let the agent open the contact
+     sheets, which are in the film's folder).
+  4. The page from parts (2026-10-27): `gui/src`, joined by `app.page()`; byte for byte the page it was before (checked,
+     and in a headless browser). `gui/index.html` was moved to `gui/src/page.html` and cut down to the frame.
+  5. `--hosted` (2026-10-27): see "The app" below. Tried in the cloud workspace from a second address: the Mac-only
+     actions hidden and refused, the rest working.
+  All five steps are built; steps 2 to 5 aren't committed yet. Still tabled: friend log-ins, and waiting for the
+  5-hour reset by itself (now possible: background requests report the reset time).
 - **Fixed on the way (2026-10-27):** the page's script stopped on load (`remember` was removed but its listener
   stayed), so the app showed nothing. A test now checks every handler and `$("id")` the script uses.
 - **Done earlier on 2026-10-27:** the install's defaults. `settings.py` keeps them in `~/.config/context-notes/settings.json`
@@ -45,7 +53,7 @@ It's the first thing to read when picking the work up on another computer or aft
   (delete kept originals, write the notes again), the run options for audience, effort and offline subtitles, the
   rebuild preview with a `.bak` kept on every rebuild and an optional re-embed, the new default audience ("Fluent in
   American English"), a probe cache, the background status check, and the docs and changelog to match.
-- **Tested:** the full suite passes (452, `python3 -m pytest -q`), `ruff check .` is clean. The module split was
+- **Tested:** the full suite passes (483, `python3 -m pytest -q`), `ruff check .` is clean. The module split was
   compared with the code before it, and the API route still is after step 2 (same output, requests and files; only
   the forwarded `--route api --api-fallback 0` and `--help` differ). The Settings "Claude" section and the run option
   were checked in a headless browser. The other dialogs added before step 1 haven't been looked at in a browser.
@@ -86,7 +94,11 @@ It's the first thing to read when picking the work up on another computer or aft
    - Also in a Claude Code conversation: `chat_notes.py prepare`, then one reply per part, then
      `chat_notes.py collect`. In this project, `/notes` does this with the **note-writer** agent.
 4. **Frame notes.** `make_ass.py --refine`, on the same two routes. It sends contact sheets of keyframes; on the plan,
-   Claude Code opens them itself with its Read tool (only that folder).
+   Claude Code opens them itself with its Read tool (only that folder). Also in a Claude Code conversation:
+   `/refine` runs the **frame-reviewer** agent once per stretch (`chat_notes.py show-frames --part 0` begins and
+   keeps the notes as they were; `--part K` shows stretch K with parts 1 to K-1 applied; `collect-frames` applies
+   the replies in `<working folder>/frame-replies/` to the kept notes). Same replies, same notes as `--refine`
+   (`tests/test_chat_frames.py` checks it); a stop is recorded as `stopped_after`, so either route picks up.
 5. **Build.** `make_ass.py SRT NOTES --video V`. Repeats are left out (`dedupe.py`); timing and the box behind the
    notes come from the notes file's `timing` and `note_background`. The `.ass` header's `; Look:` line records the
    build (`make_ass.BUILD`), background and reading speed. `context_notes.py` rebuilds a finished video's `.ass`
@@ -326,13 +338,23 @@ Open the module that holds the job, not the script that used to. README's second
   `--extend`, unreadable replies, API errors, `--limit`, the wrapper). The output, the 38 requests and all 1,234 files
   were the same; only `--help` changed.
 
-## The app (`app.py` and `gui/index.html`)
+## The app (`app.py` and the page in `gui/src`)
+
+- The page is in parts (since 2026-10-27): `gui/src/page.html` with `styles/*.css`, `html/*.html` (one file per
+  dialog) and `js/*.js`, joined in name order by `app.page()` on each request (`gui/README.md`). Edit the part, reload
+  the page; there is no built copy. To change one dialog, open only its `html/6x-*.html` and the `js/` file with the
+  same name.
 
 - A local web page for friends who don't use Terminal. It runs `context_notes.py` with `CONTEXT_NOTES_UI=json`
   (`docs/gui-protocol.md`) and shows the questions, the cost, progress and Cancel.
-- Standard library only. One HTML file, with no external scripts, fonts or images.
-- Security: it listens on 127.0.0.1 only, every request needs the random key, and `Host` and `Origin` are checked.
-  The API key never goes to the page; it only shows the last 4 characters. Keep all of this when changing it.
+- Standard library only. One page for the browser, with no external scripts, fonts or images.
+- Security: by default it listens on 127.0.0.1 only, every request needs the random key, and `Host` and `Origin` are
+  checked. `--hosted` (Erin, 2026-10-27) listens on every address ("::", dual stack) but answers only `app.PRIVATE`
+  ranges (+ `--allow`), checks that `Host` is an IP address or this computer's own name (DNS rebinding), uses port
+  8229 and a kept key (`app_key`, `~/.config/context-notes/app-key`, mode 600). From anything but loopback,
+  `LOCAL_ONLY` endpoints and deleting kept originals are refused (403), and the page hides them (`.local-only`,
+  `body.remote`). `--public` (servers only) drops the address rule. The API key never goes to the page; it only shows
+  the last 4 characters. Keep all of this when changing it.
 - Defaults live in `settings.py` (`settings.json`). A new default goes in `BUILT_IN` and `KEYS` (what it allows), and
   is read in one of three places: `cli_defaults()` (flags left out, via `set_defaults` in `context_notes.py`),
   `look_defaults()` (`make_ass.py`), or `custom_audience()` (`generate_notes.py`). Never add a key that rewrites,
@@ -371,6 +393,8 @@ Open the module that holds the job, not the script that used to. README's second
 |---|---|---|
 | `subtitle-prep` | Haiku | Find subtitles, run the sync and alignment checks, and summarise what the reports say. It runs scripts and reads their output; it doesn't write code. |
 | `note-writer` | Opus | Write the notes for ONE part of a film (`chat_notes.py show`) as a JSON array, saved as `part-<k>.txt`. This replaces the API's `--generate` and runs on the subscription. |
+| `frame-reviewer` | Opus | Look at ONE stretch of a film's contact sheets (`chat_notes.py show-frames --part K`, opening each sheet with Read) and write `frames-<k>.txt`: what to add, revise, retime or drop. The `/refine` command's agent. |
 
-Commands: `/notes <video> [options]` (subscription-written notes, end to end) and `/check <video>` (subtitles,
-sync, alignment and repeats, with no API use).
+Commands: `/notes <video> [options]` (subscription-written notes, end to end), `/refine <video> [options]` (the
+frames step on the subscription, one stretch at a time) and `/check <video>` (subtitles, sync, alignment and
+repeats, with no API use).

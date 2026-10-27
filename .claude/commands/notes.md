@@ -15,7 +15,7 @@ Read `CLAUDE.md` first; its rules bind you. Keep your messages short.
 - Tell Erin which ones are to do, and roughly 2 Opus runs per 25-minute episode.
 - Then do steps 1 to 6 for each one, one video at a time and in order. Ask questions as they come up.
 - Leave out step 7 per video. At the end, offer the frame pass once for the whole folder with
-  `python3 context_notes.py "<folder>" --recursive --model claude-opus-5-5 --effort high`, which asks before each video.
+  `python3 context_notes.py "<folder>" --recursive`, which asks before each video (or `/refine` per video).
 - If her usage limit stops the run, rerun `/notes` on the same folder. Finished videos are skipped, and finished
   parts are kept.
 - Finish with one line per video, then the next step.
@@ -62,7 +62,9 @@ Read `CLAUDE.md` first; its rules bind you. Keep your messages short.
    - Run `python3 make_ass.py "<srt>" "<notes>" --video "<video>" --timing-report`.
    - Delegate to **subtitle-prep** for the alignment check.
    - If stretches are out, ask Erin whether to run `align_check.py ... --fix` and rebuild from the `.aligned.srt`.
-7. **Offer the frame pass.** The on-screen notes need the API: `python3 context_notes.py "<video>" --model claude-opus-5-5 --effort high`
-   skips generate because the notes exist. Show its cost estimate and run it only if Erin says yes.
+7. **Offer the frame pass.** Two ways, both on her plan unless she chose API credits in Settings:
+   - `/refine "<video>"`: here, one stretch at a time with the frame-reviewer agent (she can watch each part).
+   - `python3 context_notes.py "<video>"`: in the background through Claude Code; it skips writing the notes
+     because they exist. On the API route it shows a cost estimate first: run it only if Erin says yes.
 
 Finish with 3 to 5 lines: notes written, repeats left out, timing, alignment, next step.

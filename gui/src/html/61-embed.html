@@ -1,0 +1,18 @@
+<dialog id="embed" aria-labelledby="embedTitle">
+  <div class="dhead"><h2 id="embedTitle">Put the notes inside the film</h2>
+    <button type="button" class="btn quiet" data-close>Close</button></div>
+  <div class="dbody">
+    <p id="embedIntro"></p>
+    <ul class="entries" id="embedList"></ul>
+    <label class="check"><input type="checkbox" id="embedConvert">
+      <span>Also convert MP4 films to MKV<small>MP4 can't hold the notes' styling, so these are rewritten as MKV first. The .mp4 is kept in context-notes/originals, and media servers may list the film as new.</small></span></label>
+    <label class="check" id="embedDefaultRow"><input type="checkbox" id="embedDefault">
+      <span>Play with the notes on<small>Otherwise the track is there to choose in your player's subtitle menu.</small></span></label>
+    <p class="msg" id="embedMsg" role="status"></p>
+  </div>
+  <div class="dfoot">
+    <button type="button" class="btn" id="embedNo">Not now</button>
+    <button type="button" class="btn primary" id="embedBtn">Put them inside</button>
+  </div>
+</dialog>
+
