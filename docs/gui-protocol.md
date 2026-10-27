@@ -45,8 +45,10 @@ Answer with the text as one line. `hidden` inputs (keys and passwords) are never
 
 ### `estimate`
 
-This is sent before anything goes to the API. Unless `--yes` or `--estimate-only` was given, the matching
-`.send` question follows it.
+This is sent before anything goes to Claude. Unless `--yes` or `--estimate-only` was given, the matching
+`.send` question follows it. On the Claude plan (the default route, through Claude Code) it also has `"route": "plan"`,
+`cost_usd` is `null`, and `api_cost_usd` says what the same requests would cost in API credits (for when the plan runs
+out). On the API there is no `route` field.
 
 ```
 @context-notes {"v": 1, "type": "estimate", "step": "generate", "model": "claude-sonnet-5-5", "lines": 13, "requests": 1, "input_tokens": 1792, "output_tokens": 139, "cost_usd": 0.005, "limit": null}
@@ -59,6 +61,7 @@ This is sent before anything goes to the API. Unless `--yes` or `--estimate-only
 | `input_tokens`, `output_tokens`, `cost_usd` | the estimate; `cost_usd` is `null` when the model's price isn't known |
 | `limit` | seconds, when `--limit` is in force; otherwise `null` |
 | `balance_usd` | the estimated credit left (see `usage` below), or `null` when no balance has been set |
+| `route`, `api_cost_usd` | on the plan only: `"plan"`, and the cost in API credits if it had to move to them |
 | `lines` | generate only: subtitle lines sent |
 | `mode`, `offset`, `images`, `notes` | refine only: `full` or `visual-only`; the sync offset used; how many contact-sheet images; how many existing notes |
 
@@ -81,10 +84,22 @@ the real balance.
 | `film_cost_usd` | everything recorded for this film so far, across runs and steps |
 | `balance_usd`, `low` | the estimated credit left, and whether it is under the warning level; `null` and `false` when no balance has been set |
 
+A request on the plan sends `usage` with `"route": "plan"`, `request` (tokens, `cost_usd` `null`), `run`
+(`plan_requests`, and the API `requests` and `cost_usd` so far in this step) and `session_percent` (the 5-hour session
+as last seen, or `null`).
+
+### `route`
+
+Sent when a run moves from the Claude plan to API credits part-way (or before the first request, when Claude Code
+can't be used): `{"type": "route", "step": "generate", "route": "api", "reason": "...", "allowance_usd": 5.0}`.
+`allowance_usd` is what the run may spend in API credits (`--api-fallback`), or `null` after a yes to `plan.fallback`.
+
 The same figures are in `app.py`'s `GET /api/usage` (also inside `/api/info`), which adds `spent` (today, the last
 7 days with its request count, this month, all time), the latest `films` and the Claude plan's `session` (the 5-hour
 and 7-day windows, read from what Claude Code's status line saved, plus `week`: how many 5-hour sessions it has seen in
-the last 7 days and how full the busiest got). `POST /api/credit` with `{"balance": "25.00", "low": "2"}` sets the starting balance.
+the last 7 days and how full the busiest got). `POST /api/credit` with `{"balance": "25.00", "low": "2"}` sets the starting balance. `POST /api/plan/refresh`
+gets a fresh reading of the plan's windows (one tiny request through Claude Code) and answers `{"ok": true, "usage":
+...}` or `{"ok": false, "error": "..."}`.
 
 ### `progress`
 
@@ -195,8 +210,10 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 
 | id | Asked by | Choices (default) | About |
 |---|---|---|---|
-| `generate.send` | `generate_notes.py` | y / n (**n**) | Send the subtitles to the API |
-| `refine.send` | `refine_notes.py` | y / n (**n**) | Send frames and subtitles to the API |
+| `generate.send` | `generate_notes.py` | y / n (**n**) | Send the subtitles to Claude (the plan or the API: see `estimate`) |
+| `refine.send` | `refine_notes.py` | y / n (**n**) | Send frames and subtitles to Claude |
+| `plan.fallback` | `generate_notes.py`, `refine_notes.py`, `context_notes.py` | y / n (**n**) | The Claude plan can't go on (its usage limit, the 5-hour session at 90%, or Claude Code missing or signed out) and no API credits are allowed for the run (`--api-fallback`): carry on with API credits? The text says what the rest would cost. A yes holds for the rest of the run (the later steps don't ask). With `--yes` the answer is no, and the run stops with what was written kept |
+| `plan.allowance` | `generate_notes.py`, `refine_notes.py` | y / n (**n**) | The next API request would go past the run's `--api-fallback` allowance: carry on anyway? |
 | `credit.continue` | `generate_notes.py`, `refine_notes.py` | y / n (**n**) | A balance is set (`usage.py`) and the next request is expected to cost more than what's left: carry on anyway? Asked once per run, between requests. With `--yes` the answer is no, and the run stops with what was written kept |
 | `generate.resume` | `generate_notes.py` | p / s (p) | The last run stopped part-way: pick up where it left off, or start again |
 | `refine.unreadable` | `refine_notes.py` | y / n (y) | The frames step couldn't read the reply for some stretches last time: send just those again (n sends nothing) |
@@ -285,4 +302,4 @@ What happens then:
   `input()` or `getpass` directly. Give every new question a stable id, and add it to the table above.
 - Send events only through `prompts.py`. Never send one while a printed line is still open
   (`print(..., end=" ")`): an event must start its own line, or a GUI misses it. The tests check this.
-- Write any file a later run reads with `make_ass.write_text_safely()` or `make_ass.replacing()`, never in place.
+- Write any file a later run reads with `fileio.write_text_safely()` or `fileio.replacing()`, never in place.

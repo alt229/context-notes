@@ -29,17 +29,13 @@ from pathlib import Path
 import dedupe
 import make_ass
 import workfiles
+from timecode import parse_time  # (an .ass time, 0:01:02.35, in seconds)
 
 FLOOR = make_ass.DEFAULT_TIMING["min"]
 TOLERANCE = 0.25
 # Files saved after the three-note limit was added (commit 26b77587) already have it in their start times, so the
 # scan doesn't apply the rules to them a second time.
 HOLD_RULE_SINCE = datetime(2026, 10, 21, 22, 37)
-
-
-def parse_time(text):
-    h, m, s = text.split(":")
-    return int(h) * 3600 + int(m) * 60 + float(s)
 
 
 def clean(text):

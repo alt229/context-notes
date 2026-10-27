@@ -35,6 +35,9 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import analyze  # noqa: E402
+import fileio  # noqa: E402
+import subtitles  # noqa: E402
+import timecode  # noqa: E402
 import languages  # noqa: E402
 import make_ass  # noqa: E402
 import workfiles  # noqa: E402
@@ -46,7 +49,7 @@ MIN_LINES = 2         # lines measured in a window to judge it (one line on its 
 
 # ---------------------------------------------------------------- measuring lines against the speech
 def words(text):
-    text = make_ass.fold(re.sub(r"<[^>]+>|\{[^}]*\}", " ", text))
+    text = subtitles.fold(re.sub(r"<[^>]+>|\{[^}]*\}", " ", text))
     return [w for w in re.findall(r"[a-z']+", text) if w.strip("'")]
 
 
@@ -204,12 +207,12 @@ def run_check(video, srt, notes_path, original=None, film_lang=None, window=10.0
     """The whole check, as data: {rows, runs, fixed (path or None), summary lines, report path}. Exits with a
     message when it can't be done (no transcript and transcribe=False, faster-whisper missing, wrong language)."""
     video, srt = Path(video), Path(srt)
-    spec = json.loads(make_ass.read_text(notes_path))
+    spec = json.loads(fileio.read_text(notes_path))
     notes = spec["notes"] if isinstance(spec, dict) else spec
     spec = spec if isinstance(spec, dict) else {}
     offset = float(spec.get("video_offset", 0) or 0)
     film_lang = languages.code(film_lang or spec.get("film_language")) or "en"
-    cues = make_ass.parse_srt(srt)
+    cues = subtitles.parse_srt(srt)
     if not cues:
         sys.exit(f"No subtitle lines in {srt}")
     import dedupe
@@ -224,7 +227,7 @@ def run_check(video, srt, notes_path, original=None, film_lang=None, window=10.0
     # Which subtitles can be compared with the words spoken?
     subs_lang = languages.guess(" ".join(c["text"] for c in cues[:300]))
     if original:
-        ref_cues = make_ass.parse_srt(original)
+        ref_cues = subtitles.parse_srt(original)
     elif subs_lang is None or languages.same(subs_lang, film_lang):
         ref_cues = cues
     else:
@@ -250,7 +253,7 @@ def run_check(video, srt, notes_path, original=None, film_lang=None, window=10.0
     asr = [json.loads(line) for line in transcript.open()]
     ref = asr_cue_offsets(ref_cues, asr)
     cue_offsets = ref if ref_cues is cues else through_original(cues, ref_cues, ref)
-    in_range = len(make_ass.limit_cues(cues, limit))
+    in_range = len(subtitles.limit_cues(cues, limit))
     say(f"  {len(cue_offsets)} of {in_range} lines found in what is said ({transcript.name}"
         + (f", through {Path(original).name}" if original else "") + ")")
     if len(cue_offsets) < max(10, 0.15 * in_range):
@@ -271,8 +274,8 @@ def run_check(video, srt, notes_path, original=None, film_lang=None, window=10.0
                        "  Not enough measurable dialogue to judge.")
     for run in runs:
         when = "early" if run["offset"] > 0 else "late"
-        summary.append(f"  ! {make_ass.fmt_ass_time(max(run['from'] - window, 0)).split('.')[0]} to "
-                       f"{make_ass.fmt_ass_time(run['to']).split('.')[0]}: lines {abs(run['offset']):.1f} s {when} "
+        summary.append(f"  ! {timecode.fmt_ass_time(max(run['from'] - window, 0)).split('.')[0]} to "
+                       f"{timecode.fmt_ass_time(run['to']).split('.')[0]}: lines {abs(run['offset']):.1f} s {when} "
                        f"(notes {', '.join('#' + str(k) for k in run['notes'][:8])}"
                        + (" ..." if len(run["notes"]) > 8 else "") + ")")
 
@@ -282,7 +285,7 @@ def run_check(video, srt, notes_path, original=None, film_lang=None, window=10.0
         if fixed.exists():
             backup = analyze_backup(fixed)
             summary.append(f"  Kept the previous {fixed.name} as {backup.name}.")
-        analyze.write_srt(cues, corrections(cues, offset, runs, window), fixed)
+        subtitles.write_srt(cues, corrections(cues, offset, runs, window), fixed)
         same = fixed.resolve() == srt.resolve()
         summary.append(f"  Wrote {fixed.name}: those stretches moved to match the speech, every other line as it was"
                        + ("." if same else f" ({srt.name} is untouched)."))
@@ -292,13 +295,13 @@ def run_check(video, srt, notes_path, original=None, film_lang=None, window=10.0
     report = {"video": video.name, "subtitles": srt.name, "original_subtitles": Path(original).name if original else None,
               "transcript": transcript.name, "window": window, "tolerance": TOLERANCE, "video_offset": offset,
               "stretches": runs, "fixed": fixed.name if fixed else None, "notes": rows}
-    make_ass.write_text_safely(folder / "alignment.json", json.dumps(report, indent=1, ensure_ascii=False))
+    fileio.write_text_safely(folder / "alignment.json", json.dumps(report, indent=1, ensure_ascii=False))
     with open(folder / "alignment.txt", "w", encoding="utf-8") as f:
         f.write("\n".join(summary) + "\n\nnote   time      lines  offset  smoothed   (offset: + = lines early)\n")
         for r in rows:
             off = "   -  " if r["offset"] is None else f"{r['offset']:+6.2f}"
             sm = f"{r['smoothed']:+6.2f}" if "smoothed" in r else "      "
-            f.write(f"#{r['k']:<5} {make_ass.fmt_ass_time(r['time']).split('.')[0]}  {r['lines']:>3}  {off}  {sm}"
+            f.write(f"#{r['k']:<5} {timecode.fmt_ass_time(r['time']).split('.')[0]}  {r['lines']:>3}  {off}  {sm}"
                     f"{'  OUT' if r['out'] else '     '}  {r['text'][:50]}\n")
     return {"rows": rows, "runs": runs, "fixed": fixed, "summary": summary, "report": folder / "alignment.txt"}
 
@@ -325,7 +328,7 @@ def main(argv=None):
     ap.add_argument("--no-transcribe", action="store_true",
                     help="only use a transcript made earlier; stop if there isn't one")
     ap.add_argument("--model", help="speech model for transcribing (default: base.en, or small for other languages)")
-    ap.add_argument("--limit", type=make_ass.duration_arg, metavar="TIME", help="only the first part, e.g. 20:00")
+    ap.add_argument("--limit", type=timecode.duration_arg, metavar="TIME", help="only the first part, e.g. 20:00")
     ap.add_argument("--fix", action="store_true",
                     help="write <subtitles>.aligned.srt (in the video's context-notes folder) with the out-of-step "
                          "stretches moved (original untouched)")

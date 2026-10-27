@@ -64,7 +64,7 @@ Notes on options:
 - `cell.json` and the cached analysis store absolute paths. If a run folder is moved, or the session's mount path
   changes, re-judging and reporting fail until those paths are rewritten (done once for the Amelie folder; the judge
   cache itself still matches because it is keyed on content).
-- Subtitle prep for odd inputs: `make_ass.read_text` reads UTF-16 and other encodings (a decode loop that tries
+- Subtitle prep for odd inputs: `fileio.read_text` reads UTF-16 and other encodings (a decode loop that tries
   cp1252 will happily turn UTF-16 into garbage); strip WebVTT colour tags from embedded mov_text tracks.
 
 ## Reading the results

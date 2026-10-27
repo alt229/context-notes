@@ -211,8 +211,8 @@ def test_a_whole_cli_run_shows_the_cost_and_sends_events(tmp_path, api, api_key_
     api.responder = notes_for_each_part
     usage.set_balance(10)
     tick()
-    r = run_cli("make_ass.py", srt, "--generate", "--yes", "--api-url", api.url, cwd=tmp_path, home_dir=home,
-                env_extra={prompts.ENV: "json", "PYTHONUNBUFFERED": "1"})
+    r = run_cli("make_ass.py", srt, "--generate", "--yes", "--api-url", api.url, "--model", "claude-sonnet-5-5",
+                cwd=tmp_path, home_dir=home, env_extra={prompts.ENV: "json", "PYTHONUNBUFFERED": "1"})
     assert r.returncode == 0, r.stdout + r.stderr
     evs = events_in(r.stdout)
     spent = [e for e in evs if e["type"] == "usage"]
@@ -541,3 +541,19 @@ def test_the_estimate_for_a_film_comes_from_the_parts_measured_before():
     assert lines[1].startswith("The session is 13% used now, so all 12 should fit before 90%")
     longer = usage.parts_estimate(40)                                                    # 13% + 120% can't all fit
     assert "so about 25 should fit before 90%" in longer[1] and "resets" in longer[1]    # (90 - 13) // 3
+
+
+def test_the_pages_script_only_uses_what_the_page_has():
+    """Cheap checks a browser would make on load: every $("id") is an element of the page, and every handler given by
+    name is defined. (A handler left behind once stopped the whole script, so the page never loaded.)"""
+    import re
+    page = (ROOT / "gui" / "index.html").read_text(encoding="utf-8")
+    script = page[page.index("<script>"):]
+    markup = page[:page.index("<script>")]
+    ids = set(re.findall(r'\bid="([^"]+)"', markup)) | set(re.findall(r'\bid: "([^"]+)"', script))
+    missing = sorted({i for i in re.findall(r'\$\("([^"]+)"\)', script)} - ids)
+    assert not missing, missing
+    defined = set(re.findall(r"\b(?:async\s+)?function\s+([A-Za-z_$][\w$]*)", script))
+    defined |= set(re.findall(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", script))
+    handlers = set(re.findall(r'addEventListener\("[\w-]+",\s*([A-Za-z_$][\w$]*)\s*\)', script))
+    assert not handlers - defined, sorted(handlers - defined)

@@ -34,18 +34,20 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import dedupe  # noqa: E402
 import generate_notes as gn  # noqa: E402
-import make_ass  # noqa: E402
+import fileio  # noqa: E402
+import subtitles  # noqa: E402
+import timecode  # noqa: E402
 import workfiles  # noqa: E402
 
 MARK = "CONTEXT-NOTES UPLOAD v1"
 
 
 def setup(a, say=print):
-    cues = make_ass.parse_srt(a.srt)
+    cues = subtitles.parse_srt(a.srt)
     if not cues:
         sys.exit(f"No subtitle lines found in {a.srt}")
-    limit = make_ass.duration_arg(a.limit) if a.limit else None
-    cues = make_ass.limit_cues(cues, limit)
+    limit = timecode.duration_arg(a.limit) if a.limit else None
+    cues = subtitles.limit_cues(cues, limit)
     situation, extra = gn.subtitle_setup(cues, a.film_language, a.original_subs, say=say)
     audience = a.audience or gn.default_audience(a.film_language, situation)
     return cues, situation, extra, audience, limit
@@ -72,7 +74,7 @@ def prepare(a):
         out.append("")
     video = Path(a.video)
     dest = Path(a.out) if a.out else workfiles.place(video) / f"{video.stem}.chat-upload.txt"
-    make_ass.write_text_safely(dest, "\n".join(out))
+    fileio.write_text_safely(dest, "\n".join(out))
     print(f"Wrote {dest} ({len(cues)} lines in {len(parts)} parts, about {sum(map(len, out)) // 4:,} tokens).")
     print("Upload it to a chat in the Project and say \"go all\" (again if a reply ends \"CONTINUE FROM PART k\"). "
           "Paste every reply into one text file.")
@@ -207,7 +209,7 @@ def collect(a):
              "category": "About these notes", "duration": 9, "kind": "speech",
              "text": f"Alpha context notes written by Claude ({a.model_label}) for this viewer: "
                      f"{audience.rstrip('.')}. Each note appears just after its line. “(less sure)” means: check me."
-                     + (f" These notes cover only the first {make_ass.fmt_limit(limit)}." if limit else "")}
+                     + (f" These notes cover only the first {timecode.fmt_limit(limit)}." if limit else "")}
     year = gn.resolve_year(a.year, video, a.title)
     spec = {"title": f"{a.title or video.stem} (context notes)", "audience": audience,
             "scope": "Dialogue notes written from the subtitles only (no video or audio was analysed), in a claude.ai chat",
@@ -221,7 +223,7 @@ def collect(a):
     if year:
         spec["year"] = int(year)
     spec["notes"] = [intro] + [n for _, n in notes]
-    make_ass.write_text_safely(dest, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
+    fileio.write_text_safely(dest, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
     print(f"Wrote {len(notes)} notes -> {dest}")
     dups, similar = dedupe.find_duplicates(spec["notes"])
     print(f"  {len(dups)} repeated explanation(s) will be left out of the .ass, {len(similar)} near-miss(es) kept "

@@ -38,10 +38,13 @@ HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 import analyze  # noqa: E402  (the video file types)
+import fileio  # noqa: E402
 import embed  # noqa: E402  (whether a film's notes are inside it)
 import find_subs  # noqa: E402  (where the OpenSubtitles login lives)
-import generate_notes  # noqa: E402  (where the API key lives)
+import claude_api  # noqa: E402  (where the API key lives)
+import claude_code  # noqa: E402  (whether Claude Code can write the notes on the plan)
 import languages  # noqa: E402
+import cli_common  # noqa: E402  (--note-opacity's check)
 import make_ass  # noqa: E402
 import prompts  # noqa: E402
 import settings  # noqa: E402  (this install's defaults, shared with the terminal)
@@ -265,7 +268,7 @@ def pick(kind):
 # ---------------------------------------------------------------- settings
 def key_info():
     """Whether there's an API key, and its last four characters. The key itself never leaves this process."""
-    path = generate_notes.key_path()
+    path = claude_api.key_path()
     info = {"file": str(path), "found": False, "ends": None, "source": None, "problem": None}
     if path.exists():
         try:
@@ -329,7 +332,7 @@ def install_vlc_extension():
     for d in dirs:
         try:
             d.mkdir(parents=True, exist_ok=True)
-            with make_ass.replacing(d / src.name) as tmp:
+            with fileio.replacing(d / src.name) as tmp:
                 shutil.copyfile(src, tmp)
             done.append(str(d / src.name))
         except OSError as e:
@@ -472,7 +475,7 @@ def common_args(o):
     opacity = str(o.get("box_opacity") or "").strip().rstrip("%").strip().replace(",", ".")
     if opacity:                                   # empty: each video keeps its own (30% unless changed)
         try:
-            args += ["--note-opacity", f"{make_ass.percent_arg(opacity):g}"]
+            args += ["--note-opacity", f"{cli_common.percent_arg(opacity):g}"]
         except argparse.ArgumentTypeError:
             raise BadRequest("How solid the box is: a number from 0 (invisible) to 100 (solid), like 30.")
     if o.get("refine") is False:
@@ -492,6 +495,22 @@ def effort_args(o):
     if effort not in EFFORTS:
         raise BadRequest(f"That doesn't look right: {effort}")
     return ["--effort", effort]
+
+
+def fallback_args(o):
+    """--api-fallback from the page's "Use API credits if the plan runs out, up to $..." (this run only). Left out
+    when the page doesn't say, so Settings decides."""
+    if "api_fallback" not in o:
+        return []
+    if not o.get("api_fallback"):
+        return ["--api-fallback", "0"]
+    try:
+        usd = usage.parse_dollars(o.get("api_fallback_usd"))
+    except ValueError as e:
+        raise BadRequest(f"Use API credits up to: {e}") from None
+    if not 0.01 <= usd <= 1000:
+        raise BadRequest("Use API credits up to: an amount from $0.01 to $1,000, like 5.")
+    return ["--api-fallback", f"{usd:g}"]
 
 
 STATUS_TIMEOUT = 3600    # a folder on a NAS can take minutes; the page waits for it in the background (App.start_check)
@@ -648,6 +667,7 @@ class App:
                 "vlc": vlc_info(), "dialogs": dialog_command("file") is not None,
                 "speech": find_subs.have_whisper(), "usage": usage.summary(5),
                 "languages": [{"code": c, "name": n} for c, (n, _) in languages.LANGUAGES.items()],
+                "claude": claude_code.status(),
                 "settings": settings.effective(), "settings_built_in": settings.BUILT_IN,
                 "settings_warnings": settings.warnings(),
                 "running": bool(self.job and self.job.running)}
@@ -669,6 +689,10 @@ class App:
                 args.append("--check-alignment")
             if o.get("embed"):                  # put the new notes inside the .mkv once they're built
                 args.append("--embed")
+            try:
+                args += fallback_args(o)
+            except BadRequest as e:
+                return 400, {"error": str(e)}
             if self.api_url:
                 args += ["--api-url", self.api_url]
             self.job = Job(script("context_notes.py", *args))
@@ -739,6 +763,24 @@ class App:
             code, lines, events = run_quietly(script("embed.py", *args, "--dry-run"), timeout=600)
         return 200, {"videos": [e for e in events if e.get("type") == "embed-plan"], "ok": code == 0, "lines": lines}
 
+    def plan_refresh(self):
+        """The meter's refresh: one tiny request through Claude Code, only for the plan's windows it reports back
+        (claude_code.ping). Not while a run is going: the run's own requests keep the reading current then."""
+        if self.job and self.job.running:
+            return {"ok": True, "usage": usage.summary(5)}
+        problem = claude_code.problem()
+        if problem:
+            return {"ok": False, "error": problem}
+        try:
+            got = claude_code.ping()
+        except claude_code.CantGoOn as e:
+            return {"ok": False, "error": str(e)}
+        except SystemExit as e:                   # call() stops a script with its message: here it's an answer
+            return {"ok": False, "error": str(e)}
+        if not got:
+            return {"ok": False, "error": "Claude Code answered, but didn't say how much of the plan is used."}
+        return {"ok": True, "usage": usage.summary(5)}
+
     def save_settings(self, o):
         """The Defaults in the Settings page: checked as a whole, then written. A wrong value changes nothing."""
         try:
@@ -768,11 +810,11 @@ class App:
 
     def test_key(self):
         try:
-            key = generate_notes.load_key()
+            key = claude_api.load_key()
         except SystemExit as e:
             return {"ok": False, "message": str(e)}
-        url = re.sub(r"/messages$", "/models", self.api_url or generate_notes.API_URL)
-        req = urllib.request.Request(url, headers={"x-api-key": key, "anthropic-version": generate_notes.API_VERSION})
+        url = re.sub(r"/messages$", "/models", self.api_url or claude_api.API_URL)
+        req = urllib.request.Request(url, headers={"x-api-key": key, "anthropic-version": claude_api.API_VERSION})
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
                 r.read()
@@ -911,6 +953,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, app.test_key())
         if path == "/api/settings":
             return self._send(*app.save_settings(o))
+        if path == "/api/plan/refresh":
+            return self._send(200, app.plan_refresh())
+        if path == "/api/claude/check":
+            return self._send(200, {"claude": claude_code.status(refresh=True)})
         if path == "/api/settings/reset":
             return self._send(200, {"settings": settings.reset()})
         if path == "/api/credit":
@@ -959,6 +1005,7 @@ def main(argv=None):
     except OSError as e:
         sys.exit(f"Couldn't start on port {a.port}: {e.strerror or e}. Try another with --port, or leave it out.")
     url = address(server)
+    threading.Thread(target=claude_code.status, daemon=True).start()     # ready by the time the page asks
     print(f"Context Notes is running. Open this address in your browser if it doesn't open by itself:\n\n  {url}\n\n"
           "Keep this window open while you use it. Press Ctrl-C here to stop.", flush=True)
     if not a.no_browser:

@@ -13,21 +13,42 @@ Read `README.md` for the full command reference. This file holds what we've lear
 Last updated 2026-10-27. Replace this section when a session changes the project (see rule 10).
 It's the first thing to read when picking the work up on another computer or after losing the connection.
 
-- **Nothing is committed.** `git status` shows the changed or new files on `master` (last commit `9789e942`). Ask Erin
-  before committing.
-- **Done on 2026-10-27:** the install's defaults. `settings.py` keeps them in `~/.config/context-notes/settings.json`
+- **Committed:** Erin committed step 1 (the modules) on 2026-10-27. Step 2 below is not committed yet. Ask Erin
+  before committing, and never push (`.claude/settings.json` denies it).
+- **In progress: the ideas from PR #1, done our way** (the plan is the project doc `claude/pr1-plan.md`; none of the
+  PR's code is used). Steps 1 and 2 of 5 are done:
+  1. The modules (see "Where the code lives"); `make_ass.py` by hand takes the model and effort from Settings too.
+  2. The plan by default (`--route plan`, Settings "Claude"): both steps through Claude Code in the background, with
+     `--api-fallback USD` ("Use API credits when the plan runs out, up to $___ a run") or the `plan.fallback` question,
+     and the 90% stop. Tried against the real Claude Code 2.1.311 in the cloud workspace (two tiny requests: text,
+     and a contact sheet opened with Read). Not yet run on Erin's Mac: her first real run on the plan is the check.
+     A separate review of the money paths found and fixed: an allowance with a model of unknown price (now asks or
+     stops), a Claude Code that can't say how it's signed in (now not used: it might be an API key), a yes that only
+     lasted one step (now the whole run, `usage.approve_api_for_run`), Claude Code left running after a stop (own
+     process group, `claude_code._stop`), the limit words read from the model's reply (now only Claude Code's own),
+     and a dollar figure printed for plan requests.
+  Also (Erin, 2026-10-27): every plan request saves the plan's windows it reports (`--output-format stream-json`,
+  `rate_limit_event.rate_limit_info.unifiedWindows`, utilization 0 to 1, read as a fraction: check it against the
+  status line's figures) via `usage.save_plan_reading`; the app's Plan meter is a button that gets a fresh reading
+  (`POST /api/plan/refresh`, `claude_code.ping`: one Haiku request, not in the ledger).
+  Next: step 3, `/refine` with a frame-reviewer agent; then the page built from parts, and `--hosted`.
+- **Fixed on the way (2026-10-27):** the page's script stopped on load (`remember` was removed but its listener
+  stayed), so the app showed nothing. A test now checks every handler and `$("id")` the script uses.
+- **Done earlier on 2026-10-27:** the install's defaults. `settings.py` keeps them in `~/.config/context-notes/settings.json`
   (built-in defaults when the file is missing or damaged). The Settings page has a "Defaults for every run" section, and
   the page no longer remembers choices in the browser (the port changes each start). The Terminal scripts read the same
   defaults (`cli_defaults`, through argparse's `set_defaults`); the look is read by `make_ass.py` from `look_defaults`,
   so a film's saved look is never overwritten. Auto-send moved into Settings and is on by default (untick to be asked
   each time). "Remember starting folder" saves the folder you choose.
-- **Done in this session:** `embed.py --convert` (an `.mp4` becomes an `.mkv`, and the `.mp4` goes to
+- **Done before that:** `embed.py --convert` (an `.mp4` becomes an `.mkv`, and the `.mp4` goes to
   `context-notes/originals/`), the "already inside" check, the time and space warnings, the "Change or delete…" panel
   (delete kept originals, write the notes again), the run options for audience, effort and offline subtitles, the
   rebuild preview with a `.bak` kept on every rebuild and an optional re-embed, the new default audience ("Fluent in
   American English"), a probe cache, the background status check, and the docs and changelog to match.
-- **Tested:** the full suite passes (`python3 -m pytest -q`), `ruff check .` is clean, and the page's script parses.
-  The new dialogs have not been looked at in a browser yet.
+- **Tested:** the full suite passes (452, `python3 -m pytest -q`), `ruff check .` is clean. The module split was
+  compared with the code before it, and the API route still is after step 2 (same output, requests and files; only
+  the forwarded `--route api --api-fallback 0` and `--help` differ). The Settings "Claude" section and the run option
+  were checked in a headless browser. The other dialogs added before step 1 haven't been looked at in a browser.
 - **Waiting on Erin:**
   0. Confirmed by Erin (2026-10-27): with no `--model`, scripts use Opus (the app's "best") and with no `--effort` they
      use high, where the Terminal used Sonnet before. Auto-send is on by default, with no warning gate; Erin chose this
@@ -47,7 +68,8 @@ It's the first thing to read when picking the work up on another computer or aft
   `ffprobe` are needed. MKVToolNix (`mkvpropedit`, `mkvmerge`) is installed here for checks; the code doesn't use it yet.
   The Media share is mounted
   at `/Volumes/Media`. The probe cache lives in `~/.config/context-notes/probe-cache/` and isn't in the repo.
-- **Next step:** Erin's answer on the Plex copy, then a browser check of the new dialogs.
+- **Next step:** Erin tries one short run on her plan (`context_notes.py film.mkv --limit 5:00`), then step 3. Still
+  waiting: her answer on the Plex copy.
 
 ## The pipeline (one command per step; `context_notes.py` runs them all)
 
@@ -55,12 +77,16 @@ It's the first thing to read when picking the work up on another computer or aft
    folders, then OpenSubtitles.com, then offers speech recognition.
 2. **Sync.** `analyze.py SRT --video V --frames none --shift auto` fixes a constant offset. `--align` re-times with
    faster-whisper when the offset drifts (different cut).
-3. **Dialogue notes.** Two routes:
-   - The API: `make_ass.py --generate`, which costs credits.
-   - The subscription: `chat_notes.py prepare`, then one reply per part, then `chat_notes.py collect`. In this
-     project, `/notes` does this with the **note-writer** agent.
-4. **Frame notes.** `make_ass.py --refine` uses the API only; there is no subscription route yet. It sends contact
-   sheets of keyframes.
+3. **Dialogue notes.** `make_ass.py --generate`, on one of two routes (`--route`, Settings: "Claude"):
+   - The plan (the default since 2026-10-27): each part through Claude Code in the background (`claude_code.py`,
+     `claude -p`), no API credits. When the plan can't go on (its limit, the 5-hour session at 90%, Claude Code
+     missing or signed out), it moves to API credits only within `--api-fallback` dollars for the run, or after a yes
+     to `plan.fallback`; unattended without that, it stops and keeps what was written.
+   - The API: `--route api`, which costs credits.
+   - Also in a Claude Code conversation: `chat_notes.py prepare`, then one reply per part, then
+     `chat_notes.py collect`. In this project, `/notes` does this with the **note-writer** agent.
+4. **Frame notes.** `make_ass.py --refine`, on the same two routes. It sends contact sheets of keyframes; on the plan,
+   Claude Code opens them itself with its Read tool (only that folder).
 5. **Build.** `make_ass.py SRT NOTES --video V`. Repeats are left out (`dedupe.py`); timing and the box behind the
    notes come from the notes file's `timing` and `note_background`. The `.ass` header's `; Look:` line records the
    build (`make_ass.BUILD`), background and reading speed. `context_notes.py` rebuilds a finished video's `.ass`
@@ -87,8 +113,10 @@ It's the first thing to read when picking the work up on another computer or aft
   - Neither hybrid (Sonnet for one step, Opus for the other) is safe across titles.
   - Erin's plan: films she loves (Das Boot, Waking Ned Devine, Akira) get Opus high; British series (Blackadder,
     Red Dwarf) get Sonnet high.
-  - `generate_notes.DEFAULT_MODEL` is still `claude-sonnet-5-5`. Pass `--model claude-opus-5-5 --effort high` for
-    Opus.
+  - Every route takes the model and effort from Settings (Opus, high unless changed), `make_ass.py` by hand too
+    (Erin, 2026-10-27). `claude_api.DEFAULT_MODEL` (`claude-sonnet-5-5`) is only the default when calling
+    `generate()` or `refine()` from Python. The effort is left out for Haiku 4.5, which rejects it
+    (`claude_api.supports_effort`).
 - **Routing by the model's own confidence** isn't worth building. It would have to flag about 65% of notes to catch
   most errors.
 - **Refine cost** is driven by frames (about 155k input tokens per 45 min). Denser frames cost proportionally more.
@@ -115,7 +143,7 @@ It's the first thing to read when picking the work up on another computer or aft
   and for the session that resets every few hours, in the GUI too, and the week's totals).
   - **API credit is an estimate.** Anthropic has no endpoint for the prepaid balance (the Admin API is for
     organizations and only reports spending). So `usage.py` keeps a ledger of this tool's own requests
-    (`~/.config/context-notes/usage.jsonl`, written in `generate_notes._call_api` through `_record_usage`, so
+    (`~/.config/context-notes/usage.jsonl`, written in `claude_api._call_api` through `_record_usage`, so
     generate, refine, bench and judge all count) and subtracts it from the balance Erin last gave
     (`usage.py --set-balance`, or the app's Settings). It leaves out other spending on the account. When the API says
     "credit balance is too low" the estimate goes to $0 (`usage.mark_empty`).
@@ -244,9 +272,10 @@ It's the first thing to read when picking the work up on another computer or aft
 1. **Never commit or upload media.** Videos, subtitle files, transcripts, `.ass` and `notes-*.json` of commercial
    films are copyrighted (see `.gitignore`). Media lives outside this folder. Ask Erin for the path, and expect a
    permission prompt to read it.
-2. **Never spend API credits without a yes from Erin in this conversation.** That covers `--generate`, `--refine`,
-   `bench.py` and `judge.py`. Each one prints a cost estimate first, so show it. `/notes` uses the subscription,
-   not the API.
+2. **Never spend API credits without a yes from Erin in this conversation.** That covers `--generate --route api`,
+   `--refine --route api`, `--api-fallback` above 0, `bench.py` and `judge.py`. Each one prints a cost estimate first,
+   so show it. `/notes` and the default plan route use the subscription, not the API; still ask before a real run on
+   her plan (it uses her 5-hour session). Tests never run the real Claude Code (`tests/fake_claude.py`).
 3. **API keys** live in `~/.config/context-notes/api-key` (mode 600). Erin prefers config files to environment
    variables. Never print a key.
 4. **Originals are never changed.** Scripts write `.aligned.srt`, `.bak` and other new files into the video's
@@ -262,13 +291,40 @@ It's the first thing to read when picking the work up on another computer or aft
    question a stable id and add it to the table in `docs/gui-protocol.md`. Events go through `prompts.py` too, and
    never while a printed line is still open (`end=" "`).
 8. **Write files all at once.** Anything a later run reads (caches, subtitles, notes, `.ass`) is written with
-   `make_ass.write_text_safely()` or `make_ass.replacing()`, so Ctrl-C or a GUI's Cancel can't leave half a file.
+   `fileio.write_text_safely()` or `fileio.replacing()`, so Ctrl-C or a GUI's Cancel can't leave half a file.
 9. **Write for Erin.** Plain English in messages and docs, and say what to do next. She runs macOS (Apple
    Silicon, Homebrew, Python 3.14) and works in Terminal. Her friends use the app on macOS, Windows and Linux.
 10. **Update "Where things left off" before a session ends.** Any chat that changes this project rewrites that section
     in place: what changed, what's uncommitted, what was tested, what's waiting on Erin, and what's next. Replace
     stale lines rather than adding a log, and keep it short enough to read in a minute. Do this even when the session
     ends with a question instead of a change.
+
+## Where the code lives (split into modules on 2026-10-27)
+
+Open the module that holds the job, not the script that used to. README's second file table lists them.
+
+- **Talking to Claude:** `claude_api.py` (key, request, retries, prices, `wait_awake`, `image_tokens`,
+  `encode_images`) and `claude_code.py` (the plan: `status`/`problem`, `call`, `CantGoOn`). `sending.Sender` picks
+  between them per request and moves to the API (`leave_plan`, `within_allowance`); the steps pass contact sheets as
+  `{"type": "image", "path": ...}` and only the API attaches them. The loop both steps use is `sending.send_parts`:
+  `usage.guard` before each part, the step reads and saves the reply, then `usage.report`; any stop keeps what was
+  written. `usage.run_start()` (env `CONTEXT_NOTES_RUN_START`, set by `context_notes.py`) makes the API allowance
+  count per run across steps. Ledger lines from the plan have `"route": "plan"` and no dollars.
+- **The steps:** `generate_notes.generate()` is `read_cues`, `notes_to_extend`, `starting_point`, `Parts`, the
+  estimate, `send_parts` with a `Writing`, then `notes_file`. `refine_notes.refine()` is `load_notes`,
+  `where_to_start`, `look_at_video`, `plan_windows`, the estimate, `keep_backups`, `send_parts` with a `Refining`,
+  then `_save`. Each reply is read by `read_part` / `apply_reply`.
+- **Options:** `cli_common.py` defines the ones `context_notes.py` and `make_ass.py` share (model, effort, key file,
+  `--limit`, the look) and passes them on (`claude_args`, `look_args`, `limit_args`). New Claude options go there.
+- **Files and text:** `fileio.py` (writing safely, backups, `config_dir`), `subtitles.py` (`.srt` and quote matching),
+  `timecode.py` (times).
+- **Old names still work** (`make_ass.write_text_safely`, `generate_notes.call_api`, `refine_notes.hms`, ...) for older
+  code and `bench/`. Patch the module a function lives in: replacing an old name doesn't reach the code that moved.
+  `bench/bench.py` replaces `claude_api.call_api`; replacing `generate_notes.call_api` would let real, paid requests
+  through.
+- **Checked:** besides the tests, the split was compared with the code before it on 13 synthetic runs (33 steps: pick-up,
+  `--extend`, unreadable replies, API errors, `--limit`, the wrapper). The output, the 38 requests and all 1,234 files
+  were the same; only `--help` changed.
 
 ## The app (`app.py` and `gui/index.html`)
 
@@ -299,7 +355,7 @@ It's the first thing to read when picking the work up on another computer or aft
   - Every script the app runs must `import prompts`, or Ctrl-Break kills it on the spot.
   - The app needs a console (`python.exe`, not `pythonw.exe`). Keep it that way in any launcher.
 - **Blocking calls don't notice Ctrl-Break.**
-  - Network requests wait through `generate_notes.wait_awake`.
+  - Network requests wait through `claude_api.wait_awake`.
   - A question that's waiting gets an empty line from the app's cancel.
 - **Text.** Windows Python isn't UTF-8 by default. Pass `encoding="utf-8"` for subprocess output and for files that
   can hold non-English text. The app sets `PYTHONUTF8=1` for its runs.

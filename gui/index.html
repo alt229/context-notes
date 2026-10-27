@@ -159,7 +159,7 @@ legend { font-weight: 650; padding: 0; margin-bottom: 4px; }
 .field select, .field input:not([type=checkbox]):not([type=radio]) { width: 100%; }
 .check.spaced { margin: 0 0 14px; }
 .inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-#limit, #spw, #opacity { width: 5.5em; }
+#limit, #spw, #opacity, #api_fallback_usd, #d_api_fallback_usd { width: 5.5em; }
 .field[hidden] { display: none; }
 details.more summary { cursor: pointer; font-weight: 600; margin: 2px 0 12px; }
 .runrow { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
@@ -220,13 +220,13 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
     <h1>Context Notes</h1>
     <div class="meters" id="meters" hidden>
       <button type="button" class="meter" id="apiMeter"><span class="k">API credit</span> <span id="apiMeterV"></span></button>
-      <span class="meter" id="sessionMeter" hidden><span class="k" id="sessionMeterK">Plan session</span> <span id="sessionMeterV"></span></span>
+      <button type="button" class="meter" id="sessionMeter" hidden><span class="k" id="sessionMeterK">Plan session</span> <span id="sessionMeterV"></span></button>
     </div>
     <button type="button" class="btn quiet" id="settingsBtn">Settings</button>
   </header>
 
   <div class="banner" id="keyBanner" hidden>
-    <span>To write notes, add your Anthropic API key. It stays on this computer.</span>
+    <span id="keyBannerText">To write notes, add your Anthropic API key. It stays on this computer.</span>
     <button type="button" class="btn" id="bannerKeyBtn">Add your key</button>
   </div>
 
@@ -287,6 +287,12 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
           <label class="choice"><input type="radio" name="quality" value="cheaper">
             <span>Cheaper<small>Claude Sonnet. Good for series; a few more mistakes.</small></span></label>
         </fieldset>
+        <div class="field" id="fallbackRun">
+          <label class="check"><input type="checkbox" id="api_fallback"><span>Use API credits if the plan runs
+            out<small>This run only; the usual choice is in Settings.</small></span></label>
+          <div class="inline"><span>up to $</span><input id="api_fallback_usd" type="text" inputmode="decimal"
+            placeholder="5.00" aria-label="The most API credit this run may use, in dollars"></div>
+        </div>
         <label class="field"><span>The film's language</span>
           <select id="film_language"><option value="">Work it out from the video</option></select></label>
         <label class="check spaced"><input type="checkbox" id="refine" checked>
@@ -447,6 +453,31 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
   <div class="dhead"><h2 id="settingsTitle">Settings</h2>
     <button type="button" class="btn quiet" data-close>Close</button></div>
   <div class="dbody">
+    <section id="claudeSection">
+      <h2>Claude</h2>
+      <p class="hint">Where the notes are written. On your Claude plan (Pro or Max), Claude Code writes them in the
+        background, with no API credits; it needs to be installed and signed in on this computer.</p>
+      <label class="choice"><input type="radio" name="d_route" value="plan">
+        <span>Your Claude plan, through Claude Code<small>No API credits. Uses your plan's 5-hour session, as chatting
+          does.</small></span></label>
+      <label class="choice"><input type="radio" name="d_route" value="api">
+        <span>API credits<small>Billed to your Anthropic account: the key and credit below.</small></span></label>
+      <p id="claudeStatus"></p>
+      <label class="check"><input type="checkbox" id="d_api_fallback"><span>Use API credits when the plan runs out<small>When
+        the plan's 5-hour session is 90% used, its limit is reached, or Claude Code can't be used. Off: you're asked
+        first, and a run nobody is watching stops (what's written is kept, and the next run picks up).</small></span></label>
+      <div class="field" id="d_fallbackField">
+        <span>Up to</span>
+        <div class="inline"><span>$</span><input id="d_api_fallback_usd" type="text" inputmode="decimal" placeholder="5.00"
+          aria-label="The most API credit a run may use, in dollars"><span>a run</span></div>
+        <small>A run is one press of Write the notes: every film and step in it.</small>
+      </div>
+      <div class="row">
+        <button type="button" class="btn primary" id="c_save">Save</button>
+        <button type="button" class="btn" id="claudeCheckBtn">Check Claude Code again</button>
+      </div>
+      <p class="msg" id="c_msg" role="status"></p>
+    </section>
     <section id="defaultsSection">
       <h2>Defaults for every run</h2>
       <p class="hint">The app and the Terminal scripts both start from these. A film that already has notes keeps its own
@@ -471,7 +502,7 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
       <label class="check"><input type="checkbox" id="d_recursive"><span>Include subfolders</span></label>
       <label class="check"><input type="checkbox" id="d_remember_start"><span>Remember starting folder<small>The folder you choose opens next time. Off: the app opens empty and doesn't record folders.</small></span></label>
       <p class="hint">Starting folder: <span id="d_start_folder"></span></p>
-      <label class="check"><input type="checkbox" id="d_autosend"><span>Send automatically 10 seconds after showing the cost<small>Untick to be asked each time instead. With this on, notes go to Claude and are billed to your account after 10 seconds, unless you press Don't send. You always see the cost first.</small></span></label>
+      <label class="check"><input type="checkbox" id="d_autosend"><span>Send automatically 10 seconds after showing the cost<small>Untick to be asked each time instead. With this on, the notes go to Claude after 10 seconds unless you press Don't send (on API credits, they're billed to your account). You always see the cost first. It never answers the question about moving to API credits.</small></span></label>
       <div class="row">
         <button type="button" class="btn primary" id="d_save">Save defaults</button>
         <button type="button" class="btn" id="d_reset">Reset to built-in</button>
@@ -507,8 +538,9 @@ ul.entries .kind { color: var(--muted); font-size: 13px; margin-left: 6px; }
     <section id="weekSection">
       <h2>This week</h2>
       <ul id="weekList" class="weeklist"></ul>
-      <p class="hint">The plan figures come from Claude Code's status line and cover everything on your plan (chat as well),
-        so they only update while Claude Code is open here. Sessions used elsewhere are in the percentages but not in the count.</p>
+      <p class="hint">The plan figures come from Claude Code: its status line while it's open here, and every request this
+        app sends on your plan. They cover everything on your plan (chat as well). Click the Plan meter at the top for a
+        fresh reading (one tiny request, no API credits). Sessions used elsewhere are in the percentages but not in the count.</p>
     </section>
     <section>
       <h2>OpenSubtitles.com</h2>
@@ -678,13 +710,22 @@ function options() {
     redo: $("redo").checked, audience: $("audience").value.trim(), offline: $("offline").checked,
     effort: $("effort").value, seconds_per_word: $("spw").value.trim(), note_background: $("note_background").value,
     box_opacity: $("note_background").value === "see-through" ? $("opacity").value.trim() : "",
+    ...(onPlan() ? { api_fallback: $("api_fallback").checked, api_fallback_usd: $("api_fallback_usd").value.trim() } : {}),
   };
+}
+function onPlan() { return !!info && info.settings.route === "plan"; }
+function showFallback() {
+  $("fallbackRun").hidden = !onPlan();
+  $("api_fallback_usd").disabled = !$("api_fallback").checked;
 }
 function showOpacity() { $("opacityField").hidden = $("note_background").value !== "see-through"; }
 // The form starts from this install's defaults (settings.json, from the Settings page). Nothing is remembered in the
 // browser any more: the app picks a new port each start, so a browser would forget it anyway.
 function applySettings() {
   const s = info.settings;
+  $("api_fallback").checked = s.api_fallback;
+  $("api_fallback_usd").value = Number(s.api_fallback_usd).toFixed(2);
+  showFallback();
   const q = document.querySelector(`input[name=quality][value="${s.quality}"]`);
   if (q) q.checked = true;
   $("effort").value = s.effort;
@@ -709,6 +750,12 @@ function rememberStartFolder(p) {
 function settingsMsg(text, ok) { $("d_msg").textContent = text; $("d_msg").className = ok ? "msg" : "msg bad"; }
 function renderDefaults() {
   const s = info.settings;
+  const route = document.querySelector(`input[name=d_route][value="${s.route}"]`);
+  if (route) route.checked = true;
+  $("d_api_fallback").checked = s.api_fallback;
+  $("d_api_fallback_usd").value = Number(s.api_fallback_usd).toFixed(2);
+  $("d_api_fallback_usd").disabled = !s.api_fallback;
+  msg("c_msg", "");
   $("d_quality").value = s.quality;
   $("d_effort").value = s.effort;
   $("d_audience").value = s.audience;
@@ -746,6 +793,33 @@ async function saveDefaults() {
   renderDefaults();
   applySettings();
   settingsMsg("Saved. The app and the Terminal scripts use these from now on.", true);
+}
+async function saveClaude() {
+  const usd = Number($("d_api_fallback_usd").value.trim().replace(/^\$/, "").replace(",", ""));
+  if (!(usd >= 0.01 && usd <= 1000)) return msg("c_msg", "Up to: an amount in dollars from 0.01 to 1,000, like 5.", false);
+  const body = { route: document.querySelector("input[name=d_route]:checked").value,
+                 api_fallback: $("d_api_fallback").checked, api_fallback_usd: usd };
+  const r = await api("/api/settings", body);
+  if (r.error) return msg("c_msg", r.error, false);
+  info.settings = r.settings;
+  renderDefaults();
+  applySettings();
+  renderSettings();
+  msg("c_msg", "Saved. The app and the Terminal scripts use this from now on.", true);
+}
+async function checkClaude() {
+  msg("c_msg", "Checking…");
+  const r = await api("/api/claude/check", {});
+  if (r.error) return msg("c_msg", r.error, false);
+  info.claude = r.claude;
+  renderSettings();
+  msg("c_msg", "");
+}
+function claudeText(c) {
+  if (!c) return "";
+  if (!c.problem) return `Claude Code${c.version ? " " + c.version : ""} is ready`
+    + (c.signed_in ? ", signed in with your Claude account." : ". It couldn't say how it's signed in; the first request will tell.");
+  return c.problem;
 }
 async function resetDefaults() {
   const r = await api("/api/settings/reset", {});
@@ -826,11 +900,18 @@ function updateRunButton() {
     : onlyRebuilds() ? "Rebuild (free)" : "Write the notes";
 }
 
+// What has to be set up before Claude can write notes, or null: Claude Code on the plan, the API key otherwise.
+function setupNeeded() {
+  if (!info) return null;
+  if (onPlan()) return info.claude && info.claude.problem
+    ? `${info.claude.problem} Or choose API credits in Settings, Claude.` : null;
+  return info.key.found ? null : "Add your Anthropic API key in Settings. It's only needed when Claude writes notes.";
+}
 function idleScreen() {
   title("Choose a film", "or a folder of episodes. Claude writes the notes, and they play in VLC.");
   hideNote("right");
   if (!keepNote) {
-    if (info && !info.key.found) note("left", "Before you start", "Add your Anthropic API key in Settings. It's only needed when Claude writes notes.");
+    if (setupNeeded()) note("left", "Before you start", setupNeeded());
     else note("left", "How it works", "Pick a film below. You choose how the notes are written, see the cost, and then Claude writes them. Nothing is sent until you say so.");
   }
   subline("");
@@ -857,7 +938,7 @@ function readyScreen() {
     + "as a subtitle track, so the notes travel with the film. It's free and nothing is re-encoded.",
     [el("button", { type: "button", onclick: openEmbed }, "Embed…")]);
   if (!keepNote) {
-    if (info && !info.key.found) note("left", "Before you start", "Add your Anthropic API key in Settings. It's only needed when Claude writes notes.");
+    if (setupNeeded()) note("left", "Before you start", setupNeeded());
     else if (videos.length && ready === videos.length) note("left", "Ready", "Everything here has notes. Open a video in VLC from the list.");
     else if (onlyRebuilds()) note("left", "Next", "Press Rebuild. It only remakes the subtitle file with these settings, so it's quick, and nothing is sent to Claude.");
     else note("left", "Next", "Choose how the notes are written, then press Write the notes. You'll see the cost first.");
@@ -1040,17 +1121,18 @@ function handle(item) {
 function costText(e) {
   const model = MODELS[e.model] || e.model;
   const cost = money(e.cost_usd);
-  const price = cost ? `, for ${cost} of API credit` : ". (The price of this model isn't known here.)";
+  const price = e.route === "plan" ? ", on your Claude plan through Claude Code, with no API credits."
+    : cost ? `, for ${cost} of API credit` : ". (The price of this model isn't known here.)";
   if (e.step === "refine") {
     let t = `Claude will look at ${plural(e.images, "contact sheet")} of frames, with the dialogue and your ${plural(e.notes, "note")}, in ${plural(e.requests, "request")} to ${model}${price}`;
-    if (cost) t += ".";
+    if (cost && e.route !== "plan") t += ".";
     if (e.mode === "visual-only") t += " The subtitles aren't in step with this video, so it will only add notes about what's on screen.";
     return t;
   }
-  return `Claude will read ${plural(e.lines, "subtitle line")} in ${plural(e.requests, "request")} to ${model}${price}${cost ? "." : ""}`;
+  return `Claude will read ${plural(e.lines, "subtitle line")} in ${plural(e.requests, "request")} to ${model}${price}${cost && e.route !== "plan" ? "." : ""}`;
 }
 function creditText(e) {
-  if (e.balance_usd == null) return "";
+  if (e.balance_usd == null || e.route === "plan") return "";
   let t = ` You have about ${dollars(Math.max(e.balance_usd, 0))} of credit left.`;
   if (e.cost_usd != null && e.cost_usd > e.balance_usd) t += " That's more than is left, so it may stop part-way; add credit and run it again to pick up.";
   return t;
@@ -1065,12 +1147,16 @@ function ask(ev) {
   stopCountdown();
   asking = true;
   const send = ev.id === "generate.send" || ev.id === "refine.send";
-  const label = send ? "Cost" : ev.id && ev.id.endsWith(".resume") ? "Pick up" : ev.id === "credit.continue" ? "Credit" : "Question";
+  const plan = ev.id === "plan.fallback" || ev.id === "plan.allowance";
+  const label = send ? "Cost" : ev.id && ev.id.endsWith(".resume") ? "Pick up" : ev.id === "credit.continue" ? "Credit"
+    : plan ? "Claude plan" : "Question";
   const text = send && lastEstimate ? costText(lastEstimate) + creditText(lastEstimate) : ev.text;
   const buttons = ev.choices.map((c) => {
     let name = c.label.charAt(0).toUpperCase() + c.label.slice(1);
     if (send) name = c.key === "y" ? "Send to Claude" : "Don't send";
     if (ev.id === "credit.continue") name = c.key === "y" ? "Carry on anyway" : "Stop here";
+    if (ev.id === "plan.fallback") name = c.key === "y" ? "Use API credits" : "Stop here";
+    if (ev.id === "plan.allowance") name = c.key === "y" ? "Carry on with API credits" : "Stop here";
     const primary = send ? c.key === "y" : c.key === ev.default;
     return el("button", { type: "button", class: primary ? "primary" : null, "data-key": c.key,
                           onclick: () => answer(c.key) }, name);
@@ -1351,9 +1437,27 @@ async function loadUsage() {
   renderMeters();
   renderCredit();
 }
+function ago(seconds) {
+  const m = Math.round(seconds / 60);
+  if (m < 90) return `${m} min`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `${h} h` : `${Math.round(h / 24)} days`;
+}
+let refreshingPlan = false;
+// One tiny request on the plan (Haiku, no tools; no API credits), only for the windows Claude Code reports back.
+async function refreshPlan() {
+  if (refreshingPlan) return;
+  refreshingPlan = true;
+  $("sessionMeterV").textContent = "checking…";
+  const r = await api("/api/plan/refresh", {});
+  refreshingPlan = false;
+  if (r.usage) usageNow = r.usage;
+  renderMeters();
+  if (!r.ok) { $("sessionMeterV").textContent = "couldn't check"; $("sessionMeter").title = r.error || ""; }
+}
 function renderMeters() {
   const u = usageNow;
-  const shown = !!u && !!((info && info.key && info.key.found) || u.balance || (u.spent && u.spent.all > 0));
+  const shown = !!u && !!(onPlan() || (info && info.key && info.key.found) || u.balance || (u.spent && u.spent.all > 0));
   $("meters").hidden = !shown;
   if (!shown) return;
   const bal = u.balance;
@@ -1369,7 +1473,9 @@ function renderMeters() {
   const wk = u.session && u.session.seven_day;
   const live = !!w && !w.reset_since && w.percent != null;
   const weekOk = !!wk && !wk.reset_since && wk.percent != null;
-  $("sessionMeter").hidden = !(live || weekOk);
+  $("sessionMeter").hidden = !(live || weekOk || onPlan());
+  $("sessionMeter").title = "How much of your Claude plan is used, as Claude Code last said (its status line, or the "
+    + "notes this app writes on the plan). Click for a fresh reading: one tiny request on your plan, no API credits.";
   if (live || weekOk) {
     const parts = [];
     if (live) {
@@ -1377,9 +1483,12 @@ function renderMeters() {
       parts.push(`${Math.round(w.percent)}% used` + (when ? ` · resets ${when}` : ""));
     }
     if (weekOk) parts.push(`week ${Math.round(wk.percent)}%`);
-    if (u.session.age_s > 900) parts.push(`seen ${Math.round(u.session.age_s / 60)} min ago`);
-    $("sessionMeterK").textContent = live ? "Plan session" : "Plan week";
+    if (u.session.age_s > 900) parts.push(`seen ${ago(u.session.age_s)} ago`);
+    $("sessionMeterK").textContent = live ? "Plan session" : "Plan";
     $("sessionMeterV").textContent = parts.join(" · ");
+  } else {
+    $("sessionMeterK").textContent = "Plan";
+    $("sessionMeterV").textContent = "no reading · click to check";
   }
   renderWeek();
 }
@@ -1437,7 +1546,15 @@ function renderSettings() {
   else $("keyStatus").textContent = "No key yet.";
   if (k.problem) $("keyStatus").textContent += " " + k.problem;
   $("testKeyBtn").disabled = !k.found;
-  $("keyBanner").hidden = k.found;
+  $("claudeStatus").textContent = claudeText(info.claude);
+  $("claudeStatus").className = info.claude && info.claude.problem ? "msg bad" : "";
+  // The banner says what's missing to write notes: Claude Code on the plan (unless API credits can stand in), else the key.
+  const plan = onPlan(), codeOk = !!info.claude && !info.claude.problem;
+  $("keyBanner").hidden = plan ? codeOk : k.found;
+  $("keyBannerText").textContent = plan
+    ? "To write notes on your Claude plan, Claude Code needs to be installed and signed in on this computer (see Settings, Claude)."
+    : "To write notes, add your Anthropic API key. It stays on this computer.";
+  $("bannerKeyBtn").textContent = plan ? "Open Settings" : "Add your key";
   const os = info.opensubtitles;
   $("osStatus").textContent = os.saved ? `Saved, for the account ${os.username}.` : "No login saved.";
   const vlc = info.vlc;
@@ -1496,7 +1613,11 @@ for (const d of document.querySelectorAll("dialog")) {
   d.querySelector("[data-close]").addEventListener("click", () => d.close());
 }
 $("settingsBtn").addEventListener("click", async () => { await reloadInfo(); $("settings").showModal(); });
-$("bannerKeyBtn").addEventListener("click", async () => { await reloadInfo(); $("settings").showModal(); $("keyInput").focus(); });
+$("bannerKeyBtn").addEventListener("click", async () => {
+  await reloadInfo();
+  $("settings").showModal();
+  (onPlan() ? $("claudeCheckBtn") : $("keyInput")).focus();
+});
 $("saveKeyBtn").addEventListener("click", saveKey);
 $("keyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") saveKey(); });
 $("testKeyBtn").addEventListener("click", testKey);
@@ -1504,6 +1625,7 @@ $("saveOsBtn").addEventListener("click", saveOs);
 $("saveCreditBtn").addEventListener("click", saveCredit);
 $("creditInput").addEventListener("keydown", (e) => { if (e.key === "Enter") saveCredit(); });
 $("apiMeter").addEventListener("click", async () => { await reloadInfo(); $("settings").showModal(); $("creditInput").focus(); });
+$("sessionMeter").addEventListener("click", refreshPlan);
 $("installVlcBtn").addEventListener("click", installVlc);
 $("tidyBtn").addEventListener("click", doTidy);
 $("tidyNo").addEventListener("click", () => $("tidy").close());
@@ -1516,6 +1638,10 @@ $("redoGo").addEventListener("click", redoGo);
 $("rebuildGo").addEventListener("click", rebuildGo);
 $("rebuildNo").addEventListener("click", () => $("rebuild").close());
 $("d_save").addEventListener("click", saveDefaults);
+$("c_save").addEventListener("click", saveClaude);
+$("claudeCheckBtn").addEventListener("click", checkClaude);
+$("d_api_fallback").addEventListener("change", () => { $("d_api_fallback_usd").disabled = !$("d_api_fallback").checked; });
+$("api_fallback").addEventListener("change", showFallback);
 $("d_reset").addEventListener("click", resetDefaults);
 $("pickFile").addEventListener("click", () => pick("file"));
 $("pickFolder").addEventListener("click", () => pick("folder"));
@@ -1528,7 +1654,6 @@ for (const id of ["recursive", "film_language", "subs_language", "show_subs", "l
                   "note_background", "opacity"]) {
   $(id).addEventListener("change", () => refresh());
 }
-for (const r of document.querySelectorAll("input[name=quality]")) r.addEventListener("change", remember);
 $("runBtn").addEventListener("click", run);
 $("cancelBtn").addEventListener("click", cancel);
 

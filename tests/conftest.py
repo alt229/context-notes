@@ -72,7 +72,31 @@ def usage_dir(tmp_path_factory, monkeypatch):
     tmp_path, which some tests check for stray files), never the real ones in ~/.config. Subprocesses inherit it."""
     d = tmp_path_factory.mktemp("usage-data")
     monkeypatch.setenv("CONTEXT_NOTES_USAGE_DIR", str(d))
+    monkeypatch.delenv("CONTEXT_NOTES_RUN_START", raising=False)   # each test is a run of its own (usage.run_start)
     return d
+
+
+@pytest.fixture(autouse=True)
+def fake_claude(tmp_path_factory, monkeypatch):
+    """The real Claude Code is never run by a test: `claude` is tests/fake_claude.py (see there for the FAKE_CLAUDE_*
+    switches). Returns the log file it writes one line to per request; calls(log) reads it back."""
+    log = tmp_path_factory.mktemp("fake-claude") / "calls.jsonl"
+    monkeypatch.setenv("CONTEXT_NOTES_CLAUDE", str(ROOT / "tests" / "fake_claude.py"))
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
+    for k in ("FAKE_CLAUDE_MODE", "FAKE_CLAUDE_AUTH", "FAKE_CLAUDE_HELP"):
+        monkeypatch.delenv(k, raising=False)
+    if "claude_code" in sys.modules:                       # its answers are kept for a run: not across tests
+        sys.modules["claude_code"]._status.clear()
+        sys.modules["claude_code"]._flags.clear()
+    return log
+
+
+def claude_calls(log):
+    """The requests fake_claude.py answered, oldest first."""
+    try:
+        return [json.loads(line) for line in Path(log).read_text(encoding="utf-8").splitlines()]
+    except OSError:
+        return []
 
 
 @pytest.fixture

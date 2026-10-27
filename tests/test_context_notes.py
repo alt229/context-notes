@@ -137,6 +137,28 @@ def test_wrapper_runs_everything_then_skips_what_is_done(tmp_path, clips, api, a
 
 
 @needs_ffmpeg
+def test_wrapper_on_the_plan_runs_both_steps_through_claude_code(tmp_path, clips, home, fake_claude, monkeypatch):
+    """The default route: no API key anywhere, and every request through Claude Code (the stand-in), the frames
+    opened with its Read tool."""
+    from conftest import claude_calls
+    season = tmp_path / "Test Show" / "Season 1"
+    season.mkdir(parents=True)
+    place(clips / "synced.mp4", season / "S01E01 Pilot.mp4")
+    make_srt(season / "S01E01 Pilot.srt", n=24)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-for-claude-code")      # in the environment: never passed on
+    r = wrapper(season, "--yes", home=home, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Ready: play S01E01 Pilot.mp4" in r.stdout and "--route plan --api-fallback 0" in r.stdout
+    calls = claude_calls(fake_claude)
+    frames = [c for c in calls if "You refine" in c["system"]]
+    assert len(frames) and len(calls) > len(frames)                              # notes, then frames
+    assert all(c["opened"] == c["pictures"] for c in frames)
+    assert all(c["env"] == [] for c in calls)
+    spec = json.loads((workfiles.folder(season / "S01E01 Pilot.mp4") / "notes-S01E01 Pilot.json").read_text())
+    assert spec["refined"] and (season / "S01E01 Pilot.notes.ass").exists()
+
+
+@needs_ffmpeg
 def test_wrapper_limit_then_full_run(tmp_path, clips, api, api_key_file, home):
     place(clips / "synced.mp4", tmp_path / "ep.mp4")
     make_srt(tmp_path / "ep.srt", n=24)
@@ -232,10 +254,26 @@ def test_wrapper_says_when_there_are_no_subtitles(tmp_path, clips, api_key_file,
 def test_wrapper_stops_early_without_an_api_key(tmp_path, home):
     (tmp_path / "ep.mp4").write_bytes(b"")
     make_srt(tmp_path / "ep.srt", n=3)
-    r = wrapper(tmp_path, "--yes", home=home, cwd=tmp_path)
+    r = wrapper(tmp_path, "--yes", "--route", "api", home=home, cwd=tmp_path)
     assert r.returncode == 1 and "--set-api-key" in r.stderr and "Checking the subtitles" not in r.stdout
     r = wrapper(tmp_path, "--status", home=home, cwd=tmp_path)
     assert r.returncode == 0 and "[to do] ep.mp4" in r.stdout
+
+
+def test_wrapper_on_the_plan_stops_early_when_claude_code_cant_be_used(tmp_path, home, monkeypatch):
+    """The plan is the default route. Signed out, unattended and with no API credits allowed: stop before any work.
+    With an allowance, it goes on (the steps move to API credits), but the API key is checked now."""
+    (tmp_path / "ep.mp4").write_bytes(b"")
+    make_srt(tmp_path / "ep.srt", n=3)
+    monkeypatch.setenv("FAKE_CLAUDE_AUTH", "none")
+    r = wrapper(tmp_path, "--yes", home=home, cwd=tmp_path)
+    assert r.returncode == 1 and "Checking the subtitles" not in r.stdout
+    assert "isn't signed in" in r.stdout and "--api-fallback" in r.stderr
+    r = wrapper(tmp_path, "--yes", "--api-fallback", "2", home=home, cwd=tmp_path)
+    assert "up to $2.00 for this run" in r.stdout and "--set-api-key" in r.stderr     # no key saved in this HOME
+    monkeypatch.setenv("FAKE_CLAUDE_AUTH", "claude.ai")
+    r = wrapper(tmp_path, "--yes", home=home, cwd=tmp_path)
+    assert "--set-api-key" not in r.stderr and "can't be used" not in r.stdout     # on the plan: no key needed
 
 
 def test_accented_names_match_however_they_are_spelled(tmp_path):

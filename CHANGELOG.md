@@ -7,6 +7,23 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- Notes written on your Claude plan by default, with no API credits. With a Pro or Max plan and Claude Code installed
+  and signed in, `--generate` and `--refine` (and so `context_notes.py` and the app) send each part through Claude
+  Code in the background (`claude -p`, in `claude_code.py`). It never sees the API key, the dialogue step gets no tools,
+  the frames step can only open its contact sheets, and Claude Code's own extras are off (`--safe-mode`).
+  `--route api` (or "API credits" in Settings) uses the API as before.
+- When the plan can't go on (its usage limit, the 5-hour session at 90% when there's a reading, or Claude Code missing
+  or signed out), a run carries on with API credits only if you allow it: `--api-fallback 5` or "Use API credits
+  when the plan runs out, up to $5 a run" in Settings (also beside the run options, for one run); the amount counts
+  for the whole run. Otherwise it asks once per run, showing what the rest would cost (`plan.fallback`), or stops
+  when nobody can be asked. What was written is always kept, and the next run picks up.
+- Settings starts with a "Claude" section: the route, the API-credit allowance, and whether Claude Code is installed
+  and signed in ("Check Claude Code again"). The banner and "Before you start" say what's missing for the route in use.
+- The Plan meter stays current: every request on the plan brings back the plan's 5-hour and 7-day figures (Claude
+  Code's stream-json `rate_limit_event`), which also feed the 90% stop, and clicking the meter gets a fresh reading
+  (one tiny Haiku request on the plan). "seen 1611 min ago" now reads "seen 27 h ago".
+- `usage.py` records requests on the plan too (tokens, no dollars, `"route": "plan"`), keeps them out of the credit
+  estimate, and shows how much of the 5-hour session is used after each part when Claude Code has given a reading.
 - Defaults for this install, in Settings ("Defaults for every run"): the model, thinking effort, who the notes are for,
   the language to write them in, seconds a word, the box and how solid it is, frames, the timing check, online subtitle
   search, subfolders, the starting folder, and the auto-send choice. They're kept in
@@ -116,6 +133,16 @@ All notable changes to this project are recorded here. The format follows
   (`/notes`, `/check`).
 
 ### Changed
+- The code is split into modules, so each job lives in one place: `claude_api.py` (the API key, requests and prices),
+  `sending.py` (the estimate, the question and the part-by-part loop that `--generate` and `--refine` share),
+  `cli_common.py` (the options `context_notes.py` and `make_ass.py` share), `fileio.py`, `subtitles.py` and
+  `timecode.py`. `generate_notes.generate()` and `refine_notes.refine()` are cut into named steps. Nothing a run does
+  has changed: the same output, requests and files on every comparison run. Old names still work. In `--help`, the
+  look options are together in `make_ass.py` and the effort default is given correctly in `context_notes.py`;
+  `make_ass.py --reading-speed 0` now gives the same message as `context_notes.py`.
+- `make_ass.py` typed in Terminal also takes the model and effort from Settings (Opus, high unless changed), where it
+  used Sonnet before. The effort is left out for Haiku 4.5, which rejects it, so an effort from Settings never stops a
+  Haiku run.
 - The Terminal scripts take their defaults from Settings, so they match the app. With no `--model` they now use Opus
   (the app's "best"), where they used Sonnet before, and with no `--effort` they use high. Set Settings to Cheaper, or
   pass `--model claude-sonnet-5-5`, to keep the old choice.
@@ -179,6 +206,8 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- The app's page stopped as it loaded (a leftover handler for the old "remember my choices" code), so nothing on it
+  worked. A test now checks that every handler and element the page's script uses exists.
 - Embed offered films whose notes were already inside them. It now says so, and only offers films that need the notes put in.
 - Choosing other subtitles to show at the bottom (`--show-subs`, "Subtitles shown at the bottom" in the app) on a
   finished film did nothing in the app: the film counted as done, so the button was off. `--status` now counts

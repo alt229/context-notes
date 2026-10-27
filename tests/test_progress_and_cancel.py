@@ -108,9 +108,10 @@ def test_waiting_for_the_api_stays_awake(api, monkeypatch):
     comes. Forced on here, so it's tried on every system."""
     import _thread
 
+    import claude_api
     import generate_notes as gn
     from conftest import message
-    monkeypatch.setattr(gn, "WAIT_IN_THREAD", True)
+    monkeypatch.setattr(claude_api, "WAIT_IN_THREAD", True)        # the request code moved to claude_api.py
     gate = threading.Event()
     api.responder = lambda n, body, h: (gate.wait(20), (200, message("[]")))[1]
     timer = threading.Timer(0.5, _thread.interrupt_main)

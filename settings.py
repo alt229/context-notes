@@ -20,8 +20,12 @@ MODELS = {"best": "claude-opus-5-5", "cheaper": "claude-sonnet-5-5"}     # the a
 EFFORTS = ("", "low", "medium", "high", "xhigh", "max")               # "" = high, what both presets use
 BACKGROUNDS = ("see-through", "dark", "none")                         # make_ass.BACKGROUNDS (checked by a test)
 FRAMES = ("keyframes", "dense")
+ROUTES = ("plan", "api")                  # your Claude plan (through Claude Code), or API credits
 
 BUILT_IN = {
+    "route": "plan",                      # where the notes are written: the plan, unless it can't (see api_fallback)
+    "api_fallback": False,                # when the plan runs out (or Claude Code can't be used): carry on with API
+    "api_fallback_usd": 5.0,              # credits, up to this much a run. Off: ask (or stop, with nobody to ask)
     "quality": "best",                    # "best" (Opus) or "cheaper" (Sonnet)
     "effort": "",                         # "" = high
     "audience": "",                       # "" = the built-in text for each film
@@ -39,6 +43,9 @@ BUILT_IN = {
 }
 # kind, and what it allows
 KEYS = {
+    "route": ("choice", ROUTES),
+    "api_fallback": ("bool", None),
+    "api_fallback_usd": ("number", (0.01, 1000)),
     "quality": ("choice", ("best", "cheaper")),
     "effort": ("choice", EFFORTS),
     "audience": ("text", 300),
@@ -147,6 +154,14 @@ def cli_defaults():
     return {"model": MODELS[s["quality"]], "effort": s["effort"] or "high", "audience": s["audience"] or None,
             "notes_language": s["notes_language"] or None, "frames": s["frames"],
             "check_alignment": s["check_alignment"], "recursive": s["recursive"], "offline": s["offline"]}
+
+
+def route_defaults():
+    """Where the notes are written when --route and --api-fallback are left out: the route ("plan" or "api"), and the
+    dollars of API credit a run may use when the plan runs out (0: ask, or stop when nobody can be asked). Kept out
+    of cli_defaults() because an --api-url given by hand (the tests' fake API) means the API: cli_common decides."""
+    s = effective()
+    return {"route": s["route"], "api_fallback": float(s["api_fallback_usd"]) if s["api_fallback"] else 0.0}
 
 
 def look_defaults():

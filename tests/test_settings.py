@@ -2,6 +2,8 @@
 import json
 
 import pytest
+from conftest import make_srt, run_cli
+from test_generate_notes import notes_for_each_part
 
 import generate_notes
 import make_ass
@@ -82,3 +84,20 @@ def test_auto_send_is_on_by_default_and_can_be_turned_off(usage_dir):
 
 def test_the_background_choices_match_make_ass():
     assert set(settings.BACKGROUNDS) == set(make_ass.BACKGROUNDS)
+
+
+def test_make_ass_by_hand_takes_the_model_and_effort_from_settings(tmp_path, api, api_key_file, home):
+    """Typed in Terminal with no --model or --effort, make_ass.py uses Settings (Opus, high), as the app does; the
+    flags still win, and the effort is left out for Haiku 4.5, which rejects it."""
+    srt = make_srt(tmp_path / "ep.srt", n=6)
+    api.responder = notes_for_each_part
+    for extra, model, effort in (((), "claude-opus-5-5", "high"),
+                                 (("--model", "claude-sonnet-5-5", "--effort", "low"), "claude-sonnet-5-5", "low"),
+                                 (("--model", "claude-haiku-4-5-20251001"), "claude-haiku-4-5-20251001", None)):
+        api.calls.clear()
+        r = run_cli("make_ass.py", srt, "--generate", "--yes", "--force", "--api-url", api.url, *extra, cwd=tmp_path,
+                    home_dir=home)
+        assert r.returncode == 0, r.stdout + r.stderr
+        body = api.calls[0]["body"]
+        assert body["model"] == model
+        assert (body.get("output_config") or {}).get("effort") == effort

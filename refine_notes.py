@@ -24,17 +24,24 @@ make_ass.py then rebuilds the .ass; the old .ass is kept as <name>.ass.bak in th
 (context-notes/<video file name>/, see workfiles.py).
 The key and cost handling are the same as for --generate (see generate_notes.py).
 """
-import base64
 import datetime
 import json
 import re
 import shutil
 import sys
+import types
 from pathlib import Path
 
+import claude_api
 import generate_notes as gn
+import fileio
+import subtitles
+import timecode
 import make_ass
+from claude_api import image_tokens  # noqa: F401  (moved to claude_api.py; the name stays here for older code)
+from timecode import hms, parse_time, srt_ts  # noqa: F401  (moved to timecode.py; the names stay here for older code)
 import prompts
+import sending  # the loop that sends the parts (shared with generate_notes.py)
 import usage
 import workfiles
 
@@ -100,30 +107,6 @@ Leave out any list you have nothing for (or use []). If there is nothing to chan
 
 
 # ---------------------------------------------------------------- small helpers
-def hms(t):
-    t = max(0.0, t)
-    return f"{int(t // 3600)}:{int(t // 60 % 60):02d}:{int(t % 60):02d}"
-
-
-def srt_ts(t):
-    ms = int(round(max(0.0, t) * 1000))
-    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
-
-
-def parse_time(v):
-    """Seconds as a number, or 'm:ss' / 'h:mm:ss(.s)' text."""
-    if isinstance(v, (int, float)):
-        return float(v)
-    parts = str(v).strip().split(":")
-    try:
-        secs = 0.0
-        for p in parts:
-            secs = secs * 60 + float(p.replace(",", "."))
-        return secs
-    except ValueError:
-        return None
-
-
 def resolve_time(v, lo, hi):
     """A visual note's time in video seconds. Prefers h:mm:ss text; for bare numbers, tries seconds, then
     decimal minutes (models sometimes write 9.8 for 9:48), then seconds from the start of the stretch."""
@@ -159,7 +142,7 @@ def check_same_episode(*names):
                  f"{lines}\nCheck the --video, subtitle and notes file names.")
 
 
-unique_backup = make_ass.unique_backup
+unique_backup = fileio.unique_backup
 
 
 def failed_reply_path(notes_path, k):
@@ -187,7 +170,7 @@ def resume_choice(notes_path, stopped, auto):
         return float(stopped.get("time", 0)), name, None
     if not have:
         return None, None, None
-    before = json.loads(make_ass.read_text(backup))
+    before = json.loads(fileio.read_text(backup))
     print(f"Starting again from {name}.")
     return None, name, before if isinstance(before, dict) else {"notes": before}
 
@@ -204,17 +187,6 @@ def words(text):
     return set(re.findall(r"[a-z0-9']+", text.lower()))
 
 
-def image_tokens(path):
-    try:
-        from PIL import Image
-        w, h = Image.open(path).size
-    except Exception:
-        return 2500
-    f = min(1.0, 1568 / max(w, h))
-    return int(w * f * h * f / 750)
-
-
-# ---------------------------------------------------------------- one window of the video
 def make_windows(sheets, duration):
     groups = [sheets[i:i + SHEETS_PER_REQUEST] for i in range(0, len(sheets), SHEETS_PER_REQUEST)]
     out = []
@@ -345,7 +317,7 @@ def apply_reply(reply, win, cues, offset, notes, times, listed, log, dropped, vi
                 log.append(f"  skipped an added delivery note ({why})")
                 continue
             if "match" in note:                      # anchor by line number: stays put wherever it is in the file
-                idx = make_ass.find_cue(cues, note.pop("match"), 0, int(note.pop("occurrence", 1)))
+                idx = subtitles.find_cue(cues, note.pop("match"), 0, int(note.pop("occurrence", 1)))
                 note = {"cue": (idx if idx is not None else int(r["cue"]) - 1) + 1, **note}
             where = f"line {note['cue']}"
         notes.append(note)
@@ -386,34 +358,38 @@ def apply_reply(reply, win, cues, offset, notes, times, listed, log, dropped, vi
 
 
 # ---------------------------------------------------------------- main entry point
-def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframes", audience=None, title=None,
-           language="English", assume_yes=False, key_file=None, api_url=gn.API_URL, ass_path=None,
-           assume_synced=False, film_language=None, original_srt=None, limit=None, effort=None,
-           max_tokens=REFINE_MAX_TOKENS, year=None, estimate_only=False):
-    """Refine the notes using the video. With estimate_only, stop after the size and cost estimate: no API key
-    is needed and nothing is sent; the notes and .ass are untouched (the video analysis is cached as usual)."""
-    check_same_episode(video, srt_path, notes_path)
-    cues = make_ass.parse_srt(srt_path)
-    if not cues:
-        sys.exit(f"No subtitle cues found in {srt_path}")
-    notes_path = Path(notes_path)
-    spec = json.loads(make_ass.read_text(notes_path))
+def load_notes(notes_path):
+    """The notes file to refine (a bare list of notes is taken as {"notes": [...]}). Exits when it has no notes."""
+    spec = json.loads(fileio.read_text(notes_path))
     if not isinstance(spec, dict):
         spec = {"notes": spec}
-    notes = spec["notes"]
-    if not notes:
+    if not spec["notes"]:
         sys.exit(f"{notes_path} has no notes to refine. Run with --generate first.")
+    return spec
+
+
+def where_to_start(spec, notes_path, limit, auto):
+    """Where this refine starts. A refine that stopped part-way is picked up (if wanted: else the notes before it are
+    started again from); one that looked at the frames for only the first part (--limit) carries on after it; the
+    stretches whose replies couldn't be read are offered again. Returns None when there's nothing to send, else:
+      spec: the notes file to work on (the one from before a stopped refine, when starting again),
+      resume_from: the video time to pick up from, or None for the beginning,
+      first_backup: the backup from before the refine being picked up, or None,
+      old_record: the "refined" record as it was,
+      carried: the unreadable stretches not sent again (they stay recorded),
+      retry: the unreadable stretches to send again,
+      only_again: True when those stretches are all there is to send."""
     stopped = (spec.get("refined") or {}).get("stopped_after")
     resume_from, first_backup = None, None
     done_to = (spec.get("refined") or {}).get("limit")
     if stopped:
-        resume_from, first_backup, before = resume_choice(notes_path, stopped, assume_yes or estimate_only)
+        resume_from, first_backup, before = resume_choice(notes_path, stopped, auto)
         if before is not None:
-            spec, notes = before, before["notes"]
+            spec = before
     elif done_to and (limit is None or limit > done_to + 1):
         # The frames were looked at for the first part only (--limit): look at the rest, and keep what it added.
         resume_from = float(done_to)
-        print(f"The frames were looked at for the first {make_ass.fmt_limit(done_to)} before, so only the rest is "
+        print(f"The frames were looked at for the first {timecode.fmt_limit(done_to)} before, so only the rest is "
               f"sent now.")
     # Stretches whose replies couldn't be read last time ("unreadable" in the refined record): offered again.
     old_record = dict(spec.get("refined") or {})
@@ -423,7 +399,7 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
         where = ", ".join(f"{hms(float(u.get('from', 0)))} to {hms(float(u.get('to', 0)))}" for u in carried)
         if prompts.ask(f"Claude's reply about the frames from {where} couldn't be read last time, so those "
                        f"stretches weren't looked at. Send just those again?",
-                       {"y": "yes, send just those", "n": "no, leave them"}, "y", assume_yes or estimate_only,
+                       {"y": "yes, send just those", "n": "no, leave them"}, "y", auto,
                        id="refine.unreadable") == "y":
             retry, carried = carried, []
         if resume_from is None:                  # the rest is finished: those stretches are all there is to do
@@ -431,23 +407,19 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
                 print("Nothing was sent. Those stretches stay recorded; the next run asks again.")
                 return None
             only_again = True
-    key = None if estimate_only else gn.load_key(key_file)    # fail early if there is no usable key
-    film_language = film_language or spec.get("film_language")
-    if not original_srt and spec.get("original_subtitles"):
-        original_srt = workfiles.find_near(srt_path, spec["original_subtitles"], video)
-    title = title or re.sub(r"\s*\(context notes\)\s*$", "", str(spec.get("title") or Path(srt_path).stem))
-    situation, extra = gn.subtitle_setup(cues, film_language, original_srt)
-    audience = audience or spec.get("audience") or gn.default_audience(film_language, situation)
-    year = year or spec.get("year") or gn.resolve_year(None, video, title)
+    return types.SimpleNamespace(spec=spec, resume_from=resume_from, first_backup=first_backup, old_record=old_record,
+                                 carried=carried, retry=retry, only_again=only_again)
 
+
+def look_at_video(cues, video, frames, spec, limit, assume_synced):
+    """Analyse the video (analyze.py: the sync, the contact sheets, the loud moments) and record the measured offset
+    in `spec`. Returns (the analysis, the sync message for the report, whether only on-screen notes can be added)."""
     import analyze
     print("Analysing the video (the slow part, all on this computer)...")
     if limit:
-        print(f"  limited to the first {make_ass.fmt_limit(limit)}")
+        print(f"  limited to the first {timecode.fmt_limit(limit)}")
     previous = float(spec.get("video_offset", 0) or 0)
     an = analyze.analyze_video(cues, video, frames, fallback_offset=previous, limit=limit)
-    offset = an["offset"]
-    sync_msg = None
     if an["offset_measured"] is not None:
         spec["video_offset"] = round(an["offset_measured"], 2)
         sync_msg = (f"sync offset set to {spec['video_offset']:+.2f} s" +
@@ -456,20 +428,25 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
         sync_msg = f"sync offset left at {previous:+.2f} s ({an['sync']['verdict'].rstrip('.')})"
     print("  " + sync_msg)
 
-    synced = an["offset_measured"] is not None or assume_synced
-    visual_only = not synced
+    visual_only = not (an["offset_measured"] is not None or assume_synced)
     if visual_only:
         print("  ! The subtitles can't be matched to this video's soundtrack, so revisions to your existing notes would be\n"
               "    guesswork. I'll only ADD notes about what's on screen and leave your existing notes alone.\n"
               "    (If you've already run  analyze.py --align  and are using the .aligned.srt, add --assume-synced.)")
+    return an, sync_msg, visual_only
 
+
+def plan_windows(an, start):
+    """The stretches of video to send: (every window, the parts left to do, the ones sent again, the part number
+    the parts left start at, how many parts there are)."""
     wins = make_windows(an["sheets"], an["duration"])
     if not wins:
         sys.exit("No contact sheets were produced, so there is nothing to look at.")
+    resume_from = start.resume_from
     total, first = len(wins), 1
-    todo = [] if only_again else wins
+    todo = [] if start.only_again else wins
     again = [w for w in wins if any(w["lo"] < float(u.get("to", 0)) - 0.01 and w["hi"] > float(u.get("from", 0)) + 0.01
-                                    for u in retry)]
+                                    for u in start.retry)]
     if again:
         print(f"  Sending again the {len(again)} stretch(es) whose replies couldn't be read last time.")
     if resume_from is not None:
@@ -482,49 +459,21 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
             if todo:
                 todo[0]["lo"] = resume_from
             total = first - 1 + len(todo)
-        sync_msg = f"picked up at {hms(resume_from)} (part {first} of {total}); {sync_msg}"
         print(f"  Picking up at {hms(resume_from)}: part {first} of {total}.")
-    if not todo and not again:
-        if not estimate_only:
-            _save(spec, notes, {}, notes_path, ["(nothing was left to refine)"],
-                  notes_path.with_name(first_backup or notes_path.name), sync_msg=sync_msg, model=model, limit=limit,
-                  append=True)
-        print("Nothing was left to refine" + ("." if estimate_only else "; marked as finished."))
-        return None
+    return wins, todo, again, first, total
+
+
+def system_prompt(audience, language, visual_only, film_language, situation, year):
     mode_note = ("IMPORTANT: for this video the subtitles are NOT reliably in step with the picture. Ignore the grey "
                  "subtitle text under frames. ONLY ADD notes with kind \"visual\"; leave the revise, retime and drop "
                  "lists empty.\n\n") if visual_only else ""
-    sys_prompt = SYSTEM.format(audience=audience, language=language, maxnew=MAX_NEW_PER_WINDOW, mode_note=mode_note,
-                               foreign_note=foreign_note(film_language, situation), era_section=gn.era_section(year))
-    times = note_times(cues, notes, offset)
-    sending = again + todo
-    est_in = sum(image_tokens(p) for w in sending for p, _, _ in w["sheets"])
-    est_in += sum((len(sys_prompt) + len(window_text(w, cues, offset, an["moments"], notes, times, title, 1, 1,
-                                                     visual_only, extra)[0])) // 3.5 for w in sending)
-    est_out = len(sending) * 500
-    est_in = int(est_in)
-    c = gn.cost(model, est_in, est_out)
-    n_img = sum(len(w["sheets"]) for w in sending)
-    print(("Mode: full (subtitles are in sync with the video)." if not visual_only else
-           "Mode: on-screen notes only (subtitles not in sync).") + f" Offset used: {offset:+.2f} s.")
-    print(f"Plan: {len(sending)} request(s) to {model}, {n_img} contact-sheet images (video frames) plus the dialogue and "
-          f"your {len(notes)} notes; about {est_in:,} tokens in and {est_out:,} out"
-          + (f", roughly ${c:.2f} in API credits." if c is not None else "."))
-    bal = usage.plan_note(c)
-    per_request = None if c is None or not sending else c / len(sending)     # for usage.guard, until real costs are known
-    prompts.event("estimate", step="refine", model=model, mode="visual-only" if visual_only else "full",
-                  offset=round(offset, 2), requests=len(sending), images=n_img, notes=len(notes), input_tokens=est_in,
-                  output_tokens=est_out, cost_usd=None if c is None else round(c, 4), limit=limit,
-                  balance_usd=None if bal is None else bal["balance_usd"])
-    if estimate_only:
-        print("Estimate only: nothing was sent. (The video analysis is saved, so the real run is quicker.)")
-        return None
-    if not assume_yes:
-        if not prompts.interactive():
-            sys.exit("Not an interactive terminal, so add --yes to confirm sending the frames and subtitles to the API.")
-        if not prompts.confirm("Send the video frames and subtitle text to the Claude API now?", id="refine.send"):
-            sys.exit("Cancelled; nothing was sent. (The video analysis is saved, so a rerun is quicker.)")
+    return SYSTEM.format(audience=audience, language=language, maxnew=MAX_NEW_PER_WINDOW, mode_note=mode_note,
+                         foreign_note=foreign_note(film_language, situation), era_section=gn.era_section(year))
 
+
+def keep_backups(notes_path, ass_path, video):
+    """Before anything changes: the notes as they are (beside them), and the .ass (in the video's working folder).
+    Returns the notes' backup."""
     backup = unique_backup(notes_path)
     shutil.copy2(notes_path, backup)
     print(f"Kept a backup of your notes: {backup.name}")
@@ -533,120 +482,213 @@ def refine(srt_path, notes_path, video, model=gn.DEFAULT_MODEL, frames="keyframe
         workfiles.make_dirs(ass_backup.parent)
         shutil.copy2(ass_path, ass_backup)
         print(f"Kept the old subtitles: {ass_backup.name}")
-    usage.begin(film=usage.film_name(notes_path), step="refine", per_request=per_request)
-    log, dropped, tin, tout, total_added, problems = [], {}, 0, 0, 0, []
-    total_revised = total_retimed = 0
-    unread = []                                  # stretches whose replies couldn't be read in this run
-    pending = [{"from": round(w["lo"], 3), "to": round(w["hi"], 3)} for w in again]       # to send again, not yet sent
+    return backup
 
-    def missing():
-        return carried + unread + pending
 
-    def stop_early():
-        last = max(resume_from or 0.0, done_until)
+def sheet_content(win, text):
+    """One request's content: each contact sheet (a line saying when its frames are from, then the image), then the
+    text. The images are file paths here: claude_api attaches them for the API, and on the plan route Claude Code
+    opens them itself."""
+    content = []
+    for path, t0, t1 in win["sheets"]:
+        content.append({"type": "text", "text": f"Contact sheet: frames from {hms(t0)} to {hms(t1)}"})
+        content.append({"type": "image", "path": str(path)})
+    content.append({"type": "text", "text": text})
+    return content
+
+
+class Refining:
+    """A refine in progress: the notes as changed so far and the part they reach. The notes file is saved after
+    every part (with where it got to), so a run that ends without warning can pick up after the last part that
+    finished. Used by sending.send_parts (prepare, apply, keep)."""
+
+    def __init__(self, spec, notes_path, backup, start, model, sheets, limit, sync_msg, cues, an, times, wins, total,
+                 first, again, title, visual_only, extra):
+        self.spec, self.notes, self.notes_path, self.backup = spec, spec["notes"], notes_path, backup
+        self.start, self.model, self.sheets, self.limit, self.sync_msg = start, model, sheets, limit, sync_msg
+        self.cues, self.offset, self.moments = cues, an["offset"], an["moments"]
+        self.wins, self.total, self.title, self.visual_only, self.extra = wins, total, title, visual_only, extra
+        self.times = times                       # when each note appears: worked out again after every part
+        self.tokens = sending.Tokens()
+        self.log, self.dropped, self.problems = [], {}, []
+        self.added = self.revised = self.retimed = 0
+        self.unread = []                         # stretches whose replies couldn't be read in this run
+        self.pending = [{"from": round(w["lo"], 3), "to": round(w["hi"], 3)} for w in again]   # to send again, not yet sent
+        self.completed, self.done_until = first - 1, 0.0
+        self.listed = None                       # the notes the request being sent lists (window_text), for apply
+
+    def missing(self):
+        return self.start.carried + self.unread + self.pending
+
+    def prepare(self, job):
+        number, win, again = job
+        text, self.listed = window_text(win, self.cues, self.offset, self.moments, self.notes, self.times, self.title,
+                                        number, len(self.wins) if again else self.total, self.visual_only, self.extra,
+                                        self.dropped)
+        label = f"  part {number}/{len(self.wins)} again: " if again else f"  part {number}/{self.total}: "
+        return label + f"{hms(win['lo'])}-{hms(win['hi'])} ...", sheet_content(win, text)
+
+    def apply(self, job, reply):
+        number, win, again = job
+        reply_text = "".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text")
+        parsed = parse_reply(reply_text)
+        if not any(parsed.values()) and reply_text.strip() not in ("{}", ""):
+            bad = failed_reply_path(self.notes_path, number)
+            bad.write_text(reply_text, encoding="utf-8")
+            self.problems.append(f"part {number}: couldn't read the reply; saved it to {bad.name}")
+            self.unread.append({"from": round(win["lo"], 3), "to": round(win["hi"], 3), "reply": bad.name})
+        if reply.get("stop_reason") == "max_tokens":
+            self.problems.append(f"part {number}: reply was cut off, so some changes in this part may be missing")
+        added, revised, retimed, dropped_n = apply_reply(parsed, win, self.cues, self.offset, self.notes, self.times,
+                                                         self.listed, self.log, self.dropped, self.visual_only)
+        self.added += added
+        self.revised += revised
+        self.retimed += retimed
+        print(f"{added} added, {revised} revised, {retimed} retimed, {dropped_n} dropped")
+        self.times = note_times(self.cues, self.notes, self.offset)     # new notes need times too, for later windows
+        if again:
+            self.pending.pop(0)                  # sent again in the order they're listed
+            self.checkpoint()
+            return
+        self.completed, self.done_until = number, win["hi"]
+        if number < self.total:
+            self.checkpoint()
+
+    def stopped_record(self):
+        last = max(self.start.resume_from or 0.0, self.done_until)
+        return {"time": round(last, 3), "part": self.completed, "parts": self.total,
+                "backup": self.start.first_backup or self.backup.name}
+
+    def checkpoint(self):
+        """After every part, so a run that ends without warning (the window closed, the computer lost power) can
+        pick up after the last part that finished: the notes file says where, as keep() does."""
+        snapshot = {**self.spec, "notes": [n for i, n in enumerate(self.notes, 1) if i not in self.dropped]}
+        if self.start.only_again:
+            snapshot["refined"] = {k: v for k, v in self.start.old_record.items()
+                                   if k not in ("stopped_after", "unreadable")}
+        else:
+            snapshot["refined"] = {"model": self.model, "date": datetime.date.today().isoformat(),
+                                   "contact_sheets": self.sheets, **({"limit": round(self.limit, 1)} if self.limit else {}),
+                                   "stopped_after": self.stopped_record()}
+        if self.missing():
+            snapshot["refined"]["unreadable"] = self.missing()
+        fileio.write_text_safely(self.notes_path, json.dumps(snapshot, indent=1, ensure_ascii=False) + "\n")
+
+    def keep(self):
+        """The run stopped early: save the changes so far, and where to pick up."""
+        start, backup = self.start, self.backup
         print()
-        _save(spec, notes, dropped, notes_path, log, backup, model=model, usage=(tin, tout), sheets=n_img,
-              sync_msg=f"STOPPED EARLY after part {completed} of {total}; {sync_msg}", limit=limit,
-              stopped=None if only_again else {"time": round(last, 3), "part": completed, "parts": total,
-                                               "backup": first_backup or backup.name},
-              append=resume_from is not None or only_again, unreadable=missing(),
-              record=old_record if only_again else None)
-        if only_again:
+        _save(self.spec, self.notes, self.dropped, self.notes_path, self.log, backup, model=self.model,
+              usage=(self.tokens.input, self.tokens.output), sheets=self.sheets,
+              sync_msg=f"STOPPED EARLY after part {self.completed} of {self.total}; {self.sync_msg}", limit=self.limit,
+              stopped=None if start.only_again else self.stopped_record(),
+              append=start.resume_from is not None or start.only_again, unreadable=self.missing(),
+              record=start.old_record if start.only_again else None)
+        if start.only_again:
             print(f"  Stopped. The changes so far were saved to the notes file (original: {backup.name}); the "
                   f"stretches not sent yet stay recorded, and the next run asks again.", flush=True)
             return
-        print(f"  Stopped after part {completed} of {total}. The changes so far were saved to the notes file "
+        print(f"  Stopped after part {self.completed} of {self.total}. The changes so far were saved to the notes file "
               f"(original: {backup.name}). The next refine offers to pick up from here.", flush=True)
 
-    def checkpoint():
-        """After every part, so a run that ends without warning (the window closed, the computer lost power) can
-        pick up after the last part that finished: the notes file says where, as stop_early() does."""
-        last = max(resume_from or 0.0, done_until)
-        snapshot = {**spec, "notes": [n for i, n in enumerate(notes, 1) if i not in dropped]}
-        if only_again:
-            snapshot["refined"] = {k: v for k, v in old_record.items() if k not in ("stopped_after", "unreadable")}
-        else:
-            snapshot["refined"] = {"model": model, "date": datetime.date.today().isoformat(), "contact_sheets": n_img,
-                                   **({"limit": round(limit, 1)} if limit else {}),
-                                   "stopped_after": {"time": round(last, 3), "part": completed, "parts": total,
-                                                     "backup": first_backup or backup.name}}
-        if missing():
-            snapshot["refined"]["unreadable"] = missing()
-        make_ass.write_text_safely(notes_path, json.dumps(snapshot, indent=1, ensure_ascii=False) + "\n")
 
-    completed, done_until = first - 1, 0.0
-    jobs = [(None, w) for w in again] + list(enumerate(todo, first))      # (part number, or None: sent again)
-    done_before = first - 1 if todo else 0
-    requests = done_before + len(jobs)
-    try:
-        for j, (k, win) in enumerate(jobs):
-            stop = usage.guard(assume_yes)
-            if stop:                             # about to run out of credit: keep the changes so far, then say so
-                stop_early()
-                sys.exit(stop)
-            number = k if k is not None else wins.index(win) + 1
-            text, listed = window_text(win, cues, offset, an["moments"], notes, times, title, number,
-                                       total if k is not None else len(wins), visual_only, extra, dropped)
-            content = []
-            for path, t0, t1 in win["sheets"]:
-                content.append({"type": "text", "text": f"Contact sheet: frames from {hms(t0)} to {hms(t1)}"})
-                content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
-                                                            "data": base64.b64encode(Path(path).read_bytes()).decode()}})
-            content.append({"type": "text", "text": text})
-            prompts.progress("refine", done_before + j, requests, "requests")     # before the line below (stays open)
-            print(f"  part {k}/{total}: " if k is not None else f"  part {number}/{len(wins)} again: ", end="")
-            print(f"{hms(win['lo'])}-{hms(win['hi'])} ...", end=" ", flush=True)
-            try:
-                reply = gn.call_api(key, model, sys_prompt, content, api_url, timeout=600, max_tokens=max_tokens,
-                                    effort=effort)
-            except SystemExit:                               # an API error: keep the changes so far
-                stop_early()
-                raise
-            u = reply.get("usage", {})
-            tin += u.get("input_tokens", 0)
-            tout += u.get("output_tokens", 0)
-            reply_text = "".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text")
-            parsed = parse_reply(reply_text)
-            if not any(parsed.values()) and reply_text.strip() not in ("{}", ""):
-                bad = failed_reply_path(notes_path, number)
-                bad.write_text(reply_text, encoding="utf-8")
-                problems.append(f"part {number}: couldn't read the reply; saved it to {bad.name}")
-                unread.append({"from": round(win["lo"], 3), "to": round(win["hi"], 3), "reply": bad.name})
-            if reply.get("stop_reason") == "max_tokens":
-                problems.append(f"part {number}: reply was cut off, so some changes in this part may be missing")
-            added, revised, retimed, dropped_n = apply_reply(parsed, win, cues, offset, notes, times, listed, log, dropped,
-                                                             visual_only)
-            total_added += added
-            total_revised += revised
-            total_retimed += retimed
-            print(f"{added} added, {revised} revised, {retimed} retimed, {dropped_n} dropped")
-            # new notes need times too, so later windows can see them
-            times = note_times(cues, notes, offset)
-            if k is None:
-                pending.pop(0)                   # sent again in the order they're listed
-                checkpoint()
-                usage.report()                   # once the part is counted and saved, never before
-                continue
-            completed, done_until = k, win["hi"]
-            if k < total:
-                checkpoint()
-            usage.report()
-    except KeyboardInterrupt:                    # Ctrl-C, or a GUI's Cancel: keep the changes so far
-        stop_early()
-        raise
-    prompts.progress("refine", requests, requests, "requests")
+def refine(srt_path, notes_path, video, model=claude_api.DEFAULT_MODEL, frames="keyframes", audience=None, title=None,
+           language="English", assume_yes=False, key_file=None, api_url=claude_api.API_URL, ass_path=None,
+           assume_synced=False, film_language=None, original_srt=None, limit=None, effort=None,
+           max_tokens=REFINE_MAX_TOKENS, year=None, estimate_only=False, route="api", fallback_usd=0.0):
+    """Refine the notes using the video. With estimate_only, stop after the size and cost estimate: no API key
+    is needed and nothing is sent; the notes and .ass are untouched (the video analysis is cached as usual).
+    `route` and `fallback_usd`: as for generate_notes.generate() (sending.Sender). On the plan, Claude Code opens
+    the contact sheets itself with its Read tool.
 
-    report = _save(spec, notes, dropped, notes_path, log, backup, sync_msg=sync_msg, model=model,
-                   usage=(tin, tout), problems=problems, sheets=n_img, limit=limit,
-                   append=resume_from is not None or only_again, unreadable=carried + unread,
-                   record=old_record if only_again else None)
-    actual = gn.cost(model, tin, tout)
-    print(f"Refined {notes_path.name}: {total_added} added, {total_revised} revised, {total_retimed} retimed, "
-          f"{len(dropped)} dropped; {sync_msg}.")
-    print(f"Used {tin:,} input and {tout:,} output tokens" + (f" (about ${actual:.2f})." if actual is not None else "."))
+    The steps: where to start (where_to_start), the video (look_at_video, plan_windows), the estimate and the
+    question, then the stretches one at a time (sending.send_parts with a Refining), and the notes and report
+    (_save)."""
+    check_same_episode(video, srt_path, notes_path)
+    cues = subtitles.parse_srt(srt_path)
+    if not cues:
+        sys.exit(f"No subtitle cues found in {srt_path}")
+    notes_path = Path(notes_path)
+    start = where_to_start(load_notes(notes_path), notes_path, limit, assume_yes or estimate_only)
+    if start is None:
+        return None
+    spec = start.spec
+    notes = spec["notes"]
+    sender = sending.Sender("refine", model, route=route, fallback_usd=fallback_usd, effort=effort,
+                            max_tokens=max_tokens, timeout=600, key_file=key_file, api_url=api_url,
+                            assume_yes=assume_yes, workdir=notes_path.resolve().parent)
+    sender.ready(estimate_only)                  # fail early if there is no usable key (or say Claude Code can't be used)
+    film_language = film_language or spec.get("film_language")
+    if not original_srt and spec.get("original_subtitles"):
+        original_srt = workfiles.find_near(srt_path, spec["original_subtitles"], video)
+    title = title or re.sub(r"\s*\(context notes\)\s*$", "", str(spec.get("title") or Path(srt_path).stem))
+    situation, extra = gn.subtitle_setup(cues, film_language, original_srt)
+    audience = audience or spec.get("audience") or gn.default_audience(film_language, situation)
+    year = year or spec.get("year") or gn.resolve_year(None, video, title)
+
+    an, sync_msg, visual_only = look_at_video(cues, video, frames, spec, limit, assume_synced)
+    offset = an["offset"]
+    wins, todo, again, first, total = plan_windows(an, start)
+    if start.resume_from is not None:
+        sync_msg = f"picked up at {hms(start.resume_from)} (part {first} of {total}); {sync_msg}"
+    if not todo and not again:
+        if not estimate_only:
+            _save(spec, notes, {}, notes_path, ["(nothing was left to refine)"],
+                  notes_path.with_name(start.first_backup or notes_path.name), sync_msg=sync_msg, model=model,
+                  limit=limit, append=True)
+        print("Nothing was left to refine" + ("." if estimate_only else "; marked as finished."))
+        return None
+    sys_prompt = system_prompt(audience, language, visual_only, film_language, situation, year)
+    times = note_times(cues, notes, offset)
+    sending_wins = again + todo
+    est_in = sum(image_tokens(p) for w in sending_wins for p, _, _ in w["sheets"])
+    est_in += sum((len(sys_prompt) + len(window_text(w, cues, offset, an["moments"], notes, times, title, 1, 1,
+                                                     visual_only, extra)[0])) // 3.5 for w in sending_wins)
+    est_out = len(sending_wins) * 500
+    est_in = int(est_in)
+    c = claude_api.cost(model, est_in, est_out)
+    n_img = sum(len(w["sheets"]) for w in sending_wins)
+    print(("Mode: full (subtitles are in sync with the video)." if not visual_only else
+           "Mode: on-screen notes only (subtitles not in sync).") + f" Offset used: {offset:+.2f} s.")
+    print(f"Plan: {len(sending_wins)} request(s) to {model}, {n_img} contact-sheet images (video frames) plus the "
+          f"dialogue and your {len(notes)} notes; about {est_in:,} tokens in and {est_out:,} out"
+          + sending.cost_words(c, sender.on_plan))
+    per_request = sending.estimate("refine", c, limit, on_plan=sender.on_plan, model=model,
+                                   mode="visual-only" if visual_only else "full", offset=round(offset, 2),
+                                   requests=len(sending_wins), images=n_img, notes=len(notes), input_tokens=est_in,
+                                   output_tokens=est_out)
+    sender.per_request_usd = per_request
+    if estimate_only:
+        print("Estimate only: nothing was sent. (The video analysis is saved, so the real run is quicker.)")
+        return None
+    sender.confirm(len(sending_wins), "Send the video frames and subtitle text to the Claude API now?", "refine.send",
+                   unattended="Not an interactive terminal, so add --yes to confirm sending the frames and subtitles "
+                              "to the API.",
+                   cancelled="Cancelled; nothing was sent. (The video analysis is saved, so a rerun is quicker.)",
+                   plan_question="Send the video frames and subtitle text to Claude now (on your Claude plan, through "
+                                 "Claude Code)?")
+
+    backup = keep_backups(notes_path, ass_path, video)
+    usage.begin(film=usage.film_name(notes_path), step="refine", per_request=None if sender.on_plan else per_request)
+    sender.system = sys_prompt
+    sender.folders = sorted({str(Path(p).resolve().parent) for w in wins for p, _, _ in w["sheets"]})
+    run = Refining(spec, notes_path, backup, start, model, n_img, limit, sync_msg, cues, an, times, wins, total, first,
+                   again, title, visual_only, extra)
+    jobs = ([(wins.index(w) + 1, w, True) for w in again]          # (part number, the window, whether it's sent again)
+            + [(k, w, False) for k, w in enumerate(todo, first)])
+    sending.send_parts(run, jobs, sender, "refine", first - 1 if todo else 0, assume_yes)
+
+    tin, tout = run.tokens.input, run.tokens.output
+    report = _save(spec, notes, run.dropped, notes_path, run.log, backup, sync_msg=sync_msg, model=model,
+                   usage=(tin, tout), problems=run.problems, sheets=n_img, limit=limit,
+                   append=start.resume_from is not None or start.only_again, unreadable=start.carried + run.unread,
+                   record=start.old_record if start.only_again else None)
+    print(f"Refined {notes_path.name}: {run.added} added, {run.revised} revised, {run.retimed} retimed, "
+          f"{len(run.dropped)} dropped; {sync_msg}.")
+    print(sending.used_line(sender, model, tin, tout))
     usage.finish()
     print(f"Report of every change: {report}")
-    for p in problems:
+    for p in run.problems:
         print("  ! " + p)
 
 
@@ -667,7 +709,7 @@ def _save(spec, notes, dropped, notes_path, log, backup, sync_msg=None, model=No
             spec["refined"]["stopped_after"] = stopped
     if unreadable:
         spec["refined"]["unreadable"] = list(unreadable)
-    make_ass.write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
+    fileio.write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
     report = notes_path.with_name(notes_path.stem + ".refine-report.txt")
     with open(report, "a" if append else "w", encoding="utf-8") as f:
         f.write(("\n" if append else "") + f"Refinement of {notes_path.name} on {datetime.date.today().isoformat()} ({model})\n"

@@ -40,6 +40,10 @@ HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 import analyze  # noqa: E402
+import cli_common  # noqa: E402  (the options context_notes.py and make_ass.py share)
+import fileio  # noqa: E402
+import subtitles  # noqa: E402
+import timecode  # noqa: E402
 import embed  # noqa: E402  (whether a film's notes are inside its .mkv: --preview-rebuild)
 import languages  # noqa: E402
 import make_ass  # noqa: E402
@@ -87,7 +91,7 @@ def covers(have, want):
 
 def load_notes(path):
     try:
-        spec = json.loads(make_ass.read_text(path))
+        spec = json.loads(fileio.read_text(path))
     except (OSError, ValueError):
         return None
     return spec if isinstance(spec, dict) else {"notes": spec}
@@ -142,7 +146,7 @@ def subtitle_files(video):
         lang, tags = languages.from_filename(base_name, stem)
         if lang is None:
             try:
-                lang = languages.guess(" ".join(c["text"] for c in make_ass.parse_srt(p)[:300]))
+                lang = languages.guess(" ".join(c["text"] for c in subtitles.parse_srt(p)[:300]))
             except (OSError, ValueError):
                 lang = None
         out.append({"path": p, "lang": lang, "tags": tags, "embedded": "embedded" in tags,
@@ -335,7 +339,7 @@ def status_line(st):
         subs = f"none in {languages.name(st['display_lang'])}; found {found_elsewhere(st['subs'])}"
     if st["have"]:
         lim = (st["spec"] or {}).get("limit")
-        notes = f"{st['have']} notes" + (f" (first {make_ass.fmt_limit(lim)})" if lim else "")
+        notes = f"{st['have']} notes" + (f" (first {timecode.fmt_limit(lim)})" if lim else "")
         refined = (st["spec"] or {}).get("refined")
         notes += ((", refine stopped part-way" if refined.get("stopped_after") else ", refined") if refined
                   else ", not refined")
@@ -374,15 +378,52 @@ def run(cmd, cwd):
             raise
 
 
+def check_route(opts):
+    """Before any work: can Claude be reached the way this run is set to? On the plan, Claude Code must be usable;
+    when it isn't, use API credits within --api-fallback (each step then moves to them itself, within that
+    allowance for the whole run), or ask once (or stop, when nobody can be asked). On the API, the key must be
+    there."""
+    import claude_api
+    import usage
+    usage.run_start()                                      # the allowance counts from here, for every step
+    if opts.route == "plan":
+        import claude_code
+        problem = claude_code.problem()
+        if problem:
+            say(f"Claude Code can't be used here, so the notes can't go on your Claude plan: {problem}")
+            if opts.api_fallback > 0:
+                say(f"The steps will use API credits instead, up to {usage.money(opts.api_fallback)} for this run "
+                    f"(--api-fallback, or Settings, Claude).")
+            elif opts.yes or not prompts.interactive():
+                sys.exit("Stopped before any work. Fix Claude Code (above), or allow API credits for when the plan "
+                         "can't be used: Settings, Claude, or --api-fallback 5 (or --route api).")
+            elif prompts.confirm("Use API credits for this run instead? Each step shows what it would cost first.",
+                                 id="plan.fallback"):
+                opts.route = "api"
+            else:
+                sys.exit("Stopped before any work; nothing was sent.")
+        else:
+            if opts.api_fallback > 0:                      # allowed, but only works with a key: say so now
+                try:
+                    claude_api.load_key(opts.api_key_file)
+                except SystemExit:
+                    say(f"(API credits are allowed if the plan runs out, up to {usage.money(opts.api_fallback)}, but "
+                        f"no API key is saved; without one, the run stops there instead.)")
+            return                                         # on the plan: no API key needed
+    try:
+        claude_api.load_key(opts.api_key_file)
+    except SystemExit as e:
+        sys.exit(str(e))
+
+
 def script(name, *args):
     return [sys.executable, str(HERE / name), *[str(a) for a in args]]
 
 
 def common_api_args(opts):
-    out = []
-    for flag, value in (("--model", opts.model), ("--audience", opts.audience), ("--notes-language", opts.notes_language),
-                        ("--api-url", opts.api_url), ("--api-key-file", opts.api_key_file),
-                        ("--effort", getattr(opts, "effort", None))):
+    """What the generate and refine steps are given: the Claude options, who the notes are for, and --yes."""
+    out = cli_common.claude_args(opts)
+    for flag, value in (("--audience", opts.audience), ("--notes-language", opts.notes_language)):
         if value:
             out += [flag, value]
     if opts.yes:
@@ -390,8 +431,8 @@ def common_api_args(opts):
     return out
 
 
-def limit_args(opts):
-    return ["--limit", f"{opts.limit:g}"] if opts.limit else []
+limit_args = cli_common.limit_args
+look_args = cli_common.look_args
 
 
 def rebuild_subtitles(st, opts):
@@ -408,7 +449,7 @@ def keep_old_ass(video):
     overwritten)."""
     ass = ass_path_for(video)
     if ass.exists():
-        backup = make_ass.unique_backup(ass)
+        backup = fileio.unique_backup(ass)
         shutil.copy2(ass, backup)
         say(f"Kept the old subtitles: {backup.name}")
 
@@ -437,7 +478,7 @@ def rebuild_diff(st, opts):
     row("Subtitles at the bottom", bottom, f"{opts.show_subs} (--show-subs)" if opts.show_subs else bottom)
     files = []
     if ass.exists():
-        files.append(f"Kept: {make_ass.unique_backup(ass).name} (the .notes.ass as it is now)")
+        files.append(f"Kept: {fileio.unique_backup(ass).name} (the .notes.ass as it is now)")
     files.append(f"Rebuilt: {ass.name}")
     if ass.name.endswith(".notes.ass"):
         files.append(f"Written beside the film: {ass.name[:-len('.notes.ass')]}.en.ass (the Plex copy, which is "
@@ -446,18 +487,6 @@ def rebuild_diff(st, opts):
     if embedded:
         files.append(f"Out of date inside {video.name}: its Context Notes track (Embed rewrites the film)")
     return {"video": str(video), "name": video.name, "rows": rows, "files": files, "embedded": embedded}
-
-
-def look_args(opts):
-    """How the notes look on screen. Given to every build, which remembers them in the notes file."""
-    out = []
-    if getattr(opts, "reading_speed", None):
-        out += ["--reading-speed", f"{opts.reading_speed:g}"]
-    if getattr(opts, "note_background", None):
-        out += ["--note-background", opts.note_background]
-    if getattr(opts, "note_opacity", None) is not None:
-        out += ["--note-opacity", f"{opts.note_opacity:g}"]
-    return out
 
 
 def get_subtitles(video, lang, opts, required=True, accept_unknown=False):
@@ -551,7 +580,7 @@ def match_timing(video, shown, main, notes, opts):
     than the soundtrack); falls back to the soundtrack if they don't resemble each other."""
     spec = load_notes(notes) if notes.exists() else None
     main_offset = float((spec or {}).get("video_offset", 0) or 0)
-    off, strength, corr = analyze.subtitle_offset(make_ass.parse_srt(shown), make_ass.parse_srt(main))
+    off, strength, corr = analyze.subtitle_offset(subtitles.parse_srt(shown), subtitles.parse_srt(main))
     if strength < 1.3 or corr < 0.4:
         say(f"{shown.name} and {main.name} don't line up clearly, so checking {shown.name} against the soundtrack.")
         return sync_original(video, shown, opts)
@@ -641,7 +670,7 @@ def check_sync(video, srt, film, display_lang, embedded, opts):
     aligned = analyze.aligned_path(srt, opts.limit if opts.limit else None, video)
     if not aligned.exists():
         raise Stop(f"Re-timing ran but {aligned.name} wasn't written.")
-    kept, total = len(make_ass.parse_srt(aligned)), len(make_ass.limit_cues(make_ass.parse_srt(srt), opts.limit))
+    kept, total = len(subtitles.parse_srt(aligned)), len(subtitles.limit_cues(subtitles.parse_srt(srt), opts.limit))
     if kept < 0.5 * total:
         rejected = aligned.with_name(aligned.name + ".rejected")
         aligned.replace(rejected)               # out of the way, or the next run would pick it up as the timing
@@ -782,8 +811,8 @@ def process(video, opts):
     need_generate = opts.redo or not have
     extend = False                               # keep the notes there are and write only the rest
     if have and not opts.redo and not covers(spec.get("limit"), opts.limit):
-        lim = make_ass.fmt_limit(spec["limit"])
-        want = "the whole video" if not opts.limit else f"the first {make_ass.fmt_limit(opts.limit)}"
+        lim = timecode.fmt_limit(spec["limit"])
+        want = "the whole video" if not opts.limit else f"the first {timecode.fmt_limit(opts.limit)}"
         pick = ask(f"{notes.name} only covers the first {lim}. Write notes for {want}? Adding to them keeps these "
                    f"{have} notes and sends only what comes after {lim}; starting again sends everything (the old "
                    f"file is kept as .bak).",
@@ -895,8 +924,7 @@ def main(argv=None):
     ap.add_argument("--status", action="store_true", help="show what's done and what's left, then stop")
     ap.add_argument("--preview-rebuild", action="store_true",
                     help="show what a rebuild would change (the settings now and after, and the files), and change nothing")
-    ap.add_argument("--limit", type=make_ass.duration_arg, metavar="TIME",
-                    help="only the first part of each video, e.g. 5:00, 300 or 5m (for testing)")
+    cli_common.add_limit_arg(ap, "only the first part of each video, e.g. 5:00, 300 or 5m (for testing)")
     ap.add_argument("--film-language", metavar="LANG",
                     help="language spoken in the video: fr, de, es, ... (default: from the audio track's tag, else en)")
     ap.add_argument("--subs-language", metavar="LANG",
@@ -914,9 +942,8 @@ def main(argv=None):
     ap.add_argument("--redo", action="store_true", help="write the notes again even if they exist (old ones kept as .bak)")
     ap.add_argument("--recursive", action="store_true", help="with a folder: include subfolders")
     ap.add_argument("--frames", choices=("keyframes", "dense"), default="keyframes", help="for the refine step")
-    ap.add_argument("--model", help="Claude model (default: from Settings, Opus unless changed)")
-    ap.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"),
-                    help="the model's effort setting (default: the model's own default; Haiku 4.5 doesn't support it)")
+    cli_common.add_claude_args(ap, model_default="from Settings, Opus unless changed",
+                               effort_default="from Settings, high unless changed")
     ap.add_argument("--audience", help="who the notes are for")
     ap.add_argument("--notes-language", help="language to write the notes in (default: English)")
     ap.add_argument("--check-alignment", action="store_true",
@@ -932,21 +959,11 @@ def main(argv=None):
                     help="when a video has no subtitles, don't search OpenSubtitles.com for them")
     ap.add_argument("--align-model", help="speech model for re-timing (default: base.en, or small for other languages)")
     look = ap.add_argument_group("how the notes look (free to change later: the .ass is rebuilt; remembered per video)")
-    look.add_argument("--reading-speed", type=float, metavar="WPM",
-                      help=f"words a minute each note is timed for (default {make_ass.DEFAULT_TIMING['wpm']:g}, "
-                           "0.4 s a word; lower keeps notes up longer)")
-    look.add_argument("--note-background", choices=list(make_ass.BACKGROUNDS),
-                      help=f"the box behind each note (default {make_ass.DEFAULT_BACKGROUND}; dark is the look "
-                           "before 0.2.0; none outlines the text instead)")
-    look.add_argument("--note-opacity", type=make_ass.percent_arg, metavar="PERCENT",
-                      help=f"how solid the see-through box is, from 0 (invisible) to 100 (solid); default "
-                           f"{make_ass.DEFAULT_OPACITY}")
-    ap.add_argument("--api-key-file", help=argparse.SUPPRESS)
-    ap.add_argument("--api-url", help=argparse.SUPPRESS)
+    cli_common.add_look_args(look)
     ap.set_defaults(**settings.cli_defaults())      # the flags left out take this install's defaults
     opts = ap.parse_args(argv)
-    if opts.reading_speed is not None and opts.reading_speed <= 0:
-        ap.error("--reading-speed is words a minute, a number above 0 (the default, 150, is 0.4 s a word)")
+    cli_common.check_look_args(ap, opts)
+    cli_common.settle_route(opts)
     opts.subs_language = languages.code(opts.subs_language) if opts.subs_language else None
     opts.show_subs = languages.code(opts.show_subs) if opts.show_subs else None
 
@@ -967,7 +984,7 @@ def main(argv=None):
             if st["rebuild"]:
                 prompts.event("rebuild-diff", **rebuild_diff(st, opts))
         return 0
-    say(f"{len(videos)} video(s)" + (f", first {make_ass.fmt_limit(opts.limit)} of each" if opts.limit else "") + ":")
+    say(f"{len(videos)} video(s)" + (f", first {timecode.fmt_limit(opts.limit)} of each" if opts.limit else "") + ":")
     old = left_beside(videos)
     for v in videos:
         st = inspect(v, opts)
@@ -981,11 +998,7 @@ def main(argv=None):
     if opts.status:
         return 0
     if not all(st["done"] or st["rebuild"] for st in (inspect(v, opts) for v in videos)):    # a rebuild needs no key
-        import generate_notes
-        try:
-            generate_notes.load_key(opts.api_key_file)          # stop now, not after minutes of local work
-        except SystemExit as e:
-            sys.exit(str(e))
+        check_route(opts)                                  # stop now, not after minutes of local work
 
     say(f'\n$ CN={shlex.quote(str(HERE))}')
     results = {}

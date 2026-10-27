@@ -23,7 +23,9 @@ Two meters, because they work differently:
    estimate is set to $0 on the spot.
 2. The Claude plan's session (Pro/Max: the 5-hour and 7-day windows). The API doesn't see this at all. Claude Code
    tells its status line, and .claude/statusline.py saves what it hears in session.json; this reads it back. So it
-   only moves while Claude Code is open in this project (the notes written with /notes use the plan).
+   only moves while Claude Code is open in this project (the notes written with /notes use the plan, and so do runs
+   on the "plan" route, which go through Claude Code in the background: their requests are in the ledger too, with
+   "route": "plan" and no dollars).
 
 It also keeps the week in view: API spending over the last 7 days, the plan's 7-day figure, and how many 5-hour
 sessions the status line has seen this week (and how full the busiest got). Sessions used somewhere the status line
@@ -52,8 +54,8 @@ def data_dir():
     override = os.environ.get(ENV_DIR, "").strip()
     if override:
         return Path(override).expanduser()
-    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "context-notes"
+    import fileio                                # late, like _write: the status line imports this file
+    return fileio.config_dir()
 
 
 def ledger_path():
@@ -85,10 +87,10 @@ def parse_stamp(text):
 
 
 def _write(path, text):
-    """Write a whole file at once (make_ass.write_text_safely), so a Ctrl-C can't leave half of it. Imported late:
-    the status line only needs make_ass when it has something to write."""
-    import make_ass
-    make_ass.write_text_safely(path, text)
+    """Write a whole file at once (fileio.write_text_safely), so a Ctrl-C can't leave half of it. Imported late:
+    the status line only needs it when it has something to write."""
+    import fileio
+    fileio.write_text_safely(path, text)
 
 
 def _append(path, text):
@@ -103,7 +105,8 @@ def _append(path, text):
 
 # ---------------------------------------------------------------- recording
 _run = {"film": None, "step": None, "requests": 0, "tin": 0, "tout": 0, "usd": 0.0, "unpriced": 0, "last": None,
-        "per_request": None, "carry_on": False}
+        "per_request": None, "carry_on": False, "plan_requests": 0}
+RUN_ENV = "CONTEXT_NOTES_RUN_START"          # when this run began (context_notes.py sets it for the steps it runs)
 _warned = []
 
 
@@ -111,7 +114,56 @@ def begin(film=None, step=None, per_request=None):
     """A paid step is starting: label what follows (which film, which step) and zero this run's totals.
     `per_request`: the plan's estimate for one request, used until real ones show what they cost."""
     _run.update(film=film, step=step, requests=0, tin=0, tout=0, usd=0.0, unpriced=0, last=None,
-                per_request=per_request, carry_on=False)
+                per_request=per_request, carry_on=False, plan_requests=0)
+    run_start()
+
+
+def run_start():
+    """When this run began, for the API-credit allowance (--api-fallback), which counts per run: one context_notes.py
+    run (or one press of Write the notes) covers every step and film in it. Set on first use, for the steps after."""
+    stamp = os.environ.get(RUN_ENV)
+    if not stamp or parse_stamp(stamp) is None:
+        stamp = now_stamp()
+        os.environ[RUN_ENV] = stamp
+    return stamp
+
+
+def _run_state_path():
+    return data_dir() / "run.json"
+
+
+def approve_api_for_run():
+    """A yes to carrying on with API credits (the plan.fallback question) holds for the rest of this run: the later
+    steps (separate processes) don't ask again."""
+    try:
+        _write(_run_state_path(), json.dumps({"run": run_start(), "api_approved": True}) + "\n")
+    except OSError:
+        pass
+
+
+def api_approved_for_run():
+    try:
+        d = json.loads(_run_state_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(d, dict) and d.get("run") == run_start() and d.get("api_approved") is True
+
+
+def run_api_spent(ents=None):
+    """API dollars this run has spent so far (the ledger since run_start(), every step and film)."""
+    since = run_start()
+    return sum(e["usd"] for e in (entries() if ents is None else ents)
+               if e["t"] >= since and e.get("route") != "plan" and _number(e.get("usd")))
+
+
+def run_totals():
+    """This step's API requests and their dollars so far (the plan's requests aren't in them)."""
+    return {"requests": _run["requests"], "usd": _run["usd"]}
+
+
+def set_per_request(usd):
+    """The estimate for one request, from now on in this run (when a run moves from the plan to API credits)."""
+    _run["per_request"] = usd
 
 
 def next_cost():
@@ -130,20 +182,27 @@ def film_name(notes_path):
     return name[:-len(".json")] if name.lower().endswith(".json") else name
 
 
-def record(model, tin, tout, usd):
+def record(model, tin, tout, usd, route="api"):
     """One finished request: into the ledger and this run's totals. `usd` is None when the model's price isn't known.
+    route "plan": a request on the Claude plan (through Claude Code), which costs no API credit: kept out of the
+    dollars and the credit estimate.
     Prints nothing, because a progress line may still be open (report() speaks, after the line is finished).
     Never raises: bookkeeping must not stop a paid run."""
-    _run["requests"] += 1
+    plan = route == "plan"
     _run["tin"] += tin
     _run["tout"] += tout
-    if usd is None:
-        _run["unpriced"] += 1
+    if plan:
+        _run["plan_requests"] += 1
+        usd = None
     else:
-        _run["usd"] += usd
-    _run["last"] = {"model": model, "input_tokens": tin, "output_tokens": tout, "cost_usd": usd}
+        _run["requests"] += 1
+        if usd is None:
+            _run["unpriced"] += 1
+        else:
+            _run["usd"] += usd
+    _run["last"] = {"model": model, "input_tokens": tin, "output_tokens": tout, "cost_usd": usd, "route": route}
     entry = {"t": now_stamp(), "film": _run["film"], "step": _run["step"], "model": model, "in": tin, "out": tout,
-             "usd": None if usd is None else round(usd, 6)}
+             "usd": None if usd is None else round(usd, 6), **({"route": "plan"} if plan else {})}
     try:
         _append(ledger_path(), json.dumps(entry, ensure_ascii=False))
     except OSError as e:
@@ -205,7 +264,7 @@ def balance(ents=None):
         return None
     spent, unpriced = 0.0, 0
     for e in entries() if ents is None else ents:
-        if e["t"] > c["as_of"]:
+        if e["t"] > c["as_of"] and e.get("route") != "plan":
             if _number(e.get("usd")):
                 spent += e["usd"]
             else:
@@ -274,6 +333,23 @@ def write_session(payload):
     except (OSError, ValueError):                  # the week's tally is a nicety: never fail the status line over it
         pass
     return True
+
+
+def save_plan_reading(info):
+    """The plan's windows as Claude Code reports them with each request (in its stream-json output, the
+    `rate_limit_event`'s rate_limit_info: unifiedWindows.five_hour / seven_day, utilization from 0 to 1, resetsAt),
+    saved like a status-line reading. So the meter and the 90% stop stay current while runs go through Claude Code in
+    the background, with no Claude Code window open. False when it had none."""
+    wins = info.get("unifiedWindows") if isinstance(info, dict) else None
+    if not isinstance(wins, dict):
+        return False
+    limits = {}
+    for key in ("five_hour", "seven_day"):
+        w = wins.get(key)
+        if isinstance(w, dict) and _number(w.get("utilization")):
+            limits[key] = {"used_percentage": round(float(w["utilization"]) * 100, 2),
+                           "resets_at": w["resetsAt"] if _number(w.get("resetsAt")) else None}
+    return write_session({"rate_limits": limits}) if limits else False
 
 
 WINDOW_S = 600                                      # readings of one 5-hour window agree on its end to within this
@@ -353,6 +429,17 @@ def _five():
     s = session()
     w = s.get("five_hour") if s else None
     return w if w and w["percent"] is not None else None
+
+
+def session_full(stop_at=PAUSE_DEFAULT):
+    """A reason to stop starting parts on the plan, or None: the 5-hour session at `stop_at`% or more. An old reading
+    still counts while its window hasn't reset, because use only goes up within a window; with no reading at all
+    (Claude Code hasn't been open here), it can't tell, and the run goes on until Claude Code itself says stop."""
+    w = _five()
+    if w is None or w["percent"] < stop_at:
+        return None
+    when = f", and resets {clock(w['resets_at'])}" if w["resets_at"] else ""
+    return f"Your plan's 5-hour session is {w['percent']:.0f}% used{when}."
 
 
 def note_parts_start(say=print):
@@ -557,6 +644,18 @@ def report(say=print):
         return None
     _run["last"] = None
     import prompts
+    if last.get("route") == "plan":
+        text = f"{last['input_tokens']:,} tokens in, {last['output_tokens']:,} out, on your Claude plan"
+        w = _five()
+        if w is not None:
+            text += f" · 5-hour session {w['percent']:.0f}% used when last seen"
+        say("    " + text)
+        prompts.event("usage", step=_run["step"], film=_run["film"], model=last["model"], route="plan",
+                      request={k: last[k] for k in ("input_tokens", "output_tokens", "cost_usd")},
+                      run={"plan_requests": _run["plan_requests"], "requests": _run["requests"],
+                           "cost_usd": round(_run["usd"], 6)},
+                      session_percent=None if w is None else w["percent"])
+        return None
     ents = entries()
     bal = balance(ents)
     film_usd = _film_cost(_run["film"], ents)
@@ -610,11 +709,20 @@ def summary(films=8):
     """Everything the CLI prints and the app shows, as plain data."""
     ents = entries()
     today = datetime.date.today()
-    spent = {"today": 0.0, "week": 0.0, "week_requests": 0, "month": 0.0, "all": 0.0, "unpriced": 0}
+    spent = {"today": 0.0, "week": 0.0, "week_requests": 0, "month": 0.0, "all": 0.0, "unpriced": 0,
+             "plan_week_requests": 0, "plan_requests": 0}
     week_start = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
     by = {}
     for e in ents:
         when = parse_stamp(e["t"])
+        if e.get("route") == "plan":              # on the Claude plan: no dollars, counted on their own
+            spent["plan_requests"] += 1
+            if when is not None and when > week_start:
+                spent["plan_week_requests"] += 1
+            f = by.setdefault(e.get("film") or "(no film)", {"usd": 0.0, "steps": {}, "requests": 0, "last": e["t"]})
+            f["plan_requests"] = f.get("plan_requests", 0) + 1
+            f["last"] = max(f["last"], e["t"])
+            continue
         usd = e.get("usd")
         if not _number(usd):
             spent["unpriced"] += 1
@@ -638,6 +746,7 @@ def summary(films=8):
     recent = sorted(by.items(), key=lambda kv: kv[1]["last"], reverse=True)[:films]
     return {"balance": balance(ents), "spent": {k: round(v, 4) if isinstance(v, float) else v for k, v in spent.items()},
             "films": [{"film": k, "cost_usd": round(v["usd"], 4), "requests": v["requests"], "last": v["last"],
+                       "plan_requests": v.get("plan_requests", 0),
                        "steps": {s: round(c, 4) for s, c in v["steps"].items()}} for k, v in recent],
             "session": session(), "dir": str(data_dir())}
 
@@ -663,10 +772,14 @@ def show(s):
     sp = s["spent"]
     print(f"\nSpent through this tool:  today {money(sp['today'])} · last 7 days {money(sp['week'])} "
           f"({sp['week_requests']} requests) · this month {money(sp['month'])} · all time {money(sp['all'])}")
+    if sp.get("plan_week_requests"):
+        print(f"On your Claude plan (no API credit): {sp['plan_week_requests']} requests in the last 7 days.")
     if s["films"]:
         print("\nFilms, latest first")
         for f in s["films"]:
             split = " · ".join(f"{names.get(k, k)} {money(v)}" for k, v in f["steps"].items())
+            if f.get("plan_requests"):
+                split = (split + " · " if split else "") + f"{f['plan_requests']} on the plan"
             print(f"  {f['film'][:58]:<58}  {money(f['cost_usd']):>8}   {split}")
     print("\nClaude plan session\n  " + session_line(s["session"]))
     if week_line(s["session"]):
