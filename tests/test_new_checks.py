@@ -281,9 +281,14 @@ def test_an_episode_named_by_code_searches_by_the_show_folder(tmp_path):
     video = folder / "S02E03 Moss and the German.mp4"
     video.write_bytes(b"\1" * 200000)
     cfg = {"api_key": "K", "username": "u", "password": "p"}
-    find_subs.search_online(video, "en", cfg, api=api.url)
+    asked = []
+    find_subs.search_online(video, "en", cfg, api=api.url, ask=lambda q: asked.append(q) or "n")
     searches = [c[1] for c in api.calls if c[0] == "GET" and "/subtitles" in c[1]]
     assert any("query=it+crowd" in s and "season_number=2" in s and "episode_number=3" in s for s in searches)
+    # the question says what it's about on its own (in the app it's shown without the lines before it)
+    assert asked and asked[0].startswith("OpenSubtitles.com has English subtitles for S02E03 Moss and the German.mp4: ")
+    assert "Download them? (It uses one of your daily downloads.)" in asked[0]
+    assert not (folder / "S02E03 Moss and the German.en.srt").exists()            # a no downloads nothing
     api.server.shutdown()
 
 

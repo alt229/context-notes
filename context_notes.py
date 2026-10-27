@@ -397,7 +397,8 @@ def check_route(opts):
             elif opts.yes or not prompts.interactive():
                 sys.exit("Stopped before any work. Fix Claude Code (above), or allow API credits for when the plan "
                          "can't be used: Settings, Claude, or --api-fallback 5 (or --route api).")
-            elif prompts.confirm("Use API credits for this run instead? Each step shows what it would cost first.",
+            elif prompts.confirm(f"Claude Code can't be used here, so the notes can't go on your Claude plan: {problem} "
+                                 f"Use API credits for this run instead? Each step shows what it would cost first.",
                                  id="plan.fallback"):
                 opts.route = "api"
             else:
@@ -1012,8 +1013,8 @@ def main(argv=None):
                 say(f"! {e}")
                 results[v] = "stopped"
                 prompts.event("video-result", path=str(v), result="stopped", reason=str(e))
-                if k < len(videos) and ask("Go on to the next video?", {"y": "yes", "n": "no, stop here"}, "y",
-                                           opts.yes, id="folder.next") == "n":
+                if k < len(videos) and ask(f"{v.name} stopped: {e} Go on to the next video?",
+                                           {"y": "yes", "n": "no, stop here"}, "y", opts.yes, id="folder.next") == "n":
                     break
             else:
                 if opts.embed and results[v] in ("done", "ready") and not embed_step(v, opts):

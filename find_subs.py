@@ -394,8 +394,10 @@ def search_online(video, lang, cfg, api=OS_API, ask=None):
         what = (f"“{a.get('release') or a['files'][0].get('file_name')}”, {int(a.get('download_count') or 0):,} downloads"
                 + ("; made for this exact file" if a.get("moviehash_match") else "; NOT matched to your exact file, so "
                    "the sync check may need to fix the timing"))
-        say(f"  OpenSubtitles: {what}")
-        if ask and ask("  Download it (uses one of your daily downloads)?") != "y":
+        if not ask:
+            say(f"  OpenSubtitles: {what}")
+        elif ask(f"OpenSubtitles.com has {languages.name(lang)} subtitles for {video.name}: {what}. Download them? "
+                 f"(It uses one of your daily downloads.)") != "y":
             return None
         data, remaining = client.download(a["files"][0]["file_id"])
     except RuntimeError as e:
