@@ -236,7 +236,24 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 | `opensubtitles.password` | `find_subs.py --set-opensubtitles` | input, hidden | |
 
 `alignment.check` only comes up in a GUI run. With no terminal and no GUI, the scripts skip that question, as they
-always have, and print a hint about `--check-alignment` instead.
+always have, and print a hint about `--check-alignment` instead (unless Yes to all questions is on: then it's yes).
+
+### Yes to all questions
+
+With "Yes to all questions" on (Settings, `"yes_to_all"`; or `--yes-to-all`), `context_notes.py` sets
+`CONTEXT_NOTES_YES_TO_ALL=1`, so every script the run starts sees it too. These questions are then answered without
+asking, and no `question` event is sent for them; the log gets a line ending "(Yes to all questions)":
+
+| id | Answer |
+|---|---|
+| `subs.download`, `subs.transcribe`, `sync.unmeasured`, `alignment.check`, `alignment.fix`, `notes.unreadable`, `refine.unreadable`, `folder.next`, `embed.go` | y |
+| `notes.limited` | a (add the rest) |
+| `generate.resume`, `refine.resume` | p (pick up) |
+| `sync.drift` | its default (a, or c when re-timing isn't possible) |
+
+It's a list (`prompts.YES_TO_ALL`), so a question added later is asked until it's put there. Sending
+(`generate.send`, `refine.send`), API credits (`plan.fallback`, `plan.allowance`, `credit.continue`) and deleting
+(`embed.delete`) are never on it.
 
 ## `--yes` and `--estimate-only`
 

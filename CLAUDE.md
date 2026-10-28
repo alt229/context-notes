@@ -42,6 +42,11 @@ It's the first thing to read when picking the work up on another computer or aft
   5-hour reset by itself (now possible: background requests report the reset time).
 - **Fixed on the way (2026-10-27):** the page's script stopped on load (`remember` was removed but its listener
   stayed), so the app showed nothing. A test now checks every handler and `$("id")` the script uses.
+- **Also added (2026-10-27, Erin's asks; not committed):** "Always download subtitles" (`download_subs`,
+  `--download-subs`) and "Yes to all questions" (`yes_to_all`, `--yes-to-all`) in Settings, Defaults for every run.
+  Yes to all sets `CONTEXT_NOTES_YES_TO_ALL=1` for the run and its steps; `prompts.ask`/`confirm` then answer the
+  questions in `prompts.YES_TO_ALL` (the work: subtitles, sync, alignment, pick up, next video, embed) and never
+  sending, API credits or deleting. A new question isn't on that list unless it's added (and to docs/gui-protocol.md).
 - **Done earlier on 2026-10-27:** the install's defaults. `settings.py` keeps them in `~/.config/context-notes/settings.json`
   (built-in defaults when the file is missing or damaged). The Settings page has a "Defaults for every run" section, and
   the page no longer remembers choices in the browser (the port changes each start). The Terminal scripts read the same

@@ -132,3 +132,41 @@ def test_always_download_subtitles_answers_the_question_itself(tmp_path, monkeyp
     assert settings.BUILT_IN["download_subs"] is False
     settings.save({"download_subs": True})
     assert settings.cli_defaults()["download_subs"] is True
+
+
+def test_yes_to_all_reaches_the_run_and_the_steps_it_starts(tmp_path, usage_dir):
+    """Settings' "Yes to all questions" (or --yes-to-all) turns it on for the run: CONTEXT_NOTES_YES_TO_ALL, which
+    every step the run starts inherits."""
+    import os
+
+    import context_notes as cn
+    import prompts
+    missing = str(tmp_path / "missing.mp4")
+    for saved, flags, on in ((False, [], False), (False, ["--yes-to-all"], True), (True, [], True)):
+        os.environ[prompts.YES_ENV] = ""
+        settings.save({"yes_to_all": saved})
+        assert settings.cli_defaults()["yes_to_all"] is saved
+        with pytest.raises(SystemExit):
+            cn.main([missing, *flags])
+        assert prompts.yes_to_all() is on
+    assert settings.BUILT_IN["yes_to_all"] is False
+
+
+def test_yes_to_all_checks_the_timing_even_with_nobody_there(tmp_path, monkeypatch, usage_dir):
+    """With no terminal the alignment question was skipped (only a hint); Yes to all answers it, so the check runs."""
+    import types
+
+    import context_notes as cn
+    import prompts
+    monkeypatch.setattr(prompts, "interactive", lambda: False)
+    ran = []
+    monkeypatch.setattr(cn, "run", lambda cmd, cwd=None: ran.append(cmd) or 1)
+    video, srt, notes = tmp_path / "ep.mp4", tmp_path / "ep.srt", tmp_path / "ep.notes.json"
+    for f in (video, srt, notes):
+        f.write_text("x")
+    opts = types.SimpleNamespace(no_alignment_check=False, check_alignment=False, yes=False, window=10.0, limit=None,
+                                 align_model=None)
+    assert cn.alignment_step(video, srt, notes, "en", "en", None, opts) == srt and not ran
+    prompts.turn_on_yes_to_all()
+    assert cn.alignment_step(video, srt, notes, "en", "en", None, opts) == srt
+    assert len(ran) == 1 and "align_check.py" in str(ran[0][1])

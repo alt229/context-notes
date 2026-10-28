@@ -56,6 +56,54 @@ def test_terminal_prompts_are_the_same_calls_as_before(monkeypatch):
     assert seen == ["Send it? [y/N] "] * 3 + ["Username: ", "Password (hidden): "]
 
 
+# ---------------------------------------------------------------- "Yes to all questions"
+def test_yes_to_all_answers_only_the_questions_about_the_work(monkeypatch, capsys):
+    monkeypatch.delenv("CONTEXT_NOTES_UI", raising=False)
+    monkeypatch.setattr(prompts, "interactive", lambda: True)
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda q: asked.append(q) or "n")
+    yn = {"y": "yes", "n": "no"}
+    assert prompts.ask("Download them?", yn, "y", id="subs.download") == "n" and asked    # off: asked as before
+    asked.clear()
+    prompts.turn_on_yes_to_all()
+    assert prompts.yes_to_all()
+    assert prompts.ask("Download them?", yn, "y", id="subs.download") == "y"
+    assert prompts.ask("Write them from the soundtrack?", yn, "n", auto=True, id="subs.transcribe") == "y"  # over --yes
+    assert prompts.ask("Drifts. What now?", {"a": "re-time", "c": "carry on", "s": "skip"}, "a", id="sync.drift") == "a"
+    assert prompts.ask("Drifts. What now?", {"c": "carry on", "s": "skip"}, "c", id="sync.drift") == "c"
+    assert prompts.ask("Pick up?", {"p": "pick up", "s": "start again"}, "p", id="generate.resume") == "p"
+    assert prompts.confirm("Download them?", id="subs.download") is True
+    assert not asked
+    assert "Download them? -> yes (Yes to all questions)" in capsys.readouterr().out
+    # never sending, API credits or deleting, nor a question it doesn't know
+    assert prompts.confirm("Send the subtitle text to Claude now?", id="generate.send") is False
+    assert prompts.confirm("Use API credits instead?", id="plan.fallback") is False
+    assert prompts.ask("Delete the kept originals?", yn, "n", id="embed.delete") == "n"
+    assert prompts.ask("Something new?", yn, "y", id="new.question") == "n"
+    assert prompts.ask("No id?", yn, "y") == "n"
+    assert len(asked) == 5
+
+
+def test_yes_to_all_leaves_money_and_deleting_alone():
+    never = {"generate.send", "refine.send", "plan.fallback", "plan.allowance", "credit.continue", "embed.delete",
+             "tidy.move", "api-key"}
+    assert not never & set(prompts.YES_TO_ALL)
+    documented = (ROOT / "docs" / "gui-protocol.md").read_text(encoding="utf-8")
+    for qid in prompts.YES_TO_ALL:
+        assert f"| `{qid}` |" in documented
+
+
+def test_yes_to_all_questions_never_reach_a_gui(gui, capsys):
+    prompts.turn_on_yes_to_all()
+    gui("")
+    assert prompts.ask("Go on to the next video?", {"y": "yes", "n": "no"}, "y", id="folder.next") == "y"
+    out = capsys.readouterr().out
+    assert not events(out) and "(Yes to all questions)" in out
+    gui("y\n")
+    assert prompts.confirm("Send it?", id="refine.send") is True
+    assert [e["id"] for e in events(capsys.readouterr().out)] == ["refine.send"]
+
+
 # ---------------------------------------------------------------- json mode, one function at a time
 def test_question_round_trip(gui, capsys):
     gui("a\n")

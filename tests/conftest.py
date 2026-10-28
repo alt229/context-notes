@@ -73,6 +73,7 @@ def usage_dir(tmp_path_factory, monkeypatch):
     d = tmp_path_factory.mktemp("usage-data")
     monkeypatch.setenv("CONTEXT_NOTES_USAGE_DIR", str(d))
     monkeypatch.delenv("CONTEXT_NOTES_RUN_START", raising=False)   # each test is a run of its own (usage.run_start)
+    monkeypatch.setenv("CONTEXT_NOTES_YES_TO_ALL", "")   # off, and undone after a test whose run turns it on
     return d
 
 

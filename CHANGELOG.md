@@ -7,6 +7,11 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- "Yes to all questions" in Settings (and `context_notes.py --yes-to-all`, `make_ass.py --yes-to-all`): a run doesn't
+  stop to ask about the work. It downloads subtitles, writes them from the soundtrack when none are found, checks and
+  fixes new notes' timing, re-times subtitles that drift, picks up a stopped run, and goes on to the next video; each
+  answer is in the log. It never answers sending to Claude, using API credits, or deleting. Off by default. The list
+  is `prompts.YES_TO_ALL`, so a question added later isn't answered until it's put there.
 - "Always download subtitles" in Settings (and `context_notes.py --download-subs`): when OpenSubtitles.com has
   subtitles for a film that has none, they're downloaded without asking. Off by default. The question itself now says
   what it's about (the film, the release, how often it's been downloaded).

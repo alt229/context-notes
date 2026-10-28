@@ -184,11 +184,19 @@ python3 app.py
   the run options for one run. Then your Anthropic API key (saved in the usual place), the credit you have left, the
   OpenSubtitles login, and a button that installs the VLC extension.
 - **Defaults for every run** (in Settings): the model, thinking effort, who the notes are for, the language to write
-  them in, seconds a word, the box and how solid it is, frames, the timing check, online subtitle search (and whether to download what it finds without asking), subfolders,
-  and the starting folder. They're saved on this computer, and the Terminal scripts read them too, so both start from
+  them in, seconds a word, the box and how solid it is, frames, the timing check, online subtitle search (and whether
+  to download what it finds without asking), subfolders, Yes to all questions, and the starting folder. They're saved
+  on this computer, and the Terminal scripts read them too, so both start from
   the same choices. A film that already has notes keeps its own look and audience. Subtitle choices and anything that
   rewrites or deletes files stay per run. Send-after-10-seconds is on by default: notes go to Claude after 10 seconds
   unless you press Don't send. (It never answers the question about moving to API credits.) Untick it in Settings to be asked each time instead.
+- **Yes to all questions** (in Settings, off by default; `context_notes.py --yes-to-all` for one run): a run doesn't
+  stop to ask about the work. It downloads subtitles, writes them from the soundtrack when none are found (slow),
+  checks new notes' timing against the speech and fixes the stretches that are out, re-times subtitles that drift,
+  picks up a run that stopped, and goes on to the next video. Each answer is in the log. It never answers sending to
+  Claude (that's Send-after-10-seconds, or `--yes`), using API credits (that's "Use API credits when the plan runs
+  out"), or deleting anything. Unlike `--yes`, which takes each question's default, it says yes even where the
+  default is no (writing subtitles from the soundtrack) and even when nobody is there (the timing check).
 
 Keep the Terminal window open while you use it; Ctrl-C there stops it. It runs the same scripts described below, so
 anything it does you can also do by hand. Only your computer can reach it: it listens on 127.0.0.1, and the page's
@@ -287,6 +295,7 @@ context_notes.py PATH --show "The IT Crowd"    # name used in the titles Claude 
 context_notes.py PATH --no-refine              # skip the video-frames step
 context_notes.py PATH --redo                   # write the notes again (the old file is kept as .bak)
 context_notes.py PATH --yes                    # don't stop to ask anything
+context_notes.py PATH --yes-to-all             # yes to the questions about the work; sending still asks
 context_notes.py PATH --reading-speed 120      # notes stay up longer (0.5 s a word); free for finished videos
 context_notes.py PATH --note-background none   # no box behind the notes (also: dark, see-through, the default)
 context_notes.py PATH --note-opacity 50        # a more solid see-through box (0 invisible, 100 solid; default 30)
