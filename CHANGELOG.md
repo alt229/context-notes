@@ -7,6 +7,9 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- "Always download subtitles" in Settings (and `context_notes.py --download-subs`): when OpenSubtitles.com has
+  subtitles for a film that has none, they're downloaded without asking. Off by default. The question itself now says
+  what it's about (the film, the release, how often it's been downloaded).
 - `app.py --hosted`: use the app from a phone or another computer on your network. It answers private addresses only
   (`--allow` adds a range), on port 8229 with a key kept between starts, and prints the address to use. Opening films
   in VLC, Show in folder, the file dialogs, installing the VLC extension, deleting kept originals and saving the API

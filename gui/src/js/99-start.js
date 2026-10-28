@@ -28,6 +28,7 @@ $("redoGo").addEventListener("click", redoGo);
 $("rebuildGo").addEventListener("click", rebuildGo);
 $("rebuildNo").addEventListener("click", () => $("rebuild").close());
 $("d_save").addEventListener("click", saveDefaults);
+$("d_offline").addEventListener("change", () => { $("d_download_subs").disabled = $("d_offline").checked; });
 $("c_save").addEventListener("click", saveClaude);
 $("claudeCheckBtn").addEventListener("click", checkClaude);
 $("d_api_fallback").addEventListener("change", () => { $("d_api_fallback_usd").disabled = !$("d_api_fallback").checked; });

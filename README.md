@@ -184,7 +184,7 @@ python3 app.py
   the run options for one run. Then your Anthropic API key (saved in the usual place), the credit you have left, the
   OpenSubtitles login, and a button that installs the VLC extension.
 - **Defaults for every run** (in Settings): the model, thinking effort, who the notes are for, the language to write
-  them in, seconds a word, the box and how solid it is, frames, the timing check, online subtitle search, subfolders,
+  them in, seconds a word, the box and how solid it is, frames, the timing check, online subtitle search (and whether to download what it finds without asking), subfolders,
   and the starting folder. They're saved on this computer, and the Terminal scripts read them too, so both start from
   the same choices. A film that already has notes keeps its own look and audience. Subtitle choices and anything that
   rewrites or deletes files stay per run. Send-after-10-seconds is on by default: notes go to Claude after 10 seconds

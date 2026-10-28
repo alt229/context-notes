@@ -529,8 +529,8 @@ def _look_further(video, lang, opts, find_subs, film=None):
     # Speech recognition writes what is SAID, so it can only make subtitles in the film's own language.
     can_transcribe = film is None or languages.same(lang, film)
 
-    def ask_yes(q):
-        return ask(q, {"y": "yes", "n": "no"}, "y", opts.yes, id="subs.download")
+    def ask_yes(q):                   # --download-subs (Settings: always download): yes without asking
+        return ask(q, {"y": "yes", "n": "no"}, "y", opts.yes or getattr(opts, "download_subs", False), id="subs.download")
 
     def ask_no(q):                    # transcribing a whole film is slow: only when asked for, never by --yes
         return ask(q, {"y": "yes", "n": "no"}, "n", opts.yes, id="subs.transcribe")
@@ -958,6 +958,9 @@ def main(argv=None):
                     help="for the alignment check: seconds before each note to look at (default 10)")
     ap.add_argument("--offline", action="store_true",
                     help="when a video has no subtitles, don't search OpenSubtitles.com for them")
+    ap.add_argument("--download-subs", action="store_true",
+                    help="download the subtitles OpenSubtitles.com finds without asking (each uses one of your daily "
+                         "downloads; Settings: \"Always download subtitles\")")
     ap.add_argument("--align-model", help="speech model for re-timing (default: base.en, or small for other languages)")
     look = ap.add_argument_group("how the notes look (free to change later: the .ass is rebuilt; remembered per video)")
     cli_common.add_look_args(look)

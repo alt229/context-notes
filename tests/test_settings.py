@@ -101,3 +101,34 @@ def test_make_ass_by_hand_takes_the_model_and_effort_from_settings(tmp_path, api
         body = api.calls[0]["body"]
         assert body["model"] == model
         assert (body.get("output_config") or {}).get("effort") == effort
+
+
+def test_always_download_subtitles_answers_the_question_itself(tmp_path, monkeypatch, usage_dir):
+    """Settings' "Always download subtitles" (--download-subs): the subs.download question isn't asked; without it,
+    it is. Speech recognition is still only by asking."""
+    import types
+
+    import context_notes as cn
+    import prompts
+    asked = []
+    monkeypatch.setattr(prompts, "interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda q: asked.append(q) or "n")
+
+    class Finder:
+        def __init__(self):
+            self.answers = []
+
+        def find(self, video, lang, online=None, transcribe=None, ask=None, model=None, limit=None):
+            self.answers.append(ask("OpenSubtitles.com has English subtitles for ep.mp4: x. Download them?"))
+            return None
+
+    video = tmp_path / "ep.mp4"
+    for always, answer, was_asked in ((True, "y", False), (False, "n", True)):
+        asked.clear()
+        f = Finder()
+        opts = types.SimpleNamespace(yes=False, offline=False, align_model=None, limit=None, download_subs=always)
+        cn._look_further(video, "en", opts, f)
+        assert f.answers == [answer] and bool(asked) is was_asked
+    assert settings.BUILT_IN["download_subs"] is False
+    settings.save({"download_subs": True})
+    assert settings.cli_defaults()["download_subs"] is True

@@ -67,6 +67,8 @@ function renderDefaults() {
   $("d_frames").checked = s.frames === "dense";
   $("d_check_alignment").checked = s.check_alignment;
   $("d_offline").checked = s.offline;
+  $("d_download_subs").checked = s.download_subs;
+  $("d_download_subs").disabled = s.offline;
   $("d_recursive").checked = s.recursive;
   $("d_remember_start").checked = s.remember_start_folder;
   $("d_start_folder").textContent = s.start_folder || "none yet";
@@ -85,7 +87,7 @@ async function saveDefaults() {
     notes_language: $("d_notes_language").value.trim(), seconds_per_word: spw === "" ? null : numberOrText(spw),
     note_background: $("d_background").value, note_opacity: numberOrText($("d_opacity").value.trim()),
     frames: $("d_frames").checked ? "dense" : "keyframes", check_alignment: $("d_check_alignment").checked,
-    offline: $("d_offline").checked, recursive: $("d_recursive").checked,
+    offline: $("d_offline").checked, download_subs: $("d_download_subs").checked, recursive: $("d_recursive").checked,
     remember_start_folder: $("d_remember_start").checked, autosend: $("d_autosend").checked,
   };
   const r = await api("/api/settings", body);
