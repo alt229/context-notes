@@ -37,6 +37,7 @@ BUILT_IN = {
     "check_alignment": False,
     "offline": False,                     # True = don't search OpenSubtitles.com for subtitles
     "download_subs": False,               # True = download what OpenSubtitles.com finds without asking
+    "yes_to_all": False,                  # True = answer the questions about the work without asking (prompts.py)
     "recursive": False,
     "autosend": True,                     # send 10 seconds after showing the cost; untick to be asked each time
     "start_folder": "",
@@ -58,6 +59,7 @@ KEYS = {
     "check_alignment": ("bool", None),
     "offline": ("bool", None),
     "download_subs": ("bool", None),
+    "yes_to_all": ("bool", None),
     "recursive": ("bool", None),
     "autosend": ("bool", None),
     "start_folder": ("text", 1024),
@@ -156,7 +158,7 @@ def cli_defaults():
     return {"model": MODELS[s["quality"]], "effort": s["effort"] or "high", "audience": s["audience"] or None,
             "notes_language": s["notes_language"] or None, "frames": s["frames"],
             "check_alignment": s["check_alignment"], "recursive": s["recursive"], "offline": s["offline"],
-            "download_subs": s["download_subs"]}
+            "download_subs": s["download_subs"], "yes_to_all": s["yes_to_all"]}
 
 
 def route_defaults():

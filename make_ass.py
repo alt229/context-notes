@@ -62,7 +62,7 @@ from pathlib import Path
 
 import cli_common  # the options this script shares with context_notes.py
 import languages
-import prompts  # noqa: F401  (on Windows, lets a GUI's Cancel stop this script cleanly)
+import prompts  # the questions (and on Windows, lets a GUI's Cancel stop this script cleanly)
 import settings  # the install's defaults for the look (settings.json; the built-in ones when there's no file)
 import workfiles
 # Moved to their own modules; the names stay here so older code (and bench/) still finds them.
@@ -712,6 +712,9 @@ def main():
     g.add_argument("--max-tokens", type=int, default=None, metavar="N",
                    help="with --generate/--refine: reply limit per request (higher efforts may need more room)")
     g.add_argument("--yes", action="store_true", help="don't ask before sending the subtitles to the API")
+    g.add_argument("--yes-to-all", action="store_true",
+                   help="pick up a stopped run, and send again what couldn't be read, without asking (Settings: "
+                        "\"Yes to all questions\"). Sending still asks unless --yes")
     g.add_argument("--estimate-only", action="store_true",
                    help="with --generate or --refine: show the size and cost estimate, then stop. Nothing is sent, "
                         "no API key is needed, and no notes or .ass are written (--refine still analyses the video, "
@@ -721,10 +724,12 @@ def main():
                    help="with --generate: keep the notes a run with a shorter --limit wrote, and write notes only for "
                         "the lines after them (only those are sent; a backup copy is kept)")
     defaults = settings.cli_defaults()            # the install's model and effort, as the wrapper and the app use
-    ap.set_defaults(model=defaults["model"], effort=defaults["effort"])
+    ap.set_defaults(model=defaults["model"], effort=defaults["effort"], yes_to_all=defaults["yes_to_all"])
     a = ap.parse_args()
     cli_common.check_look_args(ap, a)
     cli_common.settle_route(a)
+    if a.yes_to_all:
+        prompts.turn_on_yes_to_all()
     if a.estimate_only and not (a.generate or a.refine):
         ap.error("--estimate-only goes with --generate or --refine")
     if a.estimate_only and a.generate and a.refine:

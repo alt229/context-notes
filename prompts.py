@@ -12,6 +12,9 @@ starts, and every script those start, then:
   - reads each answer as one line on stdin: the choice's key (e.g. "y"), or an empty line for the default.
 Everything else they print stays ordinary text, for a log window. Full description: docs/gui-protocol.md.
 
+"Yes to all questions" (Settings; context_notes.py --yes-to-all) sets CONTEXT_NOTES_YES_TO_ALL=1 for the run, and
+the questions about the work itself (YES_TO_ALL below) are then answered without asking, even with no terminal.
+
 Standard library only.
 """
 import getpass
@@ -24,6 +27,21 @@ import time
 ENV = "CONTEXT_NOTES_UI"
 PREFIX = "@context-notes "
 VERSION = 1
+YES_ENV = "CONTEXT_NOTES_YES_TO_ALL"
+
+# What "Yes to all questions" answers by itself: the questions about the work, each with the answer that goes ahead
+# (None: the question's own default, as for sync.drift: re-time, or carry on when that isn't possible). Only these:
+# never sending to Claude (that's --yes, or Send automatically in the app), moving to API credits, or deleting; and
+# a question added later isn't answered until it's listed here.
+YES_TO_ALL = {
+    "subs.download": "y", "subs.transcribe": "y",          # download subtitles; write them from the soundtrack
+    "sync.unmeasured": "y", "sync.drift": None,            # treat them as in sync; re-time them
+    "alignment.check": "y", "alignment.fix": "y",          # check every note's timing; fix the stretches that are out
+    "notes.limited": "a", "notes.unreadable": "y",         # add the rest; send again the lines whose reply was lost
+    "refine.unreadable": "y",
+    "generate.resume": "p", "refine.resume": "p",          # pick up where a stopped run left off
+    "folder.next": "y", "embed.go": "y",                   # go on to the next video; --embed: put the notes inside
+}
 
 
 def machine():
@@ -47,6 +65,24 @@ if os.name == "nt" and machine() and hasattr(signal, "SIGBREAK"):
 def interactive():
     """Can a question be asked at all? Yes in a terminal, and when a program answers (json mode)."""
     return machine() or bool(sys.stdin and sys.stdin.isatty())
+
+
+def yes_to_all():
+    """Is "Yes to all questions" on for this run? (Inherited by every script the run starts.)"""
+    return os.environ.get(YES_ENV, "").strip() == "1"
+
+
+def turn_on_yes_to_all():
+    """For the rest of this run, and the scripts it starts: answer the YES_TO_ALL questions without asking."""
+    os.environ[YES_ENV] = "1"
+
+
+def _yes_answer(id, choices, default):
+    """The key "Yes to all questions" answers question `id` with, or None (it's off, or doesn't answer this one)."""
+    if not id or id not in YES_TO_ALL or not yes_to_all():
+        return None
+    key = YES_TO_ALL[id] or default
+    return key if key in choices else None
 
 
 def event(kind, **fields):
@@ -122,8 +158,13 @@ def question(text, choices, default, id=None):
 def ask(text, choices, default, auto=False, id=None):
     """Ask a one-letter question and return the chosen key. `choices` is like {'a': 'align', 's': 'skip'}.
     With auto (--yes), or nobody to answer (no terminal, no GUI), takes the default and says so. In a terminal: the
-    usual '[a/S]' prompt, with the default in capitals. When a program is answering, the question goes to it."""
+    usual '[a/S]' prompt, with the default in capitals. When a program is answering, the question goes to it.
+    "Yes to all questions" answers the YES_TO_ALL ones first, even over --yes's default."""
     keys = "/".join(k.upper() if k == default else k for k in choices)
+    yes = _yes_answer(id, choices, default)
+    if yes is not None:
+        print(f"{text} -> {choices[yes]} (Yes to all questions)", flush=True)
+        return yes
     if auto or not interactive():
         print(f"{text} -> {choices[default]} (automatic)", flush=True)
         return default
@@ -143,7 +184,10 @@ def ask(text, choices, default, auto=False, id=None):
 
 def confirm(text, id=None):
     """A yes/no question that defaults to no (asked before anything costs money or downloads). True for yes.
-    In a terminal: the same '[y/N]' prompt as always."""
+    In a terminal: the same '[y/N]' prompt as always. "Yes to all questions" answers the YES_TO_ALL ones."""
+    if _yes_answer(id, {"y": "yes", "n": "no"}, "n") == "y":
+        print(f"{text} -> yes (Yes to all questions)", flush=True)
+        return True
     if machine():
         return question(text, {"y": "yes", "n": "no"}, "n", id) == "y"
     return input(f"{text} [y/N] ").strip().lower() in ("y", "yes")

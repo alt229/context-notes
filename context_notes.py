@@ -692,7 +692,7 @@ def alignment_step(video, srt, notes, film, display_lang, original, opts):
     folder = workfiles.analysis(video)
     cached = align_check.find_transcript(folder, film, opts.limit) if folder.exists() else None
     if not (opts.check_alignment or cached):
-        if opts.yes or not prompts.interactive():
+        if (opts.yes or not prompts.interactive()) and not prompts.yes_to_all():
             say("(Every note's timing can be checked against the speech: --check-alignment. It transcribes the "
                 "soundtrack once, which is slow.)")
             return srt
@@ -961,6 +961,10 @@ def main(argv=None):
     ap.add_argument("--download-subs", action="store_true",
                     help="download the subtitles OpenSubtitles.com finds without asking (each uses one of your daily "
                          "downloads; Settings: \"Always download subtitles\")")
+    ap.add_argument("--yes-to-all", action="store_true",
+                    help="answer yes to the questions about the work without asking: download and write subtitles, "
+                         "check and fix the timing, re-time, pick up, go on to the next video (Settings: \"Yes to all "
+                         "questions\"). Never to sending to Claude (that's --yes), API credits, or deleting")
     ap.add_argument("--align-model", help="speech model for re-timing (default: base.en, or small for other languages)")
     look = ap.add_argument_group("how the notes look (free to change later: the .ass is rebuilt; remembered per video)")
     cli_common.add_look_args(look)
@@ -968,6 +972,8 @@ def main(argv=None):
     opts = ap.parse_args(argv)
     cli_common.check_look_args(ap, opts)
     cli_common.settle_route(opts)
+    if opts.yes_to_all:
+        prompts.turn_on_yes_to_all()               # for every step this run starts, too
     opts.subs_language = languages.code(opts.subs_language) if opts.subs_language else None
     opts.show_subs = languages.code(opts.show_subs) if opts.show_subs else None
 

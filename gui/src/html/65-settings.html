@@ -52,6 +52,11 @@
       <label class="check"><input type="checkbox" id="d_recursive"><span>Include subfolders</span></label>
       <label class="check"><input type="checkbox" id="d_remember_start"><span>Remember starting folder<small>The folder you choose opens next time. Off: the app opens empty and doesn't record folders.</small></span></label>
       <p class="hint">Starting folder: <span id="d_start_folder"></span></p>
+      <label class="check"><input type="checkbox" id="d_yes_to_all"><span>Yes to all questions<small>A run doesn't stop to
+        ask about the work. It downloads subtitles, and writes them from the soundtrack when none are found (slow). It
+        checks new notes' timing against the speech and fixes what's out (slow the first time), re-times subtitles that
+        drift, picks up a run that stopped, and goes on to the next video. The log shows each answer. It never answers
+        sending to Claude (that's the next box), using API credits, or deleting anything.</small></span></label>
       <label class="check"><input type="checkbox" id="d_autosend"><span>Send automatically 10 seconds after showing the cost<small>Untick to be asked each time instead. With this on, the notes go to Claude after 10 seconds unless you press Don't send (on API credits, they're billed to your account). You always see the cost first. It never answers the question about moving to API credits.</small></span></label>
       <div class="row">
         <button type="button" class="btn primary" id="d_save">Save defaults</button>
