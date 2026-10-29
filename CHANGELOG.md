@@ -228,6 +228,9 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- Embed (and `--convert`) failed on an MP4 with a phone's or camera's timecode track: "Only audio, video, and subtitles
+  are supported for Matroska". That track is now left out of the copy, and the list, the prompt and the page say how
+  many were left out. Nothing else changes.
 - The app's page stopped as it loaded (a leftover handler for the old "remember my choices" code), so nothing on it
   worked. A test now checks that every handler and element the page's script uses exists.
 - Embed offered films whose notes were already inside them. It now says so, and only offers films that need the notes put in.

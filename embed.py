@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 embed.py - put a film's notes inside the film, as a subtitle track (.mkv only, for now).
-Created 2026-10-24, modified 2026-10-26.
+Created 2026-10-24, modified 2026-10-29.
 
     python3 embed.py film.mkv                       one film: says what it would do, asks, then does it
     python3 embed.py "/Volumes/Movies"              every .mkv in the folder that has a .notes.ass beside it
@@ -24,6 +24,7 @@ How it stays safe:
   - Anything wrong, or Ctrl-C: the film is exactly as it was.
   - It needs about the film's size in free space while it works (one film at a time).
 Only .mkv: an .mp4 can't hold these subtitles without losing their styling, so .mp4 files are left as they are.
+A data track an MKV can't hold (a phone's or camera's timecode) is left out of the copy, and the output says so.
 Notes that only cover the first part of a film (--limit) are not embedded: run the whole film first.
 """
 import argparse
@@ -234,6 +235,20 @@ def plan_for(path, recursive=False, convert=False):
     return plan, without
 
 
+def data_tracks(item):
+    """The data tracks of an inspect() result (a camera's or phone's timecode, say). An MKV can't hold them, so the copy
+    leaves them out, and the output says so."""
+    info = item.get("info") or {}
+    return [s for s in info.get("streams", []) if s.get("codec_type") == "data"]
+
+
+def dropped_text(item):
+    n = len(data_tracks(item))
+    if not n:
+        return ""
+    return f"; leaves out {n} data track{'s' if n != 1 else ''} (such as a camera's timecode), which an MKV can't hold"
+
+
 def describe(item, base):
     v = item["video"]
     name = os.path.relpath(v, base) if base else v.name
@@ -243,7 +258,8 @@ def describe(item, base):
         if item.get("convert"):
             verb = "convert to .mkv, then put the notes inside"
         low, high = rewrite_seconds(item["size"])
-        return f"{name}: {verb}  ({size_text(item['size'])}, about {minutes_text(low)} to {minutes_text(high)})"
+        return (f"{name}: {verb}  ({size_text(item['size'])}, about {minutes_text(low)} to {minutes_text(high)})"
+                + dropped_text(item))
     if act == "current":
         return f"{name}: {item['reason']}"
     return f"{name}: skipped, {item['reason']}"
@@ -274,6 +290,8 @@ def warning_text(todo):
     if any(i.get("convert") for i in todo):
         text += (" Films converted from .mp4 change name to .mkv, so media servers may list them as new; the .mp4s "
                  f"wait in {workfiles.FOLDER}/originals.")
+    if any(data_tracks(i) for i in todo):
+        text += " Data tracks an MKV can't hold (a camera's timecode, say) are left out."
     return text
 
 
@@ -293,7 +311,7 @@ def build_command(video, ass, tmp, item, make_default):
                  if s.get("codec_type") == "subtitle" and s["index"] not in old]
     n = len(kept_subs)
     cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-progress", "pipe:1", "-nostats", "-i", str(video),
-           "-i", str(ass), "-map", "0"]
+           "-i", str(ass), "-map", "0", "-map", "-0:d"]     # data tracks (a camera's timecode) can't go into an MKV
     for i in old:
         cmd += ["-map", f"-0:{i}"]
     cmd += ["-map", "1", "-map_chapters", "0", "-c", "copy",
@@ -356,7 +374,7 @@ def verify(before, after, item, size_before, size_after):
     def kinds(info, skip=()):
         out = {}
         for s in info["streams"]:
-            if s["index"] not in skip:
+            if s["index"] not in skip and s.get("codec_type") != "data":          # data tracks are left out of the copy
                 out[s.get("codec_type")] = out.get(s.get("codec_type"), 0) + 1
         return out
     want = kinds(before, skip=old)
@@ -364,7 +382,7 @@ def verify(before, after, item, size_before, size_after):
     got = kinds(after)
     if want != got:
         return f"the tracks differ (expected {want}, got {got})"
-    kept = [s for s in before["streams"] if s["index"] not in old and s.get("codec_type") != "subtitle"]
+    kept = [s for s in before["streams"] if s["index"] not in old and s.get("codec_type") not in ("subtitle", "data")]
     now = [s for s in after["streams"] if s.get("codec_type") != "subtitle"]
     if [s.get("codec_name") for s in kept] != [s.get("codec_name") for s in now]:
         return "a track's format changed"
@@ -559,7 +577,7 @@ def main(argv=None):
         low, high = rewrite_seconds(item["size"])
         prompts.event("embed-plan", video=str(item["video"]), action=item["action"], size=item["size"],
                       reason=item["reason"] or None, seconds_low=round(low), seconds_high=round(high),
-                      convert=bool(item.get("convert")))
+                      convert=bool(item.get("convert")), dropped=len(data_tracks(item)))
     if without:
         print(f"({without} video(s) here have no .notes.ass yet, so they're not listed.)")
     if a.delete_backups:

@@ -174,7 +174,7 @@ moving, `tidy-done` says how it went (the app's Tidy button runs it with `--dry-
 `embed-plan` per video that has a `.notes.ass`. `action` is `add`, `update` (the notes changed since they were put
 inside), `current` (nothing to do) or `skip` (`reason` says why: an `.mp4` without `--convert`, notes that only cover
 part of the film, a link). `convert` is true for an `.mp4` that `--convert` will make into an `.mkv` first (its `.mp4`
-is then kept in `context-notes/originals`). `size` is the film's size in bytes, and `seconds_low` and `seconds_high` are a rough range for reading and
+is then kept in `context-notes/originals`). `size` is the film's size in bytes, `dropped` is how many data tracks (a camera's timecode) an `.mkv` can't hold are left out, and `seconds_low` and `seconds_high` are a rough range for reading and
 rewriting it on the NAS (an estimate from the disk's speed, not a promise). While it works it sends `embed-video` and `embed-result` for each film
 (`result` is `embedded` or `stopped`, with a `reason`), and `progress` events with `task` `embed` and `unit`
 `seconds` (how much of the film has been copied). `--delete-backups` lists each kept original as `embed-backup`.

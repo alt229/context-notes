@@ -314,3 +314,21 @@ def test_convert_is_refused_when_an_mkv_of_that_name_is_there(tmp_path, clip):
     film(tmp_path, clip, name="Film")                    # Film.mkv already exists
     r = run_cli("embed.py", video, "--convert", "--dry-run", cwd=tmp_path)
     assert "a .mkv of this name is already here" in r.stdout and "Nothing to do" in r.stdout
+
+
+@needs_ffmpeg
+def test_convert_leaves_out_a_camera_timecode_track_and_says_so(tmp_path, clip):
+    """A phone's or camera's MP4 has a timecode track (a data stream) that an MKV can't hold: it's left out, and said."""
+    video = tmp_path / "Film.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(clip / "plain.mp4"), "-timecode", "01:00:00:00",
+                    "-c", "copy", str(video)], check=True)
+    video.with_suffix(".notes.ass").write_text(ASS, encoding="utf-8-sig")
+    assert [s["codec_type"] for s in embed.probe(video)["streams"]].count("data") == 1
+    r = run_cli("embed.py", video, "--convert", "--dry-run", cwd=tmp_path)
+    assert "leaves out 1 data track (such as a camera's timecode)" in r.stdout, r.stdout
+    r = run_cli("embed.py", video, "--convert", "--yes", cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    mkv = tmp_path / "Film.mkv"
+    assert sorted(s["codec_type"] for s in embed.probe(mkv)["streams"]) == ["audio", "subtitle", "video"]
+    assert notes_track(mkv)["codec_name"] == "ass"
+    assert embed.film_state(mkv)["action"] == "current"

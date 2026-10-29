@@ -10,7 +10,7 @@ Read `README.md` for the full command reference. This file holds what we've lear
 
 ## Where things left off
 
-Last updated 2026-10-27. Replace this section when a session changes the project (see rule 10).
+Last updated 2026-10-29. Replace this section when a session changes the project (see rule 10).
 It's the first thing to read when picking the work up on another computer or after losing the connection.
 
 - **Committed:** Erin committed step 1 (the modules) on 2026-10-27. Steps 2 to 5 below are not committed yet. Ask Erin
@@ -40,6 +40,15 @@ It's the first thing to read when picking the work up on another computer or aft
      actions hidden and refused, the rest working.
   All five steps are built; steps 2 to 5 aren't committed yet. Still tabled: friend log-ins, and waiting for the
   5-hour reset by itself (now possible: background requests report the reset time).
+- **Uncommitted, 2026-10-29: the timecode fix.** A phone's or camera's MP4 has a timecode track (a data stream), and
+  `--convert` copied it into the MKV, which refused it ("Only audio, video, and subtitles are supported for Matroska").
+  Now `embed.py` leaves data tracks out (`-map -0:d` in `build_command`, `data_tracks`, and `verify()` ignores them).
+  The list, the prompt, the page (`dropped` in `embed-plan`, `gui/src/js/62-danger.js`) and the README say how many
+  were left out. Tested: `test_convert_leaves_out_a_camera_timecode_track_and_says_so` fails on the old code and passes
+  now; all 490 tests pass; `ruff check` is clean on the two Python files; a synthetic timecode MP4 converts and decodes.
+  Not run on the friend's file, and the page change is checked only by the tests, not in a browser. The friend got past
+  the error; the cause of the fix is not known. Still open: a plain `.srt` beside a film isn't embedded (`embed.py`
+  only takes `.notes.ass`), and Erin hasn't said whether she wants that.
 - **Fixed on the way (2026-10-27):** the page's script stopped on load (`remember` was removed but its listener
   stayed), so the app showed nothing. A test now checks every handler and `$("id")` the script uses.
 - **Also added (2026-10-27, Erin's asks; not committed):** "Always download subtitles" (`download_subs`,
@@ -58,7 +67,7 @@ It's the first thing to read when picking the work up on another computer or aft
   (delete kept originals, write the notes again), the run options for audience, effort and offline subtitles, the
   rebuild preview with a `.bak` kept on every rebuild and an optional re-embed, the new default audience ("Fluent in
   American English"), a probe cache, the background status check, and the docs and changelog to match.
-- **Tested:** the full suite passes (483, `python3 -m pytest -q`), `ruff check .` is clean. The module split was
+- **Tested:** the full suite passes (490 on 2026-10-29, `python3 -m pytest -q`), `ruff check .` is clean. The module split was
   compared with the code before it, and the API route still is after step 2 (same output, requests and files; only
   the forwarded `--route api --api-fallback 0` and `--help` differ). The Settings "Claude" section and the run option
   were checked in a headless browser. The other dialogs added before step 1 haven't been looked at in a browser.

@@ -276,8 +276,9 @@ python3 embed.py "/Volumes/Movies" --delete-backups  # free the space the kept o
   `--reading-speed`), run it again: it replaces its own track and never adds a second.
 - `.mp4` files are left as they are unless you add `--convert`: MP4 can't hold these subtitles without losing their
   styling, so `--convert` rewrites the film as an `.mkv` first. The `.mp4` is kept in `context-notes/originals/`, the
-  film's name changes, and its `mov_text` subtitles become SRT. Media servers may list it as a new film. Notes that
-  only cover the first part of a film (`--limit`) aren't embedded.
+  film's name changes, and its `mov_text` subtitles become SRT. Media servers may list it as a new film. A phone's or
+  camera's timecode track (a data track an MKV can't hold) is left out, and the run says so. Notes that only cover the
+  first part of a film (`--limit`) aren't embedded.
 - Each run states the time it takes (a rough range from this NAS's read and write speed), the space it needs, and the
   copy it keeps. No Claude or API calls are made. The app's Embed dialog lists only films whose notes are not yet inside.
 

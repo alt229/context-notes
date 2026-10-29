@@ -83,7 +83,7 @@ async function listEmbed() {
   if (converting) $("embedIntro").textContent += ` ${plural(converting, "MP4 film")} become MKV first; each .mp4 is kept in context-notes/originals.`;
   $("embedList").replaceChildren(...todo.map((v) => el("li", {},
     el("p", { class: "tidyvideo" }, baseName(v.video)),
-    el("p", { class: "tidyfiles" }, `${v.convert ? "Converts to MKV, then adds the notes" : v.action === "update" ? "Replaces the earlier notes inside" : "Adds the notes"} · ${sizeText(v.size)}`))));
+    el("p", { class: "tidyfiles" }, `${v.convert ? "Converts to MKV, then adds the notes" : v.action === "update" ? "Replaces the earlier notes inside" : "Adds the notes"} · ${sizeText(v.size)}${v.dropped ? ` · leaves out ${plural(v.dropped, "data track")}` : ""}`))));
   $("embedDefaultRow").hidden = false;
   $("embedBtn").disabled = false;
   $("embedBtn").focus();
