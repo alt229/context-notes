@@ -1,7 +1,9 @@
 """The plan route: requests through Claude Code (claude_code.py), and moving to API credits when the plan can't go
 on (sending.Sender). Claude Code is always tests/fake_claude.py here (conftest.fake_claude)."""
 import json
+import os
 import time
+from pathlib import Path
 
 import pytest
 from conftest import claude_calls, make_srt, needs_ffmpeg, run_cli
@@ -332,7 +334,7 @@ def test_a_sign_in_without_a_link_in_time_is_given_up(monkeypatch):
 # ---------------------------------------------------------------- where Claude Code is
 def test_where_claude_code_is(tmp_path, monkeypatch, home):
     monkeypatch.delenv("CONTEXT_NOTES_CLAUDE")
-    monkeypatch.setattr(claude_code.shutil, "which", lambda name: None)
+    monkeypatch.setattr(claude_code.shutil, "which", lambda name, path=None: None)
     old = tmp_path / "nvm/node/v20/bin/claude"
     new = tmp_path / "nvm/node/v22/bin/claude"
     for i, f in enumerate((old, new)):
@@ -353,6 +355,46 @@ def test_where_claude_code_is(tmp_path, monkeypatch, home):
     monkeypatch.setattr(claude_code, "PLACES", ())
     assert claude_code.command() is None
     assert "isn't installed" in claude_code.status(refresh=True)["problem"]
+
+
+def test_a_claude_code_on_windows_newer_path_is_found(tmp_path, monkeypatch, home):
+    """Started from a desktop shortcut, the app can have the PATH from before Claude Code was installed. The PATH as
+    Windows has it now (the registry) is looked in next."""
+    monkeypatch.delenv("CONTEXT_NOTES_CLAUDE")
+    monkeypatch.setattr(claude_code, "PLACES", ())
+    empty, newer = tmp_path / "old-path", tmp_path / "WinGet/Links"
+    empty.mkdir()
+    newer.mkdir(parents=True)
+    exe = newer / ("claude.exe" if os.name == "nt" else "claude")
+    exe.write_text("#!/bin/sh\necho 1.0.0 (Claude Code)\n")
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", str(empty))
+    monkeypatch.setattr(claude_code, "windows_path_now", lambda: "")
+    assert claude_code.command() is None
+    monkeypatch.setattr(claude_code, "windows_path_now", lambda: str(newer))
+    assert claude_code.command() is not None and Path(claude_code.command()[0]).parent == newer
+
+
+def test_fresh_path_adds_only_what_is_missing_and_moves_nothing():
+    sep = os.pathsep
+    venv, system, user = (os.path.join(os.sep, *p) for p in (("venv", "Scripts"), ("Windows", "system32"),
+                                                              ("Users", "him", ".local", "bin")))
+    current = sep.join([venv, system])
+    assert claude_code.fresh_path(current, now=sep.join([system, user, "", user])) == sep.join([venv, system, user])
+    assert claude_code.fresh_path(current, now="") == current
+    assert claude_code.fresh_path("", now=user) == user
+    assert claude_code.fresh_path(current, now=system + os.sep) == current            # a trailing slash is the same
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the registry is Windows only")
+def test_windows_path_now_reads_the_registry():
+    now = claude_code.windows_path_now()
+    assert "system32" in now.lower()                       # %SystemRoot%\system32, expanded
+
+
+def test_windows_path_now_is_empty_elsewhere():
+    if os.name != "nt":
+        assert claude_code.windows_path_now() == ""
 
 
 def test_saving_a_new_path_in_the_app_looks_again(server):  # noqa: F811

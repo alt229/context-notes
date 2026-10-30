@@ -22,7 +22,8 @@ prompted >"; Claude Code 2.1.309). The link can be opened on any computer: the c
 login_state() is what the page polls, login_finish(code) pastes the code, login_cancel() gives up, logout() signs out.
 
 CONTEXT_NOTES_CLAUDE names the program to run instead of `claude` (the tests' stand-in, tests/fake_claude.py); after
-it comes the path saved in Settings ("Where Claude Code is"), then the PATH, then the usual install folders.
+it comes the path saved in Settings ("Where Claude Code is"), then the PATH, then (on Windows) the PATH as Windows has
+it now, then the usual install folders. fresh_path() is what app.py starts with on Windows, for the same reason.
 Standard library only (plus settings.py, for that saved path).
 """
 import json
@@ -47,7 +48,12 @@ PLAN_METHODS = ("claude.ai", "oauth_token")                      # `claude auth 
 # glob; the newest match is taken.
 PLACES = ("~/.claude/local/claude", "~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude",
           "/usr/bin/claude", "~/.npm-global/bin/claude", "~/.volta/bin/claude", "~/.nvm/versions/node/*/bin/claude",
-          "~/.local/bin/claude.exe", "~/AppData/Roaming/npm/claude.cmd", "~/AppData/Local/Programs/claude/claude.exe")
+          "~/.local/bin/claude.exe", "~/AppData/Roaming/npm/claude.cmd", "~/AppData/Local/Programs/claude/claude.exe",
+          "~/AppData/Local/Microsoft/WinGet/Links/claude.exe",                 # winget install Anthropic.ClaudeCode
+          "~/AppData/Local/Microsoft/WinGet/Packages/Anthropic.ClaudeCode*/claude.exe")
+# Where Windows keeps the PATH (the system's, then the user's, as Windows joins them).
+WINDOWS_PATH_KEYS = (("HKEY_LOCAL_MACHINE", r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+                     ("HKEY_CURRENT_USER", "Environment"))
 LOGIN_TIMEOUT = 600               # seconds a sign-in may wait for the code
 LINK_WAIT = 30                    # seconds for `claude auth login` to print its link
 TIMEOUT = 900                     # seconds for one request (the frames: Claude Code opens each contact sheet)
@@ -89,6 +95,48 @@ def in_usual_places():
     return None
 
 
+def windows_path_now():
+    """On Windows, the PATH as Windows has it now (from the registry), else "". A program keeps the PATH it was started
+    with: one started from a desktop shortcut, or from a window opened before an install, can be missing the folder
+    a newer install (Claude Code, ffmpeg) added, though a new PowerShell window finds it."""
+    if os.name != "nt":
+        return ""
+    try:
+        import winreg
+    except ImportError:
+        return ""
+    parts = []
+    for root, key in WINDOWS_PATH_KEYS:
+        try:
+            with winreg.OpenKey(getattr(winreg, root), key) as k:
+                value, _ = winreg.QueryValueEx(k, "Path")
+        except OSError:                          # no such value (a user PATH is optional), or not allowed to read it
+            continue
+        if value:
+            parts.append(os.path.expandvars(str(value)))     # %USERPROFILE%\... as the registry keeps it
+    return os.pathsep.join(parts)
+
+
+def fresh_path(current, now=None):
+    """`current` with the folders of `now` (default: windows_path_now()) that it lacks added at the end, in order.
+    Nothing already there moves, so a virtual environment's folder stays first."""
+    now = windows_path_now() if now is None else now
+    seen = {os.path.normcase(os.path.normpath(d)) for d in current.split(os.pathsep) if d}
+    added = []
+    for d in now.split(os.pathsep):
+        key = os.path.normcase(os.path.normpath(d)) if d else ""
+        if key and key not in seen:
+            seen.add(key)
+            added.append(d)
+    return os.pathsep.join([current, *added] if current else added)
+
+
+def in_fresh_path():
+    """Claude Code on the PATH as Windows has it now, when this process started with an older one (None elsewhere)."""
+    now = windows_path_now()
+    return shutil.which("claude", path=now) if now else None
+
+
 def command():
     """The program to run, as a list, or None when Claude Code isn't installed (or can't be found). A path saved in
     Settings that isn't there gives None too (status() says so)."""
@@ -98,7 +146,7 @@ def command():
     saved = saved_path()
     if saved:
         return [str(Path(saved).expanduser())] if runnable(saved) else None
-    found = shutil.which("claude") or in_usual_places()
+    found = shutil.which("claude") or in_fresh_path() or in_usual_places()
     return [found] if found else None
 
 

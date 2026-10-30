@@ -14,6 +14,8 @@ All notable changes to this project are recorded here. The format follows
   computer running the app (hidden and refused from another device, like saving the API key).
 - "Where Claude Code is" in Settings (`claude_path`), for a Claude Code the app can't find by itself. The app now also
   looks in the npm, nvm, Volta and Windows install folders, and says when the saved path isn't there.
+- `make-shortcut.bat` (Windows): double-click it once to put a "Context Notes" shortcut on the desktop that starts
+  the app the way `context-notes.bat` does, with this folder's virtual environment.
 - "Yes to all questions" in Settings (and `context_notes.py --yes-to-all`, `make_ass.py --yes-to-all`): a run doesn't
   stop to ask about the work. It downloads subtitles, writes them from the soundtrack when none are found, checks and
   fixes new notes' timing, re-times subtitles that drift, picks up a stopped run, and goes on to the next video; each
@@ -235,6 +237,11 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- On Windows, the app could say "Claude Code isn't installed, or isn't where this can find it" when it was installed
+  and signed in. A program started from a desktop shortcut (or from a window opened before an install) keeps the PATH
+  Windows had when it started, without the folder a newer install added. The app now adds what's missing from the
+  PATH as Windows has it now (the registry) when it starts, so Claude Code, ffmpeg and VLC installed since are found,
+  and looks in WinGet's folder (`winget install Anthropic.ClaudeCode`).
 - Embed (and `--convert`) failed on an MP4 with a phone's or camera's timecode track: "Only audio, video, and subtitles
   are supported for Matroska". That track is now left out of the copy, and the list, the prompt and the page say how
   many were left out. Nothing else changes.

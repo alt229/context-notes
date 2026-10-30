@@ -140,6 +140,10 @@ pip install -r requirements.txt
 python app.py
 ```
 
+- To start the app without PowerShell, double-click `make-shortcut.bat` once: it puts a "Context Notes" shortcut on
+  your desktop (it runs `context-notes.bat`, which uses the `.venv` folder made above).
+- To write notes on your Claude plan, install Claude Code too: `irm https://claude.ai/install.ps1 | iex` in PowerShell
+  (or `winget install Anthropic.ClaudeCode`), then sign in from the app's Settings, "Sign in to Claude Code…".
 - The commands in this README say `python3`, as on macOS and Linux. On Windows, type `python`.
 - Your API key is kept in `C:\Users\<you>\.config\context-notes\api-key`.
 - Network drives and shares (`Y:\Movies`, `\\nas\Movies`) work as they are.

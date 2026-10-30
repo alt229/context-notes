@@ -13,6 +13,8 @@ Read `README.md` for the full command reference. This file holds what we've lear
 Last updated 2026-10-30. Replace this section when a session changes the project (see rule 10).
 It's the first thing to read when picking the work up on another computer or after losing the connection.
 
+- **The repo:** this folder is part of Erin's larger repo in `~/.alt229/`; its `.git` isn't visible from the connected
+  folder. Leave changes in place and Erin commits them herself (2026-10-30); friends get them with `git pull`.
 - **Committed:** Erin committed step 1 (the modules) on 2026-10-27. Steps 2 to 5 below are not committed yet. Ask Erin
   before committing, and never push (`.claude/settings.json` denies it).
 - **In progress: the ideas from PR #1, done our way** (the plan is the project doc `claude/pr1-plan.md`; none of the
@@ -40,6 +42,19 @@ It's the first thing to read when picking the work up on another computer or aft
      actions hidden and refused, the rest working.
   All five steps are built; steps 2 to 5 aren't committed yet. Still tabled: friend log-ins, and waiting for the
   5-hour reset by itself (now possible: background requests report the reset time).
+- **Uncommitted, 2026-10-30: Windows shortcut and PATH** (the friend's run said "Claude Code isn't installed, or
+  isn't where this can find it" after Erin signed him in; he starts the app from a desktop shortcut Erin made, which
+  she thinks runs `python app.py`). A program started from a shortcut keeps Explorer's PATH from when it started.
+  Now `claude_code.windows_path_now()` reads the PATH from the registry (HKLM then HKCU, `%VARS%` expanded),
+  `fresh_path()` adds what's missing at the end (nothing moves, the venv stays first), `app.main()` does that on
+  Windows at start (so ffmpeg and VLC too), and `command()` also tries `in_fresh_path()` before `PLACES`. WinGet's
+  Links and Packages folders are in `PLACES`. New `make-shortcut.bat` makes "Context Notes.lnk" on the desktop
+  (PowerShell + WScript.Shell, target `context-notes.bat`, start in this folder). Tested: 499 tests (498 pass, the
+  registry test is Windows-only and skipped), the new PATH test fails without the fix, `ruff check .` clean. Not run
+  on Windows: `make-shortcut.bat` and the registry read are untested until the friend runs them (CI covers the
+  registry test). The cause on his computer isn't confirmed: a stale PATH is the likeliest; it could also be Claude
+  Code not installed (only the Claude app), or "Run as administrator" as another user. Docs: README (Windows),
+  CHANGELOG.
 - **Uncommitted, 2026-10-30: signing Claude Code in from Settings** (Erin's ask: a friend she's testing the app with
   has no Claude account of his own, so she signs him in as herself, and the only way had been the link-and-code dance
   in Terminal). `claude auth login --claudeai` with no terminal prints the link and waits for the code on stdin
@@ -104,9 +119,10 @@ It's the first thing to read when picking the work up on another computer or aft
   `ffprobe` are needed. MKVToolNix (`mkvpropedit`, `mkvmerge`) is installed here for checks; the code doesn't use it yet.
   The Media share is mounted
   at `/Volumes/Media`. The probe cache lives in `~/.config/context-notes/probe-cache/` and isn't in the repo.
-- **Next step:** the friend tries Settings, "Sign in to Claude Code…" (Erin opens the link, sends him the code); then
-  Erin's short run on her plan (`context_notes.py film.mkv --limit 5:00`), then step 3. Still waiting: her answer on
-  the Plex copy.
+- **Next step:** Erin commits the uncommitted work and the friend runs `git pull`, double-clicks `make-shortcut.bat`,
+  starts the app from the new shortcut and looks at Settings, Claude. If it still can't find Claude Code: his
+  `claude --version` and `where.exe claude` in PowerShell, and "Where Claude Code is" in Settings. Then Erin's short
+  run on her plan (`context_notes.py film.mkv --limit 5:00`), then step 3. Still waiting: her answer on the Plex copy.
 
 ## The pipeline (one command per step; `context_notes.py` runs them all)
 

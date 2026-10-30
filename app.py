@@ -1231,6 +1231,8 @@ def main(argv=None):
                                                           "working)")
     ap.add_argument("--api-url", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
+    if os.name == "nt":      # started from a shortcut, the PATH can be older than Windows' own: add what's missing
+        os.environ["PATH"] = claude_code.fresh_path(os.environ.get("PATH", ""))
     mode = "public" if a.public else "hosted" if a.hosted else "local"
     if mode == "local" and (a.allow or a.new_key):
         ap.error("--allow and --new-key go with --hosted (or --public)")
