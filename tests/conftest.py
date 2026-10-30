@@ -84,9 +84,10 @@ def fake_claude(tmp_path_factory, monkeypatch):
     log = tmp_path_factory.mktemp("fake-claude") / "calls.jsonl"
     monkeypatch.setenv("CONTEXT_NOTES_CLAUDE", str(ROOT / "tests" / "fake_claude.py"))
     monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
-    for k in ("FAKE_CLAUDE_MODE", "FAKE_CLAUDE_AUTH", "FAKE_CLAUDE_HELP"):
+    for k in ("FAKE_CLAUDE_MODE", "FAKE_CLAUDE_AUTH", "FAKE_CLAUDE_HELP", "FAKE_CLAUDE_SIGNIN", "FAKE_CLAUDE_LOGIN"):
         monkeypatch.delenv(k, raising=False)
     if "claude_code" in sys.modules:                       # its answers are kept for a run: not across tests
+        sys.modules["claude_code"].login_cancel()
         sys.modules["claude_code"]._status.clear()
         sys.modules["claude_code"]._flags.clear()
     return log

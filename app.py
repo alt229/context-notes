@@ -802,10 +802,15 @@ class App:
 
     def save_settings(self, o):
         """The Defaults in the Settings page: checked as a whole, then written. A wrong value changes nothing."""
+        before = settings.effective().get("claude_path")
         try:
-            return 200, {"settings": settings.save(o)}
+            saved = settings.save(o)
         except ValueError as e:
             return 400, {"error": str(e)}
+        out = {"settings": saved}
+        if saved.get("claude_path") != before:           # a new place to look: is it there, and signed in?
+            out["claude"] = claude_code.status(refresh=True)
+        return 200, out
 
     def set_credit(self, o):
         """The credit left, as the page's Settings gives it (usage.py keeps the estimate from there)."""
@@ -999,6 +1004,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, app.plan_refresh())
         if path == "/api/claude/check":
             return self._send(200, {"claude": claude_code.status(refresh=True)})
+        if path == "/api/claude/login":
+            return self._send(200, claude_code.login_start())
+        if path == "/api/claude/login/state":
+            return self._send(200, claude_code.login_state())
+        if path == "/api/claude/login/code":
+            return self._send(200, claude_code.login_finish(o.get("code")))
+        if path == "/api/claude/login/cancel":
+            return self._send(200, {"claude": claude_code.login_cancel()})
+        if path == "/api/claude/logout":
+            return self._send(200, claude_code.logout())
         if path == "/api/settings/reset":
             return self._send(200, {"settings": settings.reset()})
         if path == "/api/credit":
@@ -1026,7 +1041,9 @@ class Handler(BaseHTTPRequestHandler):
 # for good, or would send a key or password across the network unencrypted.
 LOCAL_ONLY = {"/api/pick": "Choosing with the file dialog", "/api/vlc/open": "Opening a film in VLC",
               "/api/reveal": "Show in folder", "/api/vlc/install": "Installing the VLC extension",
-              "/api/key": "Saving the API key", "/api/opensubtitles": "Saving the OpenSubtitles login"}
+              "/api/key": "Saving the API key", "/api/opensubtitles": "Saving the OpenSubtitles login",
+              "/api/claude/login": "Signing Claude Code in", "/api/claude/login/code": "Signing Claude Code in",
+              "/api/claude/login/cancel": "Signing Claude Code in", "/api/claude/logout": "Signing Claude Code out"}
 PRIVATE = ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16",
            "::1/128", "fc00::/7", "fe80::/10")
 HOSTED_PORT = 8229

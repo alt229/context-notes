@@ -12,6 +12,25 @@
       <label class="choice"><input type="radio" name="d_route" value="api">
         <span>API credits<small>Billed to your Anthropic account: the key and credit below.</small></span></label>
       <p id="claudeStatus"></p>
+      <div class="row local-only" id="claudeSignInRow">
+        <button type="button" class="btn" id="claudeLoginBtn">Sign in to Claude Code…</button>
+        <button type="button" class="btn quiet" id="claudeLogoutBtn" hidden>Sign out</button>
+      </div>
+      <div class="local-only" id="claudeLoginPanel" hidden>
+        <p class="hint">1. Open this link and sign in with the Claude account the notes should be written on. It can
+          be opened on another computer: the code it gives only works for this sign-in.</p>
+        <div class="row"><a id="claudeLoginLink" href="#" target="_blank" rel="noopener">Open the sign-in page</a>
+          <button type="button" class="btn quiet" id="claudeLoginCopy">Copy the link</button></div>
+        <p class="hint">2. Copy the code the page shows and paste it here.</p>
+        <div class="row"><input id="claudeLoginCode" type="text" autocomplete="off" spellcheck="false"
+            placeholder="The code from the sign-in page" aria-label="The code from the sign-in page">
+          <button type="button" class="btn primary" id="claudeLoginDone">Finish signing in</button>
+          <button type="button" class="btn quiet" id="claudeLoginCancel">Cancel</button></div>
+        <p class="msg" id="claudeLoginMsg" role="status"></p>
+      </div>
+      <label class="field"><span>Where Claude Code is</span>
+        <input id="d_claude_path" type="text" placeholder="Empty: the PATH and the usual install folders"
+          aria-label="The path of the claude program, if it isn't found by itself"></label>
       <label class="check"><input type="checkbox" id="d_api_fallback"><span>Use API credits when the plan runs out<small>When
         the plan's 5-hour session is 90% used, its limit is reached, or Claude Code can't be used. Off: you're asked
         first, and a run nobody is watching stops (what's written is kept, and the next run picks up).</small></span></label>

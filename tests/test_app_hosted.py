@@ -86,10 +86,13 @@ def test_from_another_device_the_mac_only_actions_are_refused(hosted, monkeypatc
     for path, body in (("/api/key", {"key": "sk-ant-x"}), ("/api/opensubtitles", {}), ("/api/pick", {}),
                        ("/api/vlc/install", {}), ("/api/vlc/open", {"path": str(tmp_path)}),
                        ("/api/reveal", {"path": str(tmp_path)}),
+                       ("/api/claude/login", {}), ("/api/claude/login/code", {"code": "x"}),
+                       ("/api/claude/login/cancel", {}), ("/api/claude/logout", {}),
                        ("/api/backups", {"path": str(tmp_path), "go": True})):
         status, body, _ = ask(hosted, path, body)
         assert status == 403 and b"only works in a browser on the computer running the app" in body, path
     assert ask(hosted, "/api/backups", {"path": str(tmp_path)})[0] != 403          # listing them is fine
+    assert ask(hosted, "/api/claude/login/state", {})[0] == 200                    # looking is fine too
     assert ask(hosted, "/api/settings", {"recursive": True})[0] == 200
     status, body, headers = ask(hosted, f"/api/vlc/extension?k={hosted.app.token}", query_key=True)
     assert status == 200 and b"context" in body.lower() and "context_notes.lua" in headers["Content-Disposition"]

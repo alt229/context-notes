@@ -101,6 +101,15 @@ the last 7 days and how full the busiest got). `POST /api/credit` with `{"balanc
 gets a fresh reading of the plan's windows (one tiny request through Claude Code) and answers `{"ok": true, "usage":
 ...}` or `{"ok": false, "error": "..."}`.
 
+Signing Claude Code in from the page (`claude_code.login_*`; from a browser on the app's computer only, see `LOCAL_ONLY`):
+`POST /api/claude/login` starts `claude auth login --claudeai` and answers `{"ok": true, "url": "https://..."}` once
+the link is printed (or `{"ok": false, "error"}`); `POST /api/claude/login/state` is `{"waiting": true, "url"}` while
+it waits for the code, then once `{"waiting": false, "ok", "error"?, "claude"}`; `POST /api/claude/login/code` with
+`{"code": "..."}` pastes the code and answers the same way (`waiting` stays true with an `error` when there was no
+code to paste); `POST /api/claude/login/cancel` gives up (`{"claude"}`); `POST /api/claude/logout` runs
+`claude auth logout` (`{"ok", "message", "claude"}`). `POST /api/claude/check` looks again (`{"claude"}`), and
+`POST /api/settings` answers with `claude` too when `claude_path` changed.
+
 ### `progress`
 
 This reports how far a long task has got, for a progress bar.

@@ -57,6 +57,7 @@ function renderDefaults() {
   $("d_api_fallback_usd").value = Number(s.api_fallback_usd).toFixed(2);
   $("d_api_fallback_usd").disabled = !s.api_fallback;
   msg("c_msg", "");
+  $("d_claude_path").value = s.claude_path || "";
   $("d_quality").value = s.quality;
   $("d_effort").value = s.effort;
   $("d_audience").value = s.audience;
@@ -103,10 +104,12 @@ async function saveClaude() {
   const usd = Number($("d_api_fallback_usd").value.trim().replace(/^\$/, "").replace(",", ""));
   if (!(usd >= 0.01 && usd <= 1000)) return msg("c_msg", "Up to: an amount in dollars from 0.01 to 1,000, like 5.", false);
   const body = { route: document.querySelector("input[name=d_route]:checked").value,
-                 api_fallback: $("d_api_fallback").checked, api_fallback_usd: usd };
+                 api_fallback: $("d_api_fallback").checked, api_fallback_usd: usd,
+                 claude_path: $("d_claude_path").value.trim() };
   const r = await api("/api/settings", body);
   if (r.error) return msg("c_msg", r.error, false);
   info.settings = r.settings;
+  if (r.claude) info.claude = r.claude;                     // the path changed: the app looked again
   renderDefaults();
   applySettings();
   renderSettings();

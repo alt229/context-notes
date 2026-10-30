@@ -16,8 +16,14 @@ status() is what Settings shows (installed? signed in, and how?); problem() says
 None. call() raises CantGoOn when the plan can't go on (its usage limit; signed out part-way), which sending.py turns
 into the question about API credits. Any other failure stops the run with Claude Code's own words.
 
-CONTEXT_NOTES_CLAUDE names the program to run instead of `claude` (the tests' stand-in, tests/fake_claude.py).
-Standard library only.
+Signing in from the app (Settings, "Sign in to Claude Code"): login_start() runs `claude auth login --claudeai`,
+which with no terminal prints the link to open and then waits for the code that page shows ("Paste code here if
+prompted >"; Claude Code 2.1.309). The link can be opened on any computer: the code only works for this attempt.
+login_state() is what the page polls, login_finish(code) pastes the code, login_cancel() gives up, logout() signs out.
+
+CONTEXT_NOTES_CLAUDE names the program to run instead of `claude` (the tests' stand-in, tests/fake_claude.py); after
+it comes the path saved in Settings ("Where Claude Code is"), then the PATH, then the usual install folders.
+Standard library only (plus settings.py, for that saved path).
 """
 import json
 import os
@@ -36,8 +42,14 @@ HIDDEN = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK"
           "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",                # when this itself runs inside Claude Code
           "CONTEXT_NOTES_UI")                                    # our GUI protocol is for our scripts only
 PLAN_METHODS = ("claude.ai", "oauth_token")                      # `claude auth status` authMethod: on the plan
-# Where the installers put it, for when the app was started without those folders on the PATH.
-PLACES = ("~/.claude/local/claude", "~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude")
+# Where the installers put it, for when the app was started without those folders on the PATH (from Finder or a
+# shortcut, say): the native installer, Homebrew, npm (global, nvm, Volta, a user prefix), and Windows. A * is a
+# glob; the newest match is taken.
+PLACES = ("~/.claude/local/claude", "~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude",
+          "/usr/bin/claude", "~/.npm-global/bin/claude", "~/.volta/bin/claude", "~/.nvm/versions/node/*/bin/claude",
+          "~/.local/bin/claude.exe", "~/AppData/Roaming/npm/claude.cmd", "~/AppData/Local/Programs/claude/claude.exe")
+LOGIN_TIMEOUT = 600               # seconds a sign-in may wait for the code
+LINK_WAIT = 30                    # seconds for `claude auth login` to print its link
 TIMEOUT = 900                     # seconds for one request (the frames: Claude Code opens each contact sheet)
 
 # "You've hit your session limit · resets 3:45pm" (or weekly, or Opus), and older wordings. Not "Server is temporarily
@@ -53,15 +65,40 @@ class CantGoOn(Exception):
     """The plan can't take this request: the message says why, for the question about API credits."""
 
 
+def saved_path():
+    """The path saved in Settings ("Where Claude Code is"), or "". Empty means: look in the usual places."""
+    try:
+        import settings
+        return str(settings.effective().get("claude_path") or "").strip()
+    except Exception:                            # the setting is a convenience: never stop a run over it
+        return ""
+
+
+def runnable(path):
+    p = Path(path).expanduser()
+    return p.is_file() and os.access(p, os.X_OK)
+
+
+def in_usual_places():
+    """The first of PLACES that is there (the newest match of a glob), or None."""
+    import glob
+    for place in PLACES:
+        found = sorted((p for p in glob.glob(os.path.expanduser(place)) if runnable(p)), key=os.path.getmtime)
+        if found:
+            return found[-1]
+    return None
+
+
 def command():
-    """The program to run, as a list, or None when Claude Code isn't installed (or can't be found)."""
+    """The program to run, as a list, or None when Claude Code isn't installed (or can't be found). A path saved in
+    Settings that isn't there gives None too (status() says so)."""
     given = os.environ.get(ENV_BIN)
     if given:
         return [sys.executable, given] if given.endswith(".py") else [given]
-    found = shutil.which("claude")
-    if not found:
-        found = next((str(p) for p in (Path(x).expanduser() for x in PLACES)
-                      if p.is_file() and os.access(p, os.X_OK)), None)
+    saved = saved_path()
+    if saved:
+        return [str(Path(saved).expanduser())] if runnable(saved) else None
+    found = shutil.which("claude") or in_usual_places()
     return [found] if found else None
 
 
@@ -111,9 +148,13 @@ def _check():
     cmd = command()
     out = {"installed": bool(cmd), "path": cmd[-1] if cmd else None, "version": None, "signed_in": None,
            "method": None, "problem": None}
-    if not cmd:
+    if not cmd and saved_path() and not os.environ.get(ENV_BIN):
+        out["problem"] = (f"Claude Code isn't at the place saved in Settings ({saved_path()}). Fix the path there, or "
+                          f"clear it to look in the usual places.")
+    elif not cmd:
         out["problem"] = ("Claude Code isn't installed, or isn't where this can find it. Install it from "
-                          "https://claude.com/claude-code, then sign in by running `claude` once in Terminal.")
+                          "https://claude.com/claude-code, then sign in (Settings, \"Sign in to Claude Code\", or run "
+                          "`claude` once in Terminal). If it's installed somewhere unusual, say where in Settings.")
     else:
         r = _quick(["--version"])
         if r is None or r.returncode != 0:
@@ -138,17 +179,170 @@ def _check():
                 out["method"] = method
                 out["signed_in"] = r.returncode == 0 and method != "none" and data.get("loggedIn") is not False
                 if not out["signed_in"]:
-                    out["problem"] = ("Claude Code isn't signed in. Run `claude` once in Terminal and sign in with "
-                                      "your Claude account (or run `claude auth login`).")
+                    out["problem"] = ("Claude Code isn't signed in. Use \"Sign in to Claude Code\" below, or run "
+                                      "`claude` once in Terminal and sign in with your Claude account.")
                 elif method not in PLAN_METHODS:
                     out["problem"] = (f"Claude Code is signed in another way ({method}), not with your Claude plan, so "
                                       f"it would use API credits or another account. Sign in with your Claude account "
-                                      f"instead (`claude auth login`), or choose API credits in Settings.")
+                                      f"instead (\"Sign in to Claude Code\" below, or `claude auth login`), or choose "
+                                      f"API credits in Settings.")
     return out
 
 
 def problem():
     return status()["problem"]
+
+
+# ---------------------------------------------------------------- signing in from the app
+URL_RE = re.compile(r"https://[^\s'\"<>]+")
+_login = {"process": None, "url": None, "output": "", "result": None, "started": 0.0}
+_login_lock = threading.Lock()
+
+
+def _read_login_output(p):
+    """Collects what the sign-in prints (the link, then the prompt for the code, which has no newline), and the
+    result when it ends. Runs in its own thread, so the page never waits on a pipe."""
+    import time
+    fd = p.stdout.fileno()
+    while True:
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            chunk = b""
+        if not chunk:
+            break
+        with _login_lock:
+            if _login["process"] is not p:
+                break
+            _login["output"] += chunk.decode("utf-8", "replace")
+            if _login["url"] is None:
+                found = URL_RE.search(_login["output"])
+                if found:
+                    _login["url"] = found.group(0).rstrip(".,)")
+    code = p.wait()
+    with _login_lock:
+        if _login["process"] is p:
+            if code == 0:
+                _login["result"] = {"ok": True}
+            else:                                # its reason: what it printed besides the link and the prompt
+                lines = [re.sub(r"^Paste code here.*?>\s*", "", ln.strip()) for ln in _login["output"].splitlines()]
+                why = " ".join(" ".join(ln for ln in lines if ln and "https://" not in ln
+                                        and not ln.startswith("Opening browser")).split())[-300:]
+                _login["result"] = {"ok": False, "error": "The sign-in didn't finish" + (f": {why}" if why else
+                                                                                        " (Claude Code gave no reason).")}
+            _login["started"] = time.time()
+    status(refresh=True)                         # signed in now, or still not: Settings shows which
+
+
+def login_start():
+    """Starts the sign-in and waits (up to 30 s) for the link. {"ok": True, "url": ...}, or {"ok": False, "error"}.
+    One sign-in at a time: starting again while one waits for its code gives the same link."""
+    import time
+    cmd = command()
+    if not cmd:
+        return {"ok": False, "error": status(refresh=True)["problem"]}
+    with _login_lock:
+        p = _login["process"]
+        if p is not None and p.poll() is None and _login["url"] and time.time() - _login["started"] < LOGIN_TIMEOUT:
+            return {"ok": True, "url": _login["url"]}
+    login_cancel()
+    try:
+        p = subprocess.Popen(cmd + ["auth", "login", "--claudeai"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, cwd=str(Path.home()), env=clean_env(), **GROUP)
+    except OSError as e:
+        return {"ok": False, "error": f"Claude Code ({cmd[-1]}) couldn't be started: {e.strerror or e}."}
+    with _login_lock:
+        _login.update(process=p, url=None, output="", result=None, started=time.time())
+    threading.Thread(target=_read_login_output, args=(p,), daemon=True).start()
+    deadline = time.time() + LINK_WAIT
+    while time.time() < deadline:
+        with _login_lock:
+            if _login["url"]:
+                return {"ok": True, "url": _login["url"]}
+            if _login["result"] is not None:
+                return dict(_login["result"], url=None) if not _login["result"]["ok"] else {"ok": True, "url": None}
+        time.sleep(0.1)
+    login_cancel()
+    return {"ok": False, "error": f"Claude Code didn't show a sign-in link within {LINK_WAIT} seconds. Try "
+                                  f"`claude auth login` in Terminal to see what it says."}
+
+
+def login_state():
+    """What the page polls while the link is open: {"waiting": True, "url"} until the sign-in ends, then, once,
+    {"waiting": False, "ok", "error"?, "claude": status()}. Nothing started (or already reported) gives
+    {"waiting": False}."""
+    import time
+    with _login_lock:
+        p = _login["process"]
+        if p is None:
+            return {"waiting": False}
+        if _login["result"] is None and p.poll() is None:
+            if time.time() - _login["started"] > LOGIN_TIMEOUT:
+                p = None                         # too long: given up below
+            else:
+                return {"waiting": True, "url": _login["url"]}
+        result = _login["result"]
+    if p is None:
+        login_cancel()
+        return {"waiting": False, "ok": False, "error": "The sign-in waited too long for its code and was given up. "
+                                                        "Start it again.", "claude": status(refresh=True)}
+    if result is None:                           # ended, the reader thread about to record it
+        time.sleep(0.5)
+        with _login_lock:
+            result = _login["result"] or {"ok": False, "error": "The sign-in ended without saying how."}
+    with _login_lock:                            # reported: the next poll starts from nothing
+        if _login["process"] is p:
+            _login.update(process=None, url=None, output="", result=None, started=0.0)
+    return {"waiting": False, **result, "claude": status()}
+
+
+def login_finish(code):
+    """Pastes the code from the sign-in page and waits (up to 60 s) for Claude Code to finish. Returns login_state()."""
+    import time
+    code = " ".join(str(code or "").split())
+    if not code:
+        return {"waiting": True, "ok": False, "error": "Paste the code first."}
+    with _login_lock:
+        p = _login["process"]
+        if p is None or p.poll() is not None:
+            return login_state()
+        try:
+            p.stdin.write((code + "\n").encode("utf-8"))
+            p.stdin.flush()
+            p.stdin.close()
+        except (OSError, ValueError):
+            pass
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        state = login_state()
+        if not state["waiting"]:
+            return state
+        time.sleep(0.2)
+    return {"waiting": True, "ok": False, "error": "Claude Code is still checking the code. Wait a moment, then "
+                                                   "press Finish again."}
+
+
+def login_cancel():
+    """Gives up a sign-in that's waiting (and its process). Returns status()."""
+    with _login_lock:
+        p = _login["process"]
+        _login.update(process=None, url=None, output="", result=None, started=0.0)
+    if p is not None and p.poll() is None:
+        _stop(p)
+    return status()
+
+
+def logout():
+    """`claude auth logout`: {"ok", "message", "claude": status()}."""
+    login_cancel()
+    r = _quick(["auth", "logout"], timeout=60)
+    fresh = status(refresh=True)
+    if r is None:
+        return {"ok": False, "message": "Claude Code couldn't be run.", "claude": fresh}
+    if fresh["signed_in"]:
+        why = " ".join(((r.stdout or "") + " " + (r.stderr or "")).split())[-300:]
+        return {"ok": False, "message": "Claude Code is still signed in" + (f": {why}" if why else "."), "claude": fresh}
+    return {"ok": True, "message": "Signed out. Claude Code is no longer signed in on this computer.", "claude": fresh}
 
 
 def prompt_for(content):

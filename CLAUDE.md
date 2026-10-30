@@ -10,7 +10,7 @@ Read `README.md` for the full command reference. This file holds what we've lear
 
 ## Where things left off
 
-Last updated 2026-10-29. Replace this section when a session changes the project (see rule 10).
+Last updated 2026-10-30. Replace this section when a session changes the project (see rule 10).
 It's the first thing to read when picking the work up on another computer or after losing the connection.
 
 - **Committed:** Erin committed step 1 (the modules) on 2026-10-27. Steps 2 to 5 below are not committed yet. Ask Erin
@@ -40,6 +40,20 @@ It's the first thing to read when picking the work up on another computer or aft
      actions hidden and refused, the rest working.
   All five steps are built; steps 2 to 5 aren't committed yet. Still tabled: friend log-ins, and waiting for the
   5-hour reset by itself (now possible: background requests report the reset time).
+- **Uncommitted, 2026-10-30: signing Claude Code in from Settings** (Erin's ask: a friend she's testing the app with
+  has no Claude account of his own, so she signs him in as herself, and the only way had been the link-and-code dance
+  in Terminal). `claude auth login --claudeai` with no terminal prints the link and waits for the code on stdin
+  (checked on the real 2.1.309), so `claude_code.login_start/login_state/login_finish/login_cancel/logout` drive it
+  and `app.py` has `/api/claude/login`, `.../state`, `.../code`, `.../cancel` and `/api/claude/logout` (all but
+  `state` in `LOCAL_ONLY`). Settings, Claude: "Sign in to Claude Code…" (or "Sign in as someone else…") shows the
+  link (Copy the link: the account's owner can open it on her own computer and send the code back; the code is tied to
+  that one attempt), a box for the code, Finish, Cancel; "Sign out" beside it. Also "Where Claude Code is"
+  (`claude_path` in `settings.py`; `command()` takes it after `CONTEXT_NOTES_CLAUDE`; saving it makes the app look
+  again) and more `PLACES` (npm global, nvm, Volta, Windows). `tests/fake_claude.py` learnt `auth login`/`logout`
+  (`FAKE_CLAUDE_SIGNIN`, `FAKE_CLAUDE_LOGIN`). Tested: 495 tests pass (in three batches, in the Linux VM the desktop
+  app gives this session), `ruff check .` clean, and the whole flow in a headless browser against the fake Claude
+  Code (sign in, a refused code, sign out, a wrong path). Not tried with the real Claude Code's sign-in page, and not
+  on Windows. Docs: README, CHANGELOG, docs/gui-protocol.md. Note: his runs count against Erin's plan windows.
 - **Uncommitted, 2026-10-29: the timecode fix.** A phone's or camera's MP4 has a timecode track (a data stream), and
   `--convert` copied it into the MKV, which refused it ("Only audio, video, and subtitles are supported for Matroska").
   Now `embed.py` leaves data tracks out (`-map -0:d` in `build_command`, `data_tracks`, and `verify()` ignores them).
@@ -82,7 +96,7 @@ It's the first thing to read when picking the work up on another computer or aft
      rewrite the 2.8 GB film.
 - **Ideas, not built:** store the look as a Matroska track tag (`CONTEXT_NOTES_LOOK`, which ffmpeg writes and ffprobe reads back,
   checked on a test file); add the min, max and settle timing to the `Look:` line; show the old box for files made
-  before 0.2.0 (Akira's "now" column says "not recorded").
+  before 0.2.0 (Akira's "now" column says "not recorded"); and a check in `tidy.py` for episode accuracy: each video's season and episode numbers against the episode list (TMDB order), flagging duplicate numbers, files in the wrong season folder and files whose picture stops early (the Dr Who check found all three). Frames can confirm the season (the Doctor and companions); the episode number needs the dialogue.
 - **Not in the GUI yet:** `--window`, `--align-model`, and `find_subs.py --transcribe`.
 - **Test media:** the temporary test folders on the NAS (`Movies/.embed-rewrite-test` and `TV Shows/.convert-test`)
   were deleted. Nothing in the library was changed.
@@ -90,8 +104,9 @@ It's the first thing to read when picking the work up on another computer or aft
   `ffprobe` are needed. MKVToolNix (`mkvpropedit`, `mkvmerge`) is installed here for checks; the code doesn't use it yet.
   The Media share is mounted
   at `/Volumes/Media`. The probe cache lives in `~/.config/context-notes/probe-cache/` and isn't in the repo.
-- **Next step:** Erin tries one short run on her plan (`context_notes.py film.mkv --limit 5:00`), then step 3. Still
-  waiting: her answer on the Plex copy.
+- **Next step:** the friend tries Settings, "Sign in to Claude Code…" (Erin opens the link, sends him the code); then
+  Erin's short run on her plan (`context_notes.py film.mkv --limit 5:00`), then step 3. Still waiting: her answer on
+  the Plex copy.
 
 ## The pipeline (one command per step; `context_notes.py` runs them all)
 

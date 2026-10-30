@@ -26,6 +26,7 @@ BUILT_IN = {
     "route": "plan",                      # where the notes are written: the plan, unless it can't (see api_fallback)
     "api_fallback": False,                # when the plan runs out (or Claude Code can't be used): carry on with API
     "api_fallback_usd": 5.0,              # credits, up to this much a run. Off: ask (or stop, with nobody to ask)
+    "claude_path": "",                    # where Claude Code is, when it isn't on the PATH or in the usual places
     "quality": "best",                    # "best" (Opus) or "cheaper" (Sonnet)
     "effort": "",                         # "" = high
     "audience": "",                       # "" = the built-in text for each film
@@ -48,6 +49,7 @@ KEYS = {
     "route": ("choice", ROUTES),
     "api_fallback": ("bool", None),
     "api_fallback_usd": ("number", (0.01, 1000)),
+    "claude_path": ("text", 1024),
     "quality": ("choice", ("best", "cheaper")),
     "effort": ("choice", EFFORTS),
     "audience": ("text", 300),

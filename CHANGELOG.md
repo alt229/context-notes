@@ -7,6 +7,13 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- "Sign in to Claude Code…" in Settings, for friends who don't use Terminal. It runs `claude auth login`, shows the
+  link that prints, and takes the code the sign-in page gives (the same dance as in Terminal). The link can be opened
+  on another computer, by whoever owns the account the notes should be written on, and the code sent back; it only
+  works for that one sign-in. "Sign out" and "Sign in as someone else…" are beside it. Only from a browser on the
+  computer running the app (hidden and refused from another device, like saving the API key).
+- "Where Claude Code is" in Settings (`claude_path`), for a Claude Code the app can't find by itself. The app now also
+  looks in the npm, nvm, Volta and Windows install folders, and says when the saved path isn't there.
 - "Yes to all questions" in Settings (and `context_notes.py --yes-to-all`, `make_ass.py --yes-to-all`): a run doesn't
   stop to ask about the work. It downloads subtitles, writes them from the soundtrack when none are found, checks and
   fixes new notes' timing, re-times subtitles that drift, picks up a stopped run, and goes on to the next video; each

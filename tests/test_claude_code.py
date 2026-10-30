@@ -277,6 +277,93 @@ def test_the_app_says_how_claude_code_is_and_checks_again(server, monkeypatch): 
     assert "isn't signed in" in call(server, "/api/info")[1]["claude"]["problem"]
 
 
+# ---------------------------------------------------------------- signing in from the page
+def test_signing_in_from_the_page(server, monkeypatch, tmp_path):  # noqa: F811
+    """`claude auth login` prints a link and waits for the code: the page shows the link, the code goes back in."""
+    monkeypatch.setenv("FAKE_CLAUDE_AUTH", "none")
+    monkeypatch.setenv("FAKE_CLAUDE_SIGNIN", str(tmp_path / "signed-in"))
+    assert "isn't signed in" in call(server, "/api/claude/check", {})[1]["claude"]["problem"]
+    assert call(server, "/api/claude/login/state", {})[1] == {"waiting": False}
+    _, r = call(server, "/api/claude/login", {})
+    assert r["ok"] and r["url"].startswith("https://claude.example/oauth/authorize?")
+    assert call(server, "/api/claude/login", {})[1]["url"] == r["url"]           # again: the same sign-in
+    assert call(server, "/api/claude/login/state", {})[1] == {"waiting": True, "url": r["url"]}
+    _, r = call(server, "/api/claude/login/code", {"code": ""})
+    assert r["waiting"] and "Paste the code" in r["error"]
+    _, r = call(server, "/api/claude/login/code", {"code": "bad"})               # refused: the sign-in is over
+    assert r["waiting"] is False and r["ok"] is False and "Invalid authorization code" in r["error"]
+    assert "isn't signed in" in r["claude"]["problem"]
+    assert call(server, "/api/claude/login/state", {})[1] == {"waiting": False}
+    assert call(server, "/api/claude/login", {})[1]["ok"]                        # once more, with the right code
+    _, r = call(server, "/api/claude/login/code", {"code": "  abc#def  "})
+    assert r["waiting"] is False and r["ok"] and r["claude"]["signed_in"] and r["claude"]["problem"] is None
+    assert (tmp_path / "signed-in").read_text() == "abc#def"
+    assert call(server, "/api/info")[1]["claude"]["signed_in"]
+    _, r = call(server, "/api/claude/logout", {})
+    assert r["ok"] and not r["claude"]["signed_in"] and not (tmp_path / "signed-in").exists()
+    assert "isn't signed in" in call(server, "/api/info")[1]["claude"]["problem"]
+
+
+def test_a_sign_in_that_goes_wrong_or_is_given_up(server, monkeypatch):  # noqa: F811
+    monkeypatch.setenv("FAKE_CLAUDE_AUTH", "none")
+    monkeypatch.setenv("FAKE_CLAUDE_LOGIN", "no-link")
+    _, r = call(server, "/api/claude/login", {})
+    assert r["ok"] is False and "wrong with the fake's network" in r["error"]
+    monkeypatch.delenv("FAKE_CLAUDE_LOGIN")
+    assert call(server, "/api/claude/login", {})[1]["ok"]                        # waiting for its code: given up
+    p = claude_code._login["process"]
+    assert p.poll() is None
+    _, r = call(server, "/api/claude/login/cancel", {})
+    assert "isn't signed in" in r["claude"]["problem"] and p.poll() is not None
+    assert call(server, "/api/claude/login/state", {})[1] == {"waiting": False}
+    monkeypatch.setattr(claude_code, "command", lambda: None)
+    assert "isn't installed" in call(server, "/api/claude/login", {})[1]["error"]
+
+
+def test_a_sign_in_without_a_link_in_time_is_given_up(monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_AUTH", "none")
+    monkeypatch.setenv("FAKE_CLAUDE_LOGIN", "silent")
+    monkeypatch.setattr(claude_code, "LINK_WAIT", 1)
+    r = claude_code.login_start()
+    assert r["ok"] is False and "within 1 seconds" in r["error"]
+    assert claude_code._login["process"] is None
+
+
+# ---------------------------------------------------------------- where Claude Code is
+def test_where_claude_code_is(tmp_path, monkeypatch, home):
+    monkeypatch.delenv("CONTEXT_NOTES_CLAUDE")
+    monkeypatch.setattr(claude_code.shutil, "which", lambda name: None)
+    old = tmp_path / "nvm/node/v20/bin/claude"
+    new = tmp_path / "nvm/node/v22/bin/claude"
+    for i, f in enumerate((old, new)):
+        f.parent.mkdir(parents=True)
+        f.write_text("#!/bin/sh\necho 1.0.0 (Claude Code)\n")
+        f.chmod(0o755)
+        import os
+        os.utime(f, (1000 + i, 1000 + i))
+    monkeypatch.setattr(claude_code, "PLACES", (str(tmp_path / "missing/claude"), str(tmp_path / "nvm/node/*/bin/claude")))
+    assert claude_code.command() == [str(new)]                                    # the newest of a glob
+    settings.save({"claude_path": str(tmp_path / "nowhere/claude")})
+    assert claude_code.command() is None
+    assert "isn't at the place saved in Settings" in claude_code.status(refresh=True)["problem"]
+    settings.save({"claude_path": str(old)})
+    assert claude_code.command() == [str(old)]                                    # the saved path wins
+    settings.save({"claude_path": ""})
+    assert claude_code.command() == [str(new)]
+    monkeypatch.setattr(claude_code, "PLACES", ())
+    assert claude_code.command() is None
+    assert "isn't installed" in claude_code.status(refresh=True)["problem"]
+
+
+def test_saving_a_new_path_in_the_app_looks_again(server):  # noqa: F811
+    status, r = call(server, "/api/settings", {"claude_path": "/nowhere/claude"})
+    assert status == 200 and r["settings"]["claude_path"] == "/nowhere/claude"
+    assert "claude" in r and r["claude"]["installed"]                 # looked again (the tests' stand-in still wins)
+    status, r = call(server, "/api/settings", {"recursive": True})
+    assert status == 200 and "claude" not in r
+    assert call(server, "/api/settings", {"claude_path": ""})[0] == 200
+
+
 def test_the_app_saves_the_claude_settings(server):  # noqa: F811
     status, r = call(server, "/api/settings", {"route": "api", "api_fallback": True, "api_fallback_usd": 3})
     assert status == 200 and (r["settings"]["route"], r["settings"]["api_fallback_usd"]) == ("api", 3)

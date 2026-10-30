@@ -179,8 +179,9 @@ python3 app.py
   used and when it resets (see [Credit and session use](#credit-and-session-use)). The cost question also says how
   much credit you have left, and warns if the run may cost more.
 - **Settings** starts with **Claude**: where the notes are written (your Claude plan through Claude Code, the default,
-  or API credits), whether Claude Code is installed and signed in, and "Use API credits when the plan runs out, up to
-  $___ a run" (see [Your Claude plan or API credits](#your-claude-plan-or-api-credits)). The same choice sits beside
+  or API credits), whether Claude Code is installed and signed in, "Sign in to Claude Code…" (and Sign out) for when it
+  isn't, "Where Claude Code is" for an install the app can't find by itself, and "Use API credits when the plan runs
+  out, up to $___ a run" (see [Your Claude plan or API credits](#your-claude-plan-or-api-credits)). The same choice sits beside
   the run options for one run. Then your Anthropic API key (saved in the usual place), the credit you have left, the
   OpenSubtitles login, and a button that installs the VLC extension.
 - **Defaults for every run** (in Settings): the model, thinking effort, who the notes are for, the language to write
@@ -505,8 +506,11 @@ The extension looks for `<video name>.notes.ass` beside the video and gives you 
 
 **The plan (the default).** With a Claude Pro or Max plan, the notes are written through
 [Claude Code](https://claude.com/claude-code) in the background, one request per part (`claude -p`), with no API
-credits. Install Claude Code and sign in once by running `claude` in Terminal. Each request is kept small and
-closed off:
+credits. Install Claude Code and sign in once: in the app, Settings, "Sign in to Claude Code…" (it shows a link to
+open and a box for the code that page gives), or by running `claude` in Terminal. The link can be opened on another
+computer, so the account's owner can sign in there and send the code back; the code only works for that one sign-in.
+If the app can't find Claude Code (it looks on the PATH and in the usual install folders), put its path in "Where
+Claude Code is". Each request is kept small and closed off:
 
 - It can't use an API key: `ANTHROPIC_API_KEY` (and the other ways of signing in) are taken out of what it sees, so it
   only ever uses your Claude account. If Claude Code is signed in with an API key, it isn't used at all.

@@ -15,6 +15,11 @@ conftest.py points CONTEXT_NOTES_CLAUDE at this file for every test. Environment
                      ("0.42,0.11" by default), or "none"
   FAKE_CLAUDE_LOG    a file that gets one JSON line per `claude -p` run: its arguments, the prompt, the folder it ran
                      in, which auth variables it could see, and the pictures it opened
+  FAKE_CLAUDE_SIGNIN a file: when it exists, `auth status` says signed in (claude.ai) whatever FAKE_CLAUDE_AUTH says.
+                     `auth login` prints the sign-in link and waits for the code on stdin, as the real one does with
+                     no terminal: "good" (any code not "bad") makes the file and exits 0; "bad" exits 1 with a
+                     message. `auth logout` removes it. FAKE_CLAUDE_LOGIN "no-link" ends at once without a link,
+                     "silent" prints nothing and waits.
 """
 import json
 import os
@@ -85,15 +90,42 @@ def main(argv):
         print("Usage: claude [options]\n" + ("--model --print --output-format --system-prompt"
                                              if os.environ.get("FAKE_CLAUDE_HELP") == "old" else NEW_FLAGS))
         return 0
+    signin = os.environ.get("FAKE_CLAUDE_SIGNIN")
     if argv[:2] == ["auth", "status"]:
         method = os.environ.get("FAKE_CLAUDE_AUTH", "claude.ai")
         if method == "missing":
             print("error: unknown command 'auth'", file=sys.stderr)
             return 1
+        if signin and Path(signin).exists():
+            method = "claude.ai"
         print(json.dumps({"loggedIn": method != "none", "authMethod": method, "apiProvider": "firstParty"}))
         return 0 if method != "none" else 1
+    if argv[:2] == ["auth", "login"]:
+        how = os.environ.get("FAKE_CLAUDE_LOGIN", "")
+        if how == "no-link":
+            print("Something is wrong with the fake's network", file=sys.stderr)
+            return 1
+        if how == "silent":
+            import time
+            time.sleep(120)
+        print("Opening browser to sign in…")
+        print("If the browser didn't open, visit: https://claude.example/oauth/authorize?code=true&state=fake")
+        print("Paste code here if prompted > ", end="", flush=True)
+        code = sys.stdin.readline().strip()
+        if code and code != "bad":
+            if signin:
+                Path(signin).write_text(code, encoding="utf-8")
+            print("\nLogged in as fake@example.com")
+            return 0
+        print("\nInvalid authorization code" if code else "\nNo code given", file=sys.stderr)
+        return 1
+    if argv[:2] == ["auth", "logout"]:
+        if signin and Path(signin).exists():
+            Path(signin).unlink()
+        print("Logged out")
+        return 0
     if "-p" not in argv:
-        print("fake claude: only -p, --version, --help and auth status", file=sys.stderr)
+        print("fake claude: only -p, --version, --help and auth status/login/logout", file=sys.stderr)
         return 2
     opts = options(argv)
     STREAM["on"] = (opts.get("--output-format") or [""])[0] == "stream-json"
