@@ -20,6 +20,11 @@ For each video it:
   4. has Claude improve them using the video's frames    (make_ass.py --refine: shows the cost, asks first)
   5. leaves <video>.notes.ass beside the video for VLC
   6. with --embed: also puts the notes inside an .mkv as a subtitle track (embed.py; .mp4 files stay as they are)
+With --behind-the-scenes it makes the film's Behind the Scenes track instead (notes about how it was made, for
+fans watching it again): before step 3 Claude looks the film up (research.py: its commentary tracks, if any, and the
+web, keeping a source for every fact), steps 3 and 4 place those facts on the film, and step 5 leaves
+<video>.behind-the-scenes.notes.ass beside the video. Notes that give away something later are marked as spoilers;
+--spoilers (or Settings) decides whether they're shown.
 Working files (the notes file, re-timed subtitles, reports, frames) go in context-notes/<video file name>/ beside
 the video (see workfiles.py). Files earlier versions left beside the video still work; tidy.py moves them in.
 Steps already done are skipped (the notes file records them), so it is safe to stop and run it again. A finished
@@ -48,6 +53,7 @@ import embed  # noqa: E402  (whether a film's notes are inside its .mkv: --previ
 import languages  # noqa: E402
 import make_ass  # noqa: E402
 import prompts  # noqa: E402
+import pythonpin  # noqa: E402  (a Python newer than the one this is set up for)
 import settings  # noqa: E402  (this install's defaults: applied to the flags left out below)
 import workfiles  # noqa: E402
 
@@ -188,14 +194,40 @@ def audio_language(video):
     return languages.code(((astream or {}).get("tags") or {}).get("language"))
 
 
-def notes_path_for(video, srt):
+def bts(opts):
+    """Is this run about the Behind the Scenes track (--behind-the-scenes)?"""
+    return bool(getattr(opts, "behind_the_scenes", False))
+
+
+def notes_path_for(video, srt, opts=None):
     """An existing notes file for this video (by video name, subtitle name, or the aligned subtitle name),
-    else notes-<video name>.json in its working folder (context-notes/<video>/)."""
+    else notes-<video name>.json in its working folder (context-notes/<video>/). For the Behind the Scenes track:
+    behind-the-scenes-<video name>.json there."""
+    if bts(opts):
+        return workfiles.bts_notes_path(video)
     return workfiles.notes_path(video, srt)
 
 
-def ass_path_for(video):
-    return Path(str(video.with_suffix("")) + ".notes.ass")
+def ass_path_for(video, opts=None):
+    return workfiles.bts_ass_path(video) if bts(opts) else Path(str(video.with_suffix("")) + ".notes.ass")
+
+
+def track_args(opts, facts=None):
+    """What make_ass.py is told about the Behind the Scenes track: nothing for the context notes."""
+    if not bts(opts):
+        return []
+    return ["--behind-the-scenes", *(["--facts", facts] if facts else []), *cli_common.spoiler_args(opts)]
+
+
+def facts_state(path):
+    """The fact sheet (research.py): ("complete", how many facts, when it was made), ("partial", ...) for a look-up
+    that stopped part-way (the next one picks it up), or ("missing", None, None)."""
+    spec = load_notes(path) if path and path.exists() else None
+    if not spec or not isinstance(spec.get("facts"), list):
+        return "missing", None, None
+    if spec.get("complete") and spec["facts"]:
+        return "complete", len(spec["facts"]), spec.get("made")
+    return "partial", len(spec["facts"]), None
 
 
 # ---------------------------------------------------------------- what's been done
@@ -222,7 +254,8 @@ def ass_look(ass):
     if not m:
         return None
     return {"build": int(m["build"]), "background": m["background"], "wpm": float(m["wpm"]),
-            "opacity": float(m["opacity"]) if m["opacity"] else None}
+            "opacity": float(m["opacity"]) if m["opacity"] else None,
+            "spoilers": {"included": "include", "left out": "leave-out"}.get(m["spoilers"])}
 
 
 def wanted_look(spec, opts):
@@ -242,7 +275,24 @@ def wanted_look(spec, opts):
         opacity = float(opacity)
     except (TypeError, ValueError):
         opacity = None
-    return {"build": make_ass.BUILD, "background": background, "wpm": wpm, "opacity": opacity}
+    return {"build": make_ass.BUILD, "background": background, "wpm": wpm, "opacity": opacity,
+            "spoilers": wanted_spoilers(spec, opts)}
+
+
+def wanted_spoilers(spec, opts):
+    """For the Behind the Scenes track: "include" or "leave-out", as a build would decide now (make_ass.spoiler_choice),
+    or None when it would ask (Settings "ask", and the film has no choice of its own yet). None for the context notes."""
+    if not bts(opts):
+        return None
+    given = getattr(opts, "spoilers", None)
+    saved = (spec or {}).get("spoilers")
+    saved = saved if saved in make_ass.SPOILER_WORDS else None
+    for choice in (given, saved, settings.spoilers_default()):
+        if choice == "ask":
+            return saved                         # asked once per film: its answer, or None (it will be asked)
+        if choice in make_ass.SPOILER_WORDS:
+            return choice
+    return "include"
 
 
 def ass_current(ass, notes, spec, opts):
@@ -254,6 +304,8 @@ def ass_current(ass, notes, spec, opts):
         return False
     if want["background"] == "see-through" and (want["opacity"] is None or have["opacity"] is None
                                                  or abs(have["opacity"] - want["opacity"]) > 0.05):
+        return False
+    if bts(opts) and (have["spoilers"] is None or (want["spoilers"] and have["spoilers"] != want["spoilers"])):
         return False
     return abs(have["wpm"] - want["wpm"]) < 0.05
 
@@ -272,16 +324,22 @@ def inspect(video, opts):
     film, how = film_language(video, opts)
     display = opts.subs_language or film
     srt, aligned = pick_subtitles(subs, display, opts.limit, accept_unknown=True)
-    notes = notes_path_for(video, srt)
+    notes = notes_path_for(video, srt, opts)
     spec = load_notes(notes) if notes.exists() else None
     if spec and spec.get("film_language") and how == "default":
         film, how = film_language(video, opts, spec)
     have = len(spec.get("notes", [])) if spec else 0
     refined = (spec or {}).get("refined")
-    ass = ass_path_for(video)
+    ass = ass_path_for(video, opts)
     st = {"video": video, "subs": subs, "srt": srt, "aligned": aligned, "notes": notes, "spec": spec, "have": have,
-          "film_language": film, "film_language_from": how, "ass": ass, "display_lang": display}
-    st["notes_ok"] = have > 0 and covers((spec or {}).get("limit"), opts.limit) and not opts.redo
+          "film_language": film, "film_language_from": how, "ass": ass, "display_lang": display, "bts": bts(opts)}
+    st["facts"] = workfiles.facts_path(video) if bts(opts) else None
+    st["facts_state"], st["fact_count"], made = facts_state(st["facts"]) if bts(opts) else ("complete", None, None)
+    st["facts_ok"] = st["facts_state"] == "complete"
+    # Behind the Scenes notes from an older fact sheet (looked up again since) are written again
+    st["stale_facts"] = bool(bts(opts) and have and made and (spec or {}).get("facts_made") != made)
+    st["notes_ok"] = (have > 0 and covers((spec or {}).get("limit"), opts.limit) and not opts.redo
+                      and not st["stale_facts"])
     # parts whose replies couldn't be read: their lines have no notes until they're sent again (asked about)
     st["unreadable"] = len((spec or {}).get("unreadable") or []) if st["notes_ok"] else 0
     st["refined_ok"] = (bool(refined) and not refined.get("stopped_after")       # a refine that stopped part-way
@@ -293,7 +351,8 @@ def inspect(video, opts):
     shown = shown_language(spec, subs) if want and spec else None
     st["show_change"] = want if shown is not None and not languages.same(shown, want) else None
     st["done"] = (st["notes_ok"] and st["ass_ok"] and (st["refined_ok"] or opts.no_refine) and not st["unreadable"]
-                  and not st["show_change"])
+                  and not st["show_change"]
+                  and (st["facts_ok"] or (st["facts_state"] == "missing" and st["have"])))
     # only the .ass is behind: a free rebuild, no Claude
     st["rebuild"] = (st["notes_ok"] and (st["refined_ok"] or opts.no_refine) and not st["unreadable"]
                      and (not st["ass_ok"] or st["show_change"]))
@@ -330,7 +389,9 @@ def status_fields(st, tidy=0):
             "notes_stopped": st["notes"].with_suffix(".partial.json").exists(),
             "refined": "stopped" if refined.get("stopped_after") else ("yes" if refined else "no"),
             "ass": st["ass"].name if st["ass"].exists() else None, "rebuild": st["rebuild"],
-            "unreadable": st["unreadable"], "refine_unreadable": len(refined.get("unreadable") or []), "tidy": tidy}
+            "unreadable": st["unreadable"], "refine_unreadable": len(refined.get("unreadable") or []), "tidy": tidy,
+            "track": workfiles.BTS if st.get("bts") else "context",
+            "facts": st.get("fact_count") if st.get("facts_ok") else None}
 
 
 def status_line(st):
@@ -348,6 +409,11 @@ def status_line(st):
                       f"to send just those again)")
     else:
         notes = "no notes yet"
+    if st.get("bts"):
+        looked = {"complete": f"{st['fact_count']} facts looked up",
+                  "partial": f"the look-up stopped part-way ({st['fact_count']} facts so far)"}
+        notes = ("Behind the Scenes: " + looked.get(st["facts_state"], "not looked up yet") + "; " + notes
+                 + ("; written from an earlier look-up, so they'll be written again" if st["stale_facts"] else ""))
     if st["unreadable"]:
         notes += f"; {st['unreadable']} part(s) came back unreadable (the next run offers to send just those again)"
     if st["rebuild"]:
@@ -445,12 +511,21 @@ def rebuild_subtitles(st, opts):
     return pick_subtitles(st["subs"], other, opts.limit)[0]
 
 
-def keep_old_ass(video):
-    """Before a build rewrites the film's .notes.ass, keep the one there now as <name>.bak (an older backup is never
-    overwritten)."""
-    ass = ass_path_for(video)
+def ass_backup(video, ass):
+    """Where the .ass a rebuild replaces is kept: <name>.bak (or .bak2, ...; an older backup is never overwritten) in
+    the video's working folder, where the frames step keeps its own (beside the video only for a film an earlier
+    version started, as workfiles.place says). Beside the video it looked like a leftover, and Tidy couldn't move it
+    when the frames step had already kept a .bak of that name in the folder."""
+    return fileio.unique_backup(workfiles.place(video) / ass.name)
+
+
+def keep_old_ass(video, opts=None):
+    """Before a build rewrites the film's .notes.ass (or .behind-the-scenes.notes.ass), keep the one there now (see
+    ass_backup)."""
+    ass = ass_path_for(video, opts)
     if ass.exists():
-        backup = fileio.unique_backup(ass)
+        backup = ass_backup(video, ass)
+        workfiles.make_dirs(backup.parent)
         shutil.copy2(ass, backup)
         say(f"Kept the old subtitles: {backup.name}")
 
@@ -472,6 +547,10 @@ def rebuild_diff(st, opts):
     if want["background"] == "see-through":
         row("Box opacity", shown(have and have["opacity"], "% solid"), shown(want["opacity"], "% solid"))
     row("Words a minute", shown(have and have["wpm"]), shown(want["wpm"]))
+    if st.get("bts"):
+        words = {"include": "shown", "leave-out": "left out"}
+        row("Spoilers", words.get(have and have["spoilers"], "not recorded"),
+            words[want["spoilers"]] if want["spoilers"] else "asked when it's rebuilt")
     after_srt = rebuild_subtitles(st, opts)
     row("Subtitles the notes are placed on", st["srt"].name if st["srt"] else "none",
         after_srt.name if after_srt else "none")
@@ -479,18 +558,78 @@ def rebuild_diff(st, opts):
     row("Subtitles at the bottom", bottom, f"{opts.show_subs} (--show-subs)" if opts.show_subs else bottom)
     files = []
     if ass.exists():
-        files.append(f"Kept: {fileio.unique_backup(ass).name} (the .notes.ass as it is now)")
+        files.append(f"Kept: {ass_backup(video, ass).name} (the {ass.name} as it is now)")
     files.append(f"Rebuilt: {ass.name}")
-    if ass.name.endswith(".notes.ass"):
+    if ass.name.endswith(".notes.ass") and not st.get("bts"):            # the Behind the Scenes track has none
         files.append(f"Written beside the film: {ass.name[:-len('.notes.ass')]}.en.ass (the Plex copy, which is "
                      "skipped if a file of that name isn't one of ours)")
-    embedded = video.suffix.lower() == ".mkv" and embed.inspect(video)["action"] == "current"
+    track = embed.BTS_TRACK if st.get("bts") else embed.CONTEXT_TRACK
+    embedded = video.suffix.lower() == ".mkv" and embed.inspect(video, only=track)["action"] == "current"
     if embedded:
-        files.append(f"Out of date inside {video.name}: its Context Notes track (Embed rewrites the film)")
+        files.append(f"Out of date inside {video.name}: its {track['title']} track (Embed rewrites the film)")
     return {"video": str(video), "name": video.name, "rows": rows, "files": files, "embedded": embedded}
 
 
 def get_subtitles(video, lang, opts, required=True, accept_unknown=False):
+    """An .srt in `lang` for this video, pulling it out of the video if that's where it is. Checked for damage
+    first (Settings: "Check subtitles for damage"); see checked_subtitles."""
+    srt, aligned = find_subtitles(video, lang, opts, required, accept_unknown)
+    if srt and getattr(opts, "subs_check", True):
+        srt, aligned = checked_subtitles(video, lang, srt, aligned, opts)
+    return srt, aligned
+
+
+def checked_subtitles(video, lang, srt, aligned, opts):
+    """The subtitles to use instead of `srt` when it's damaged or mislabeled (subcheck.py): another file of the
+    language beside the video that's clean (an earlier download), else a clean copy from OpenSubtitles.com (Settings:
+    "Get a clean copy when they're damaged", --no-replace-bad-subs), downloaded once. Kept as they are when the film
+    already has notes (they're anchored to these lines), or nothing clean turns up. Returns (path, aligned?)."""
+    import subcheck
+    found = subcheck.problems(fileio.read_text(srt), lang)
+    if not found:
+        return srt, aligned
+    say(f"  ! {srt.name} looks damaged:")
+    for line in subcheck.describe(found):
+        say(f"      {line}")
+    prompts.event("subs-check", video=str(video), where=srt.name,
+                  problems={k: {"count": n, "examples": ex} for k, (n, ex) in found.items()})
+    if workfiles.notes_path(video, srt).exists():
+        say("    This film's notes were written from them, so they're kept. To start from clean subtitles, put them "
+            "beside the video and write the notes again.")
+        return srt, aligned
+    others = [sub["path"] for sub in subtitle_files(video) if languages.same(sub["lang"], lang) and not sub["aligned"]
+              and "forced" not in sub["tags"] and sub["path"] != srt and nfc(sub["path"].name) != nfc(srt.name)]
+    for other in others:
+        if not subcheck.problems(fileio.read_text(other), lang):
+            say(f"    Using {other.name} instead: it's clean.")
+            return other, False
+    if others:
+        say("    The other subtitle files in that language are damaged too, so I'm going on with these.")
+        return srt, aligned
+    if not getattr(opts, "replace_bad_subs", True) or opts.offline:
+        say("    Going on with them. A clean copy beside the video (find_subs.py, OpenSubtitles.com) would fix it.")
+        return srt, aligned
+    import find_subs
+    cfg = find_subs.os_load()
+    if not cfg:
+        say("    No OpenSubtitles.com login saved, so I can't fetch a clean copy (python3 find_subs.py "
+            "--set-opensubtitles). Going on with these.")
+        return srt, aligned
+    say("    Looking for a clean copy on OpenSubtitles.com (uses one of your daily downloads)...")
+    try:
+        got = find_subs.search_online(video, lang, cfg)
+    except (SystemExit, Exception) as e:         # a failed search must not stop the run: the damaged ones still work
+        say(f"    ! The search failed: {e}")
+        got = None
+    if got and not subcheck.problems(fileio.read_text(got), lang):
+        say(f"    Using {got.name}: it's clean.")
+        return got, False
+    if got:
+        say(f"    {got.name} is damaged too, so I'm going on with {srt.name}.")
+    return srt, aligned
+
+
+def find_subtitles(video, lang, opts, required=True, accept_unknown=False):
     """An .srt in `lang` for this video, pulling it out of the video if that's where it is."""
     st_subs = subtitle_files(video)
     srt, aligned = pick_subtitles(st_subs, lang, opts.limit, accept_unknown)
@@ -750,8 +889,8 @@ def process(video, opts):
     st = inspect(video, opts)
     if st["done"] and not opts.show_subs:
         say(f"Already done: notes written{' and refined' if st['refined_ok'] else ''}, {st['ass'].name} is up to date. "
-            "(--redo starts over)")
-        if opts.check_alignment and st["srt"]:
+            + ("(--research-again looks the film up again and starts over)" if bts(opts) else "(--redo starts over)"))
+        if opts.check_alignment and st["srt"] and not bts(opts):
             alignment_step(video, st["srt"], st["notes"], st["film_language"], st["display_lang"],
                            original_for(video, st["film_language"], st["display_lang"], opts), opts)
         return "done"
@@ -760,8 +899,9 @@ def process(video, opts):
         say(f"The notes are done; rebuilding {st['ass'].name} (free: nothing is sent to Claude).")
         say(f"$ cd {shlex.quote(str(video.absolute().parent))}")
         prompts.event("step", step="build")
-        keep_old_ass(video)
-        if run(script("make_ass.py", placed_on, st["notes"], "--video", video, *look_args(opts)), video.parent):
+        keep_old_ass(video, opts)
+        if run(script("make_ass.py", placed_on, st["notes"], "--video", video, *look_args(opts), *track_args(opts)),
+               video.parent):
             raise Stop("Building the .ass failed.")
         say(f"Ready: play {video.name} in VLC; {st['ass'].name} is beside it.")
         return "ready"
@@ -805,7 +945,7 @@ def process(video, opts):
             + ("" if opts.show_subs else " (--show-subs en for English)") + ".")
     say(f"Subtitles: {srt.name}" + (" (re-timed to this video)" if aligned else ""))
     embedded = ".embedded" in srt.name
-    notes = notes_path_for(video, srt)
+    notes = notes_path_for(video, srt, opts)
     spec = load_notes(notes) if notes.exists() else None
     have = len((spec or {}).get("notes", []))
 
@@ -839,7 +979,7 @@ def process(video, opts):
     if need_generate and not aligned and not retry_only:
         prompts.event("step", step="sync")
         srt, assume_synced, offset = check_sync(video, srt, film, display_lang, embedded, opts)
-        notes = notes_path_for(video, srt) if not have else notes
+        notes = notes_path_for(video, srt, opts) if not have else notes
 
     title = opts.title or guess_title(video, opts.show)
     lang_args = (["--film-language", film] if foreign else []) + (["--original-subs", original] if original else [])
@@ -859,12 +999,39 @@ def process(video, opts):
             display_args = ["--display-subs", shown]
     lang_args += display_args
 
+    # 2b. the Behind the Scenes track: Claude looks the film up first (research.py), and the notes come from that.
+    # A look-up that stopped part-way is picked up (--research-again too: it only starts over a finished sheet), and
+    # notes written from an older sheet are written again.
+    facts = workfiles.facts_path(video) if bts(opts) else None
+    if facts is not None:
+        state, count, made = facts_state(facts)
+        if (state != "complete" and (need_generate or need_refine or state == "partial")) or opts.research_again:
+            say(f"Looking up “{title}” for its Behind the Scenes notes...")
+            prompts.event("step", step="research")
+            cmd = script("research.py", video, "--title", title, *cli_common.claude_args(opts),
+                         *(["--again"] if opts.research_again else []),
+                         *(["--commentary", opts.commentary] if opts.commentary else []),
+                         *(["--yes"] if opts.yes else []))
+            if run(cmd, video.parent):
+                raise Stop("Stopped at the look-up step. What it found so far is kept; run it again to pick up.")
+            state, count, made = facts_state(facts)
+        if state != "complete":
+            if need_generate or need_refine or state == "partial":
+                raise Stop(f"The fact sheet ({facts.name}) isn't finished, so the Behind the Scenes notes can't be "
+                           f"written. Run it again to pick up the look-up.")
+        else:
+            say(f"Fact sheet: {facts.name} ({count} facts).")
+            if have and made and (spec or {}).get("facts_made") != made and not need_generate:
+                say("The notes were written from an earlier look-up, so they're written again from this one.")
+                need_generate, extend = True, False
+                need_refine = not opts.no_refine
+
     # 3. Claude writes the notes
     if need_generate:
         say(f"Writing the notes for “{title}”...")
         prompts.event("step", step="generate")
         cmd = script("make_ass.py", srt, notes, "--generate", "--video", video, "--title", title,
-                     *limit_args(opts), *lang_args, *common_api_args(opts), *look_args(opts))
+                     *limit_args(opts), *lang_args, *common_api_args(opts), *look_args(opts), *track_args(opts, facts))
         if offset:
             cmd += ["--offset", f"{offset:+.2f}"]
         if have:
@@ -877,21 +1044,23 @@ def process(video, opts):
         say("Improving the notes using the video's frames...")
         prompts.event("step", step="refine")
         cmd = script("make_ass.py", srt, notes, "--refine", "--video", video, "--frames", opts.frames,
-                     *limit_args(opts), *lang_args, *common_api_args(opts), *look_args(opts))
+                     *limit_args(opts), *lang_args, *common_api_args(opts), *look_args(opts), *track_args(opts, facts))
         if assume_synced:
             cmd.append("--assume-synced")
         if run(cmd, video.parent):
             raise Stop("Stopped at the refine step. The notes written so far are kept, and the .ass is built from them.")
 
     # 5. make sure the .ass is current
-    ass = ass_path_for(video)
+    ass = ass_path_for(video, opts)
     stale = not ass_current(ass, notes, load_notes(notes), opts)
     if not need_generate and not need_refine and (stale or display_args):
         prompts.event("step", step="build")
-        keep_old_ass(video)
-        if run(script("make_ass.py", srt, notes, "--video", video, *display_args, *look_args(opts)), video.parent):
+        keep_old_ass(video, opts)
+        if run(script("make_ass.py", srt, notes, "--video", video, *display_args, *look_args(opts), *track_args(opts)),
+               video.parent):
             raise Stop("Building the .ass failed.")
-    alignment_step(video, srt, notes, film, display_lang, original, opts)
+    if not bts(opts):                            # the alignment check is about the context notes' timing
+        alignment_step(video, srt, notes, film, display_lang, original, opts)
     say(f"Ready: play {video.name} in VLC; {ass.name} is beside it.")
     return "ready"
 
@@ -961,16 +1130,40 @@ def main(argv=None):
     ap.add_argument("--download-subs", action="store_true",
                     help="download the subtitles OpenSubtitles.com finds without asking (each uses one of your daily "
                          "downloads; Settings: \"Always download subtitles\")")
+    ap.add_argument("--no-subs-check", dest="subs_check", action="store_false",
+                    help="don't check the subtitles for damage (mangled characters, text-recognition mistakes, the "
+                         "wrong language label) before using them (Settings: \"Check subtitles for damage\")")
+    ap.add_argument("--no-replace-bad-subs", dest="replace_bad_subs", action="store_false",
+                    help="when the subtitles are damaged, go on with them instead of fetching a clean copy from "
+                         "OpenSubtitles.com (Settings: \"Get a clean copy when they're damaged\")")
     ap.add_argument("--yes-to-all", action="store_true",
                     help="answer yes to the questions about the work without asking: download and write subtitles, "
                          "check and fix the timing, re-time, pick up, go on to the next video (Settings: \"Yes to all "
                          "questions\"). Never to sending to Claude (that's --yes), API credits, or deleting")
     ap.add_argument("--align-model", help="speech model for re-timing (default: base.en, or small for other languages)")
+    b = ap.add_argument_group("the Behind the Scenes track: notes about how the film was made, for fans watching it "
+                              "again (<video>.behind-the-scenes.notes.ass beside the video)")
+    b.add_argument("--behind-the-scenes", action="store_true",
+                   help="make the Behind the Scenes track instead of the context notes: Claude looks the film up "
+                        "(its commentary tracks, and the web, with a source for every fact), then places the facts")
+    b.add_argument("--research-again", action="store_true",
+                   help="with --behind-the-scenes: look the film up again and write its notes again (the old fact "
+                        "sheet and notes are kept as .bak)")
+    b.add_argument("--commentary", metavar="auto|none|N",
+                   help="with --behind-the-scenes: commentary tracks to use (default auto: any audio track whose "
+                        "title says commentary; N: that audio track, as research.py --list-audio numbers them)")
+    cli_common.add_spoiler_arg(b)
     look = ap.add_argument_group("how the notes look (free to change later: the .ass is rebuilt; remembered per video)")
     cli_common.add_look_args(look)
     ap.set_defaults(**settings.cli_defaults())      # the flags left out take this install's defaults
     opts = ap.parse_args(argv)
     cli_common.check_look_args(ap, opts)
+    if not prompts.machine() and pythonpin.newer_than_pin():
+        print(f"Note: {pythonpin.newer_than_pin()}\n", flush=True)
+    if not opts.behind_the_scenes and (opts.research_again or opts.commentary or opts.spoilers):
+        ap.error("--research-again, --commentary and --spoilers go with --behind-the-scenes")
+    if opts.research_again:
+        opts.redo = True                         # new facts: the notes are written again from them
     cli_common.settle_route(opts)
     if opts.yes_to_all:
         prompts.turn_on_yes_to_all()               # for every step this run starts, too

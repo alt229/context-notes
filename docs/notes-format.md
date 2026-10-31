@@ -22,6 +22,8 @@ A notes file is plain JSON. `make_ass.py` merges it with an SRT to produce the `
 | `timing` | How long notes stay up: `{"wpm": 150, "settle": 2, "min": 6, "max": 24}` (any of the four; the rest default). Written when you give `--reading-speed`, `--note-settle`, `--note-min` or `--note-max` to `make_ass.py`. |
 | `display_subtitles`, `display_offset` | Subtitles shown at the bottom instead of the ones the notes are placed on (`--display-subs`). |
 | `notes` | The list of notes. |
+| `track`, `facts` | The Behind the Scenes notes (`behind-the-scenes-<video>.json`): `"behind-the-scenes"`, and the file name of the fact sheet they were written from (`facts-<video>.json`). |
+| `spoilers` | Behind the Scenes only: `include` or `leave-out`, the film's own choice for the notes marked `spoiler` (written when `--spoilers` is given, or the `ask` question is answered). Without it, Settings decides. |
 
 Any other top-level keys are kept and ignored.
 
@@ -39,6 +41,8 @@ Any other top-level keys are kept and ignored.
 | `confidence` | no (default `high`) | `high`, `medium` or `low`. Medium and low show a "(less sure)" flag. |
 | `kind` | no (default `speech`) | `speech` for notes about what is said (top-left), `visual` for notes about what is on screen (top-right in the default layout). |
 | `keep` | no | `true` keeps the note even if it repeats an earlier one (see "Repeats" below). |
+| `spoiler` | no | Behind the Scenes: `true` when the note gives away something later in the film. Shown with a "(spoiler)" flag, or left out of the build when the film's `spoilers` is `leave-out` (it still counts for placing the notes after it). |
+| `fact` | no | Behind the Scenes: the id of the fact on the fact sheet the note tells. |
 
 ### Where a note attaches (use one)
 
@@ -80,6 +84,24 @@ Any text works. The VLC extension and the colour coding know these (case-insensi
 - Sight gags & staging: `Visual gag`, `Staging`, `On-screen text`
 - Props, sets & costume: `Prop`, `Background`, `Costume`
 - Trivia: `Trivia`, `Adaptation`, `About these notes`
+- Behind the Scenes. How it was made: `Behind the scenes`, `Stunt`, `Injury`, `Improvised`, `Effects`, `Design`,
+  `Location`, `Music`, `Deleted scene`. Casting, cameos & easter eggs: `Casting`, `Cameo`, `Easter egg`. Goofs &
+  myths: `Goof`, `Myth`. `History` goes with History & culture, and `Adaptation` with Trivia.
+
+## The fact sheet
+
+`research.py` writes `facts-<video>.json` beside the Behind the Scenes notes: `title`, `year`, `video`, `runtime`
+(seconds), `model`, `date`, `commentary` (the tracks used: `[{"track": 2, "title": "..."}]`), `done` (the requests
+finished, so a stopped look-up picks up), `complete`, and `facts`:
+
+```json
+{"id": 1, "fact": "Viggo Mortensen broke two toes kicking the helmet; the take is in the film.",
+ "scene": "Aragorn finds the burnt Uruk-hai pile", "line": "", "when": "", "category": "Injury",
+ "source": "https://...", "spoiler": false, "confidence": "high"}
+```
+
+`when` is `h:mm:ss` into the film, from a commentary (when it was said) or empty. `source` is a URL, or
+`Commentary: <track title>`. The note-writing steps get each fact as one line and may use nothing else.
 
 ## Output tags
 

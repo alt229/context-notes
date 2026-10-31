@@ -106,6 +106,51 @@ Cultural reference | Trivia | your own short label>", "text": "...", "confidence
 Leave out any list you have nothing for (or use []). If there is nothing to change, reply {{}}."""
 
 
+BTS_SYSTEM = """{mode_note}You refine the "Behind the Scenes" notes for a film, using frames from the video: short \
+pop-up notes for fans watching it again, like the trivia track on a special-edition DVD. Notes already exist for the \
+facts whose moment has dialogue. Your job is to place the facts whose moment you can SEE, and to check the notes \
+against the picture.
+
+Viewer: {audience}.
+Write every note in {language}.
+
+The fact sheet. It was researched beforehand; each fact has an id, the moment it belongs to and its source:
+{facts}
+
+You get, for one stretch of the video:
+- contact sheets (images): grids of frames, 3 columns by 4 rows. Under each frame, in yellow, is its time in the \
+video (h:mm:ss.s); in grey, the subtitle line being spoken then (may be empty). Frames are SAMPLED, not continuous: \
+you cannot see what happens between them, so never claim to have seen it.
+- the dialogue for the stretch (times are video times)
+- loud moments with no dialogue (a scream, a crash, music)
+- the existing notes for the stretch, each with an id, when it appears and the fact it tells
+- the facts not placed yet anywhere in the film
+
+What to do:
+1. ADD a note for a fact not placed yet when its moment is in these frames: the scene the fact describes is \
+visible. Kind "visual", "at": the time exactly as printed in yellow under the frame where it is visible, as h:mm:ss \
+(for example "0:09:48"), and "fact": its id. When unsure it's the right moment, leave it for another stretch.
+2. RETIME an existing note ("delay" in seconds, 0 to 15) when the frames show its moment comes a little after it.
+3. REVISE an existing note only when the frames show it gets something wrong (who is who, what is on screen). Give \
+the replacement "text" and a short "reason".
+4. DROP an existing note only when the frames clearly show it is on the wrong scene (it can then be added again \
+where its moment is), or when it only repeats another note. Give a "reason".
+
+Rules:
+- Use ONLY the fact sheet. Add no facts of your own, however sure you are; describe only what you can see.
+- Spoilers: {spoilers}
+- Each note is at most about 45 words, plain and friendly, no markdown.
+- Use each fact once, and refer to existing notes only by the ids listed for this stretch.
+
+Reply with ONLY a JSON object, no prose and no code fences:
+{{"add": [{{"at": "<h:mm:ss>", "kind": "visual", "fact": <id>, "category": "<the fact's category>", "text": "...", \
+"spoiler": false, "confidence": "high" | "medium" | "low"}}],
+ "revise": [{{"id": <id>, "text": "...", "reason": "..."}}],
+ "retime": [{{"id": <id>, "delay": <seconds>, "reason": "..."}}],
+ "drop": [{{"id": <id>, "reason": "..."}}]}}
+Leave out any list you have nothing for (or use []). If there is nothing to change, reply {{}}."""
+
+
 # ---------------------------------------------------------------- small helpers
 def resolve_time(v, lo, hi):
     """A visual note's time in video seconds. Prefers h:mm:ss text; for bare numbers, tries seconds, then
@@ -244,8 +289,9 @@ def window_text(win, cues, offset, moments, notes, times, title, k, total, visua
         if visual_only and n.get("kind") != "visual":
             continue
         if t is not None and lo <= t < hi:
+            told = f", fact #{n['fact']}" if n.get("fact") is not None else ""
             listed[i] = f"#{i} [{hms(t)}, {n.get('kind', 'speech')}, {n.get('category', 'Note')}, " \
-                        f"{n.get('confidence', 'high')}] {n['text']}"
+                        f"{n.get('confidence', 'high')}{told}] {n['text']}"
     dialogue = ("(left out: the subtitles are not reliably in step with this video)" if visual_only
                 else "\n".join(lines) or "(none)")
     earlier = earlier_notes(notes, times, lo, dropped)
@@ -276,7 +322,10 @@ def note_id(r):
         return None
 
 
-def apply_reply(reply, win, cues, offset, notes, times, listed, log, dropped, visual_only=False):
+def apply_reply(reply, win, cues, offset, notes, times, listed, log, dropped, visual_only=False, fact_ids=None):
+    """Apply one stretch's reply to the notes. `fact_ids`: the Behind the Scenes track's fact sheet, {id: whether
+    it's a spoiler}; a note added then has to tell one of them, or it's left out (that track holds only researched
+    facts), and one that doesn't say whether it's a spoiler takes its fact's mark."""
     lo, hi = win["lo"], win["hi"]
     in_win = [c["n"] for c in cues if lo <= c["start"] + offset < hi]
     added = revised = retimed = dropped_n = 0
@@ -294,6 +343,14 @@ def apply_reply(reply, win, cues, offset, notes, times, listed, log, dropped, vi
         cat = str(r.get("category") or ("Delivery" if kind == "speech" else "Visual gag")).strip()
         if not text:
             continue
+        if fact_ids is not None:
+            try:
+                told = int(r.get("fact"))
+            except (TypeError, ValueError):
+                told = None
+            if told not in fact_ids:
+                log.append(f"  skipped an added note that tells no fact from the fact sheet: {text}")
+                continue
         if kind == "visual":
             t, how = resolve_time(r.get("at"), lo, hi)
             if t is None:
@@ -307,11 +364,18 @@ def apply_reply(reply, win, cues, offset, notes, times, listed, log, dropped, vi
                 log.append(f"  skipped an added visual note at {hms(t)}: duplicates an existing one")
                 continue
             note = {"at_video": srt_ts(t), "category": cat, "text": text, "confidence": conf, "kind": "visual"}
+            if "spoiler" in r:                       # the Behind the Scenes track
+                note["spoiler"] = gn._truthy(r["spoiler"])
+            try:
+                note["fact"] = int(r["fact"])
+            except (KeyError, TypeError, ValueError):
+                pass
             if isinstance(r.get("duration"), (int, float)):
                 note["duration"] = max(3.0, min(12.0, float(r["duration"])))
             where = hms(t)
         else:
-            raw = {"cue": r.get("cue"), "match": r.get("match", ""), "category": cat, "text": text, "confidence": conf}
+            raw = {"cue": r.get("cue"), "match": r.get("match", ""), "category": cat, "text": text, "confidence": conf,
+                   **{k: r[k] for k in ("spoiler", "fact") if k in r}}
             note, why = gn.check_note(raw, cues, in_win[0] if in_win else 1, in_win[-1] if in_win else len(cues))
             if note is None:
                 log.append(f"  skipped an added delivery note ({why})")
@@ -320,6 +384,9 @@ def apply_reply(reply, win, cues, offset, notes, times, listed, log, dropped, vi
                 idx = subtitles.find_cue(cues, note.pop("match"), 0, int(note.pop("occurrence", 1)))
                 note = {"cue": (idx if idx is not None else int(r["cue"]) - 1) + 1, **note}
             where = f"line {note['cue']}"
+        if fact_ids is not None:
+            note["fact"] = told
+            note.setdefault("spoiler", bool(fact_ids[told]))
         notes.append(note)
         added += 1
         log.append(f"  + [{where}] {cat} ({conf}): {text}")
@@ -417,7 +484,8 @@ def film_setup(cues, spec, srt_path, video, film_language=None, original_srt=Non
     film_language = film_language or spec.get("film_language")
     if not original_srt and spec.get("original_subtitles"):
         original_srt = workfiles.find_near(srt_path, spec["original_subtitles"], video)
-    title = title or re.sub(r"\s*\(context notes\)\s*$", "", str(spec.get("title") or Path(srt_path).stem))
+    title = title or re.sub(r"\s*\((?:context notes|behind the scenes)\)\s*$", "",
+                            str(spec.get("title") or Path(srt_path).stem))
     situation, extra = gn.subtitle_setup(cues, film_language, original_srt)
     audience = audience or spec.get("audience") or gn.default_audience(film_language, situation)
     year = year or spec.get("year") or gn.resolve_year(None, video, title)
@@ -476,10 +544,15 @@ def plan_windows(an, start):
     return wins, todo, again, first, total
 
 
-def system_prompt(audience, language, visual_only, film_language, situation, year):
+def system_prompt(audience, language, visual_only, film_language, situation, year, facts=None):
+    """The frames step's instructions. `facts`: the fact sheet's facts, for the Behind the Scenes track."""
     mode_note = ("IMPORTANT: for this video the subtitles are NOT reliably in step with the picture. Ignore the grey "
                  "subtitle text under frames. ONLY ADD notes with kind \"visual\"; leave the revise, retime and drop "
                  "lists empty.\n\n") if visual_only else ""
+    if facts is not None:
+        import research
+        return BTS_SYSTEM.format(mode_note=mode_note, audience=audience, language=language,
+                                 facts="\n".join(research.fact_lines(facts)), spoilers=gn.BTS_SPOILERS)
     return SYSTEM.format(audience=audience, language=language, maxnew=MAX_NEW_PER_WINDOW, mode_note=mode_note,
                          foreign_note=foreign_note(film_language, situation), era_section=gn.era_section(year))
 
@@ -529,6 +602,7 @@ class Refining:
         self.pending = [{"from": round(w["lo"], 3), "to": round(w["hi"], 3)} for w in again]   # to send again, not yet sent
         self.completed, self.done_until = first - 1, 0.0
         self.listed = None                       # the notes the request being sent lists (window_text), for apply
+        self.facts = None                        # the Behind the Scenes track: the fact sheet's facts
 
     def missing(self):
         return self.start.carried + self.unread + self.pending
@@ -538,8 +612,18 @@ class Refining:
         text, self.listed = window_text(win, self.cues, self.offset, self.moments, self.notes, self.times, self.title,
                                         number, len(self.wins) if again else self.total, self.visual_only, self.extra,
                                         self.dropped)
+        if self.facts is not None:
+            text = text.replace("\n\nReply with the JSON object only.", self.unplaced() + "\n\nReply with the JSON object only.")
         label = f"  part {number}/{len(self.wins)} again: " if again else f"  part {number}/{self.total}: "
         return label + f"{hms(win['lo'])}-{hms(win['hi'])} ...", sheet_content(win, text)
+
+    def unplaced(self):
+        """The facts no note tells yet, for the Behind the Scenes track's request."""
+        kept = [n for i, n in enumerate(self.notes, 1) if i not in self.dropped]
+        used = set(gn.facts_used(kept))
+        left = [f["id"] for f in self.facts if f.get("id") not in used]
+        return ("\n\nFacts not placed yet (add a note for any whose moment is in these frames): "
+                + (", ".join(f"#{i}" for i in left) if left else "(none: every fact has a note)"))
 
     def apply(self, job, reply):
         number, win, again = job
@@ -552,8 +636,10 @@ class Refining:
             self.unread.append({"from": round(win["lo"], 3), "to": round(win["hi"], 3), "reply": bad.name})
         if reply.get("stop_reason") == "max_tokens":
             self.problems.append(f"part {number}: reply was cut off, so some changes in this part may be missing")
-        added, revised, retimed, dropped_n = apply_reply(parsed, win, self.cues, self.offset, self.notes, self.times,
-                                                         self.listed, self.log, self.dropped, self.visual_only)
+        added, revised, retimed, dropped_n = apply_reply(
+            parsed, win, self.cues, self.offset, self.notes, self.times, self.listed, self.log, self.dropped,
+            self.visual_only,
+            fact_ids=None if self.facts is None else {f.get("id"): bool(f.get("spoiler")) for f in self.facts})
         self.added += added
         self.revised += revised
         self.retimed += retimed
@@ -608,7 +694,7 @@ class Refining:
 def refine(srt_path, notes_path, video, model=claude_api.DEFAULT_MODEL, frames="keyframes", audience=None, title=None,
            language="English", assume_yes=False, key_file=None, api_url=claude_api.API_URL, ass_path=None,
            assume_synced=False, film_language=None, original_srt=None, limit=None, effort=None,
-           max_tokens=REFINE_MAX_TOKENS, year=None, estimate_only=False, route="api", fallback_usd=0.0):
+           max_tokens=REFINE_MAX_TOKENS, year=None, estimate_only=False, route="api", fallback_usd=0.0, facts=None):
     """Refine the notes using the video. With estimate_only, stop after the size and cost estimate: no API key
     is needed and nothing is sent; the notes and .ass are untouched (the video analysis is cached as usual).
     `route` and `fallback_usd`: as for generate_notes.generate() (sending.Sender). On the plan, Claude Code opens
@@ -616,7 +702,14 @@ def refine(srt_path, notes_path, video, model=claude_api.DEFAULT_MODEL, frames="
 
     The steps: where to start (where_to_start), the video (look_at_video, plan_windows), the estimate and the
     question, then the stretches one at a time (sending.send_parts with a Refining), and the notes and report
-    (_save)."""
+    (_save).
+
+    `facts`: the fact sheet (research.py), for the Behind the Scenes track: the frames are used to place the facts
+    whose moment has no dialogue, and to check the notes against the picture; nothing outside the sheet is added."""
+    sheet = None
+    if facts:
+        import research
+        sheet = research.load_sheet(facts)
     check_same_episode(video, srt_path, notes_path)
     cues = subtitles.parse_srt(srt_path)
     if not cues:
@@ -646,7 +739,8 @@ def refine(srt_path, notes_path, video, model=claude_api.DEFAULT_MODEL, frames="
                   limit=limit, append=True)
         print("Nothing was left to refine" + ("." if estimate_only else "; marked as finished."))
         return None
-    sys_prompt = system_prompt(audience, language, visual_only, film_language, situation, year)
+    sys_prompt = system_prompt(audience, language, visual_only, film_language, situation, year,
+                               facts=sheet["facts"] if sheet else None)
     times = note_times(cues, notes, offset)
     sending_wins = again + todo
     est_in = sum(image_tokens(p) for w in sending_wins for p, _, _ in w["sheets"])
@@ -682,6 +776,7 @@ def refine(srt_path, notes_path, video, model=claude_api.DEFAULT_MODEL, frames="
     sender.folders = sorted({str(Path(p).resolve().parent) for w in wins for p, _, _ in w["sheets"]})
     run = Refining(spec, notes_path, backup, start, model, n_img, limit, sync_msg, cues, an, times, wins, total, first,
                    again, title, visual_only, extra)
+    run.facts = sheet["facts"] if sheet else None
     jobs = ([(wins.index(w) + 1, w, True) for w in again]          # (part number, the window, whether it's sent again)
             + [(k, w, False) for k, w in enumerate(todo, first)])
     sending.send_parts(run, jobs, sender, "refine", first - 1 if todo else 0, assume_yes)

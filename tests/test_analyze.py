@@ -155,3 +155,16 @@ def test_cli_transcript_only_and_help(tmp_path, sample_srt):
     assert json.dumps(r.stdout)  # printable
     r = run_cli("analyze.py", sample_srt, "--align", cwd=tmp_path)
     assert r.returncode == 1 and "--align needs --video" in r.stderr
+
+
+def test_a_damaged_package_says_so_instead_of_a_traceback(tmp_path, monkeypatch):
+    """A folder left by an interrupted install imports as an empty package ("module 'numpy' has no attribute
+    'frombuffer'" on Breaking Bad, 2026-10-30). need() says what happened and how to reinstall."""
+    import sys
+    (tmp_path / "halfgone" / "core").mkdir(parents=True)                  # no __init__.py: what pip leaves mid-way
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "halfgone", raising=False)
+    with pytest.raises(SystemExit) as e:
+        analyze.need("halfgone", "pip3 install halfgone")
+    assert "'halfgone' is damaged" in str(e.value) and "--force-reinstall halfgone" in str(e.value)
+    assert analyze.need("json", "") is __import__("json")                 # a real one is returned as before

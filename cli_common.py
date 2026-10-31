@@ -8,7 +8,9 @@ the code that passes them on from one script to the next.
 - add_look_args(group): how the notes look: --reading-speed, --note-background, --note-opacity.
   check_look_args(ap, opts) rejects a reading speed of 0 or less after parsing.
 - add_limit_arg(group, help): --limit, a time like 5:00, 300 or 5m.
-- claude_args(opts), look_args(opts), limit_args(opts): the same options, as they'd be typed, for the next script.
+- add_spoiler_arg(group): --spoilers, for the Behind the Scenes track (include, leave-out, ask).
+- claude_args(opts), look_args(opts), limit_args(opts), spoiler_args(opts): the same options, as they'd be typed,
+  for the next script.
 - percent_arg: the type of --note-opacity.
 
 Options whose meaning differs between the scripts (--title, --yes, --audience, --film-language, ...) stay with each
@@ -125,6 +127,18 @@ def look_args(opts):
     if getattr(opts, "note_opacity", None) is not None:
         out += ["--note-opacity", f"{opts.note_opacity:g}"]
     return out
+
+
+def add_spoiler_arg(group):
+    """--spoilers, for the Behind the Scenes track. None when left out, so a film's own choice wins."""
+    group.add_argument("--spoilers", choices=list(settings.SPOILERS),
+                       help="Behind the Scenes notes that give away something later in the film: include them, "
+                            "leave-out, or ask (once per film; remembered). Free to change later: only the .ass is "
+                            f"rebuilt. Default: the film's own choice, else {settings.spoilers_default()}")
+
+
+def spoiler_args(opts):
+    return ["--spoilers", opts.spoilers] if getattr(opts, "spoilers", None) else []
 
 
 # ---------------------------------------------------------------- --limit

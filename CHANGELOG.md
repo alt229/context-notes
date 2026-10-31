@@ -7,6 +7,35 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- `make_venv.py` and `.python-version`: one setup step that makes `.venv` with Python 3.14 and installs
+  `requirements.txt`. Python 3.15 is out, but speech recognition can't be installed on it yet (onnxruntime, which
+  faster-whisper needs, has no 3.15 build), and when one package fails pip installs none of them. It finds 3.14 itself
+  (`py -3.14` on Windows, `python3.14` elsewhere), says how to install it if it's missing, keeps a `.venv` made with
+  another version as `.venv-<version>`, and installs speech recognition as a step of its own, so a computer it has no
+  build for still gets the rest. The app's window, `context_notes.py` and Settings say when a newer Python started
+  them, and how to fix it.
+- **A check for damaged subtitles, on by default** (new `subcheck.py`). It finds mangled characters (UTF-8 read as
+  Latin-1 or Windows-1252: "Î½", "Ã©", "â€™"), Greek or Cyrillic look-alike letters in Latin words, subtitles
+  mislabeled or corrupted (labeled one language, written in another), and, for English, text-recognition mistakes
+  ("l" for "I", words split by stray spaces). Every run checks the subtitles it's about to use, and when they're
+  damaged uses a clean file beside the video or fetches one from OpenSubtitles.com, once per film (Settings: "Check
+  subtitles for damage" and "Get a clean copy when they're damaged", both on; `--no-subs-check`,
+  `--no-replace-bad-subs`). Tidy lists the damaged `.srt` files beside the videos (`--inside` checks the tracks inside
+  them too, slowly; `--no-check-subs`), in Terminal and in the app's Tidy dialog. Nothing is changed or deleted. Found
+  on Doctor Who S05E08's built-in track, where every "v" showed as "Î½".
+- **Behind the Scenes**, a second track of notes for a film you know, like a special-edition DVD's trivia track:
+  stunts and injuries, takes that were kept, cameos, casting, what changed from the book, how effects were done.
+  `context_notes.py --behind-the-scenes` (and "Which notes" in the app) looks the film up first (new `research.py`):
+  any commentary track is transcribed on your computer and mined for stories, timed to when they're told, then
+  Claude searches the web and keeps only facts it found a source for, in `facts-<video>.json`. The notes are written
+  from that sheet and nothing else, placed on the line where each moment is; the frames step places the moments with
+  no dialogue. It's built into `<video>.behind-the-scenes.notes.ass` (no Plex copy), and `--embed` puts it inside the
+  `.mkv` as a second track, "Behind the Scenes", beside "Context Notes". The VLC extension (0.3.0) loads it as a
+  second subtitle track, with topic boxes for its kinds of notes. Notes that give away the plot are marked
+  `(spoiler)`; `--spoilers include|leave-out|ask` (and Settings) decide at the build, so changing it is free.
+  On your plan, Claude Code may only use WebSearch and WebFetch for the look-up; with API credits it's the API's web
+  search tool (about 1 cent a search, counted in the credit estimate). `--research-again` looks a film up again;
+  `research.py --list-audio` and `--commentary N` pick a commentary track whose title doesn't say so.
 - "Sign in to Claude Code…" in Settings, for friends who don't use Terminal. It runs `claude auth login`, shows the
   link that prints, and takes the code the sign-in page gives (the same dance as in Terminal). The link can be opened
   on another computer, by whoever owns the account the notes should be written on, and the code sent back; it only
@@ -161,6 +190,8 @@ All notable changes to this project are recorded here. The format follows
   (`/notes`, `/check`).
 
 ### Changed
+- `requirements.txt` skips faster-whisper on Python 3.15 and newer, so the rest still installs there. The tests run on
+  the version in `.python-version`, and a CI job on 3.15 (allowed to fail) shows when the pin can move up.
 - The app's page is kept in parts in `gui/src` (the frame, styles, one HTML file per dialog, scripts by section), which
   `app.py` joins each time the page is asked for: one copy, nothing to rebuild, and the browser gets the same page,
   byte for byte. `gui/index.html` is gone; see `gui/README.md`.
@@ -237,6 +268,28 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- A rebuild (the app's Rebuild, or `context_notes.py` on a finished film) kept the old `.notes.ass` as a `.bak`
+  beside the video, where the app then called it a leftover from an earlier version and offered Tidy. Tidy couldn't
+  move it when the frames step had already kept a `.bak` of the same name in the film's context-notes folder ("is
+  already there"), so the Tidy note never went away. Rebuilds now keep it in the context-notes folder too, and Tidy
+  gives a backup whose name is taken the next free number (`.bak2`, `.bak3` ...): nothing is overwritten.
+- "1 film here still have their working files" and "1 item ... move into" now read "has its" and "moves".
+- A damaged numpy (an install or upgrade that was interrupted leaves a `numpy` folder Python still imports) stopped
+  the sync check with `module 'numpy' has no attribute 'frombuffer'`. It now says numpy is damaged and gives the
+  command that reinstalls it.
+- A Ctrl-C (or Cancel) that landed while a part's "N notes" line was printing could lose that part's notes, already
+  paid for. The part is now counted before its line is printed.
+- On Windows, a script whose output went to a pipe (Claude Code's Bash tool, `> log.txt`, Task Scheduler) stopped
+  with `UnicodeEncodeError` at the first character Windows' cp1252 can't write: a Japanese title, a Russian subtitle
+  line. In a console and in the app's runs the output was UTF-8 already. Such a character now prints as `?` there.
+- On Windows, the tests read (and could write) your real `~/.config/context-notes`: they redirected `HOME`, which
+  Windows Python ignores in favour of `USERPROFILE`. GitHub's Windows runner never noticed, having no key. Both are
+  redirected now.
+- The `/notes` and `/refine` commands, the agents and `.claude/settings.json`'s allow-list said `python3` only, which
+  on Windows is the Microsoft Store stub; the allow-list now has a `python` twin for each entry and the commands say
+  so, and the hints the scripts print (`python3 make_ass.py --set-api-key`) say `python` on Windows.
+- `bench.py` made a symlink to the video, which Windows refuses without Developer Mode; it falls back to a hard link
+  or a copy. The transcript cache is read and written as UTF-8 explicitly.
 - On Windows, the app could say "Claude Code isn't installed, or isn't where this can find it" when it was installed
   and signed in. A program started from a desktop shortcut (or from a window opened before an install) keeps the PATH
   Windows had when it started, without the folder a newer install added. The app now adds what's missing from the

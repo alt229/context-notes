@@ -79,13 +79,13 @@ def load_key(explicit=None):
         key = path.read_text().strip()
         if key:
             return key
-        sys.exit(f"{path} is empty. Run  python3 make_ass.py --set-api-key")
+        sys.exit(f"{path} is empty. Run  {prompts.PYTHON} make_ass.py --set-api-key")
     if explicit:
         sys.exit(f"Can't find the key file {explicit}")
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if key:
         return key
-    sys.exit("No API key found. Save one with:\n  python3 make_ass.py --set-api-key\n"
+    sys.exit(f"No API key found. Save one with:\n  {prompts.PYTHON} make_ass.py --set-api-key\n"
              f"(stored in {key_path()})")
 
 
@@ -114,11 +114,14 @@ def wait_awake(fn, *args, **kwargs):
     return out.get("value")
 
 
-def call_api(key, model, system, user, url=API_URL, timeout=300, max_tokens=MAX_TOKENS, effort=None):
+def call_api(key, model, system, user, url=API_URL, timeout=300, max_tokens=MAX_TOKENS, effort=None, web=False,
+             before_more=None):
     """One request to the Messages API (see _call_api). On Windows it waits awake, so Cancel works mid-request."""
+    # only when asked: stand-ins for _call_api (bench/, tests) predate these
+    more = {"web": True, "before_more": before_more} if web else {}
     if WAIT_IN_THREAD:
-        return wait_awake(_call_api, key, model, system, user, url, timeout, max_tokens, effort)
-    return _call_api(key, model, system, user, url, timeout, max_tokens, effort)
+        return wait_awake(_call_api, key, model, system, user, url, timeout, max_tokens, effort, **more)
+    return _call_api(key, model, system, user, url, timeout, max_tokens, effort, **more)
 
 
 def encode_images(user):
@@ -143,14 +146,66 @@ def supports_effort(model):
     return not str(model).startswith(NO_EFFORT)
 
 
-def _call_api(key, model, system, user, url=API_URL, timeout=300, max_tokens=MAX_TOKENS, effort=None):
+def _call_api(key, model, system, user, url=API_URL, timeout=300, max_tokens=MAX_TOKENS, effort=None, web=False,
+              before_more=None):
     """`user` is a string, or a list of content blocks (text and images).
     `effort` ("low", "medium", "high", ...) is sent as output_config.effort; None leaves the model's own default.
-    It's left out for the models that reject it (Haiku 4.5), so the effort from Settings never breaks a run."""
-    payload = {"model": model, "max_tokens": max_tokens, "system": system,
-               "messages": [{"role": "user", "content": encode_images(user)}]}
+    It's left out for the models that reject it (Haiku 4.5), so the effort from Settings never breaks a run.
+    `web`: the research step (research.py), which may search the web (the API's own web search tool, at most
+    WEB_SEARCHES searches, each SEARCH_USD on top of the tokens). A long search turn comes back paused
+    ("pause_turn"); it is sent back as it is, so Claude carries on, and the reply returned holds every part of it.
+    Each part is a request of its own, recorded as it comes: `before_more()` is called before each one after the first
+    (the run's API-credit allowance and credit check; it stops the run by exiting), and the searches left shrink, so
+    the whole turn makes at most WEB_SEARCHES. A web request that times out isn't sent again: it may have been
+    billed."""
+    messages = [{"role": "user", "content": encode_images(user)}]
+    payload = {"model": model, "max_tokens": max_tokens, "system": system, "messages": messages}
     if effort and supports_effort(model):
         payload["output_config"] = {"effort": effort}
+    if web:
+        payload["tools"] = [{"type": WEB_SEARCH_TOOL, "name": "web_search", "max_uses": WEB_SEARCHES}]
+    reply = _post(key, model, payload, url, timeout, retry_timeouts=not web)
+    if not web:
+        return reply
+    content, used = list(reply.get("content") or []), dict(reply.get("usage") or {})
+    for _ in range(PAUSES):
+        if reply.get("stop_reason") != "pause_turn":
+            break
+        if before_more:
+            before_more()
+        messages.append({"role": "assistant", "content": reply.get("content") or []})
+        left = WEB_SEARCHES - searches_in(used)
+        payload["tools"] = [{**payload["tools"][0], "max_uses": max(1, left)}]
+        reply = _post(key, model, payload, url, timeout, retry_timeouts=False)
+        content += list(reply.get("content") or [])
+        more = reply.get("usage") or {}
+        for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"):
+            if k in used or k in more:
+                used[k] = int(used.get(k) or 0) + int(more.get(k) or 0)
+        used["server_tool_use"] = {"web_search_requests": searches_in(used) + searches_in(more)}
+    return {**reply, "content": content, "usage": used}
+
+
+def searches_in(used):
+    """The web searches a reply's usage says were made."""
+    return int(((used or {}).get("server_tool_use") or {}).get("web_search_requests") or 0)
+
+
+def billed_input(used):
+    """Input tokens as they're priced: cache writes at 1.25 times the input price, cache reads at a tenth of it."""
+    return (int(used.get("input_tokens") or 0) + 1.25 * int(used.get("cache_creation_input_tokens") or 0)
+            + 0.1 * int(used.get("cache_read_input_tokens") or 0))
+
+
+WEB_SEARCH_TOOL = "web_search_20250305"    # the API's web search tool; works on every model (its docs, October 2026)
+WEB_SEARCHES = 20                          # searches one research request may make on the API (pauses included)
+SEARCH_USD = 0.01                          # $10 per 1,000 searches, on top of the tokens
+PAUSES = 8                                 # times a paused search turn is sent back before giving up on it
+
+
+def _post(key, model, payload, url, timeout, retry_timeouts=True):
+    """Send one request, retrying when the API is busy or the network drops; note what it cost. Without
+    `retry_timeouts` (a web search, which may have run and been billed), a request that times out stops the run."""
     body = json.dumps(payload).encode()
     headers = {"x-api-key": key, "anthropic-version": API_VERSION,
                "content-type": "application/json", "user-agent": "context-notes/0.1"}
@@ -177,6 +232,10 @@ def _call_api(key, model, system, user, url=API_URL, timeout=300, max_tokens=MAX
                          f"then run the same command again: what was already written is kept.")
             sys.exit(f"API error {e.code}: {msg}")
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            timed_out = isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError)
+            if timed_out and not retry_timeouts:
+                sys.exit(f"The web search didn't answer within {timeout // 60} minutes, so this stopped (it may still "
+                         f"have been billed). Run the same command again to pick up.")
             if attempt < 3:
                 print(f"    network problem ({e}); retrying...")
                 time.sleep(2 ** (attempt + 1))
@@ -190,8 +249,11 @@ def _record_usage(model, reply):
     """Note what a finished request cost (usage.py), without ever letting the bookkeeping stop a paid run."""
     try:
         used = reply.get("usage") or {}
-        tin, tout = int(used.get("input_tokens") or 0), int(used.get("output_tokens") or 0)
-        usage.record(model, tin, tout, cost(model, tin, tout))
+        tout = int(used.get("output_tokens") or 0)
+        tin = sum(int(used.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                  "cache_read_input_tokens"))
+        usd = cost(model, billed_input(used), tout)
+        usage.record(model, tin, tout, None if usd is None else usd + searches_in(used) * SEARCH_USD)
     except Exception:                        # a reply shaped oddly: the notes matter more than the ledger
         pass
 

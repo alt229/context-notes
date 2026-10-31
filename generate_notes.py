@@ -205,6 +205,74 @@ or a put-down."
 (Those examples are French; use the same approach for whatever language the film is in.)"""
 
 
+# ---------------------------------------------------------------- the Behind the Scenes track
+BTS = "behind-the-scenes"            # the track's name in notes files and options ("track"); the other is "context"
+BTS_AUDIENCE = "A fan watching the film again, who knows the story and wants to know how it was made"
+BTS_CATEGORIES = ["Behind the scenes", "Stunt", "Injury", "Improvised", "Casting", "Cameo", "Easter egg",
+                  "Adaptation", "Effects", "Location", "Music", "Design", "Goof", "Myth", "History", "Deleted scene"]
+BTS_SPOILERS = ("A note may mention what happens later in the film (or in a sequel) when that's what makes the fact "
+                "worth telling, but then set \"spoiler\": true. When a fact can be told without giving the plot "
+                "away, tell it that way and set false. Facts about the real world, the cast and the crew are never "
+                "spoilers (an actor's later life, who was cast, how a scene was shot).")
+
+BTS_SYSTEM = """You write the "Behind the Scenes" track for a film: short pop-up notes for fans watching it again, \
+like the trivia track on a special-edition DVD. Each note appears just after a subtitle line and tells the viewer \
+something about how that moment was made, or the real story behind it. You are given numbered subtitle lines and a \
+fact sheet; you reply with notes as JSON.
+
+Viewer: {audience}.
+Write every note in {language}.
+
+The fact sheet. It was researched beforehand; each fact has an id, the moment it belongs to and its source:
+{facts}
+
+What to do:
+- For each fact whose moment is in the lines you're annotating, write a note on the line where that moment is: the \
+scene the fact describes, or the line it quotes. If its moment isn't in these lines, leave it: it may come later, \
+or happen with no dialogue (a later step, with the video's frames, places those).
+- Use ONLY the fact sheet. Add no facts of your own, however sure you are, and no details the fact doesn't give. \
+Keep its confidence, or lower it.
+- Use each fact once. Two facts about the same moment can share a note (give the first one's id).
+- Don't explain the plot or the dialogue: that's not this track.
+
+Rules:
+- Each note is at most about 45 words, plain and friendly, no markdown. Start from what's on screen ("That scream is \
+real: ...").
+- Spoilers: {spoilers}
+- "cue" must be the number of the line your quote comes from; the note shows just after that line. {quote_rule}
+- Notes are about the lines marked for annotation; lines marked [context] are only for orientation.
+
+Reply with ONLY a JSON array, no prose and no code fences. Each element:
+{{"cue": <line number>, "match": "<3 to 8 words quoted exactly from that line>", "fact": <the fact's id>, \
+"category": "<the fact's category>", "text": "<the note>", "spoiler": true | false, \
+"confidence": "high" | "medium" | "low"}}
+If no fact belongs in these lines, reply with []."""
+
+
+def bts_system_prompt(audience, language, facts, film_language=None):
+    import research
+    quote = ("The subtitle lines are in " + languages.name(film_language) + ": quote \"match\" exactly as written, "
+             "never translated, and if a line has an original-language part in ‹...›, quote the main line."
+             if is_foreign(film_language) else "Quote \"match\" exactly as written in the line.")
+    return BTS_SYSTEM.format(audience=audience, language=language, facts="\n".join(research.fact_lines(facts)),
+                             spoilers=BTS_SPOILERS, quote_rule=quote)
+
+
+def facts_used(notes):
+    """The ids of the facts the notes already use."""
+    used = set()
+    for n in notes:
+        try:
+            used.add(int(n["fact"]))
+        except (KeyError, TypeError, ValueError):
+            pass
+    return sorted(used)
+
+
+def _truthy(v):
+    return v.strip().lower() in ("true", "yes", "1") if isinstance(v, str) else bool(v)
+
+
 def language_section(film_language, subs_situation):
     """Extra instructions for a film that isn't in English. subs_situation: 'original' (the viewer reads subtitles in
     the film's own language), 'paired' (a translation, with the original lines given) or 'translated' (a translation,
@@ -294,7 +362,9 @@ def chunks(cues, extra=None):
     return out
 
 
-def user_message(title, part, prev_tail, earlier_notes, k, total, extra=None):
+def user_message(title, part, prev_tail, earlier_notes, k, total, extra=None, footer=""):
+    """One part's request. `footer`: more to say before the closing line (the facts already used, for the Behind
+    the Scenes track)."""
     lines = []
     if prev_tail:
         lines.append("[context] (earlier lines, do not annotate)")
@@ -307,7 +377,7 @@ def user_message(title, part, prev_tail, earlier_notes, k, total, extra=None):
         covered = "\n\nTopics already covered by earlier notes (don't repeat):\n" + "\n".join(
             f"- \"{n.get('match') or ' '.join(n['text'].split()[:8]) + '...'}\" ({n['category']})"
             for n in earlier_notes[-60:])
-    return (f"Title: {title}\nPart {k} of {total}.\n\n" + "\n".join(lines) + covered +
+    return (f"Title: {title}\nPart {k} of {total}.\n\n" + "\n".join(lines) + covered + footer +
             "\n\nReply with the JSON array only.")
 
 
@@ -345,6 +415,12 @@ def check_note(raw, cues, lo, hi):
     conf = str(raw.get("confidence", "high")).lower()
     note = {"category": str(raw.get("category") or "Note").strip(), "text": text,
             "confidence": conf if conf in ("high", "medium", "low") else "medium", "kind": "speech"}
+    if "spoiler" in raw:                 # the Behind the Scenes track: gives away something later in the film
+        note["spoiler"] = _truthy(raw["spoiler"])
+    try:
+        note["fact"] = int(raw["fact"])  # ...and the fact sheet's fact it tells
+    except (KeyError, TypeError, ValueError):
+        pass
     match = str(raw.get("match") or "").strip()
     idx = cue - 1
     n = subtitles.norm(match)
@@ -621,6 +697,8 @@ class Writing:
         self.done_line = through                 # the last subtitle line whose part is finished
         self.done_parts = parts.first - 1
         self.pending = [[p[0]["n"], p[-1]["n"]] for p in parts.again]    # to send again, and not sent yet
+        self.bts = False                         # the Behind the Scenes track: each request lists the facts used,
+        self.fact_ids = None                     # and a note has to tell one of the fact sheet's facts
 
     def jobs(self):
         """(part number, its lines, whether it's sent again): the stretches sent again first, then the parts left."""
@@ -628,6 +706,11 @@ class Writing:
             return next((j for j, p in enumerate(self.parts.all, 1) if p[0]["n"] <= part[0]["n"] <= p[-1]["n"]), 1)
         return ([(number(part), part, True) for part in self.parts.again]
                 + [(k, part, False) for k, part in enumerate(self.parts.todo, self.parts.first)])
+
+    def footer(self):
+        used = facts_used(self.notes) if self.bts else []
+        return ("\n\nFacts already used in earlier notes (don't use them again): " + ", ".join(f"#{i}" for i in used)
+                if used else "")
 
     def prepare(self, job):
         k, part, again = job
@@ -637,26 +720,37 @@ class Writing:
             before = [n for n, line in zip(self.notes, note_lines(cues, self.notes)) if line is not None and line < lo]
             return (f"  part {k}/{n_all} again: lines {lo}-{hi} ...",
                     user_message(self.title, part, [c for c in cues if c["n"] < lo][-CONTEXT_LINES:], before, k,
-                                 n_all, self.extra))
+                                 n_all, self.extra, self.footer()))
         return (f"  part {k}/{self.parts.count}: lines {lo}-{hi} ...",
-                user_message(self.title, part, self.prev_tail, self.notes, k, self.parts.count, self.extra))
+                user_message(self.title, part, self.prev_tail, self.notes, k, self.parts.count, self.extra,
+                             self.footer()))
 
     def apply(self, job, reply):
         k, part, again = job
         lo, hi = part[0]["n"], part[-1]["n"]
         part_notes, problems, unreadable = read_part(reply, self.cues, lo, hi, k, self.notes_path)
+        if self.fact_ids is not None:            # the Behind the Scenes track holds only the fact sheet's facts
+            off = [n for n in part_notes if n.get("fact") not in self.fact_ids]
+            part_notes = [n for n in part_notes if n.get("fact") in self.fact_ids]
+            for n in part_notes:                 # not said: the fact's own mark
+                n.setdefault("spoiler", bool(self.fact_ids[n["fact"]]))
+            problems += [f"part {k}: left out a note that tells no fact from the fact sheet: {n['text'][:60]}"
+                         for n in off]
         self.problems += problems
         if unreadable:
             self.unread.append(unreadable)
-        print(f"{len(part_notes)} notes")
+        # The part is counted before its line is printed: a Ctrl-C that lands while the line is printing still
+        # finds it in the notes, so the stop keeps it.
         if again:
             self.notes = insert_in_order(self.cues, self.notes, part_notes, hi)   # in film order: the build relies on it
             self.pending.remove([lo, hi])
+            print(f"{len(part_notes)} notes")
             self.save()
             return
         self.prev_tail = part[-CONTEXT_LINES:]
         self.notes.extend(part_notes)            # a part counts once all of it is in, so a stop never splits one
         self.done_line, self.done_parts = hi, k
+        print(f"{len(part_notes)} notes")
         if k < self.parts.count:
             self.save()
 
@@ -676,22 +770,32 @@ class Writing:
 
 
 def notes_file(base, notes, cues, title, audience, model, srt_path, video_offset, foreign, film_language, original_srt,
-               limit, year, unread):
+               limit, year, unread, facts=None, facts_made=None):
     """The notes file to write: the intro note first, then the notes; with --extend, everything else in the file
-    being added to is kept. `foreign`: the film isn't in English (see subtitle_setup)."""
+    being added to is kept. `foreign`: the film isn't in English (see subtitle_setup). `facts`: the fact sheet's
+    path, for the Behind the Scenes track."""
     ms = int(round(cues[0]["start"] * 1000))
     earlier_model = (base or {}).get("generated_by")
     by = model if not earlier_model or earlier_model == model else f"{earlier_model} and {model}"
+    covers = f" These notes cover only the first {timecode.fmt_limit(limit)}." if limit else ""
+    if facts:
+        text = (f"Behind the Scenes notes by Claude ({by}), from facts it looked up, each with its source (kept in "
+                f"{Path(facts).name}). “(less sure)” means: check me." + covers)
+    else:
+        text = (f"Alpha context notes written by Claude ({by}) for this viewer: {audience.rstrip('.')}. "
+                "Each note appears just after its line. “(less sure)” means: check me." + covers)
     intro = {"at": f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}",
-             "category": "About these notes", "duration": 9, "kind": "speech",
-             "text": f"Alpha context notes written by Claude ({by}) for this viewer: {audience.rstrip('.')}. "
-                     "Each note appears just after its line. “(less sure)” means: check me."
-                     + (f" These notes cover only the first {timecode.fmt_limit(limit)}." if limit else "")}
+             "category": "About these notes", "duration": 9, "kind": "speech", "text": text}
     spec = dict(base or {})
-    spec.update({"title": f"{title} (context notes)", "audience": audience,
-                 "scope": spec.get("scope") or "Dialogue notes written from the subtitles only (no video or audio "
-                                               "was analysed)",
+    spec.update({"title": f"{title} ({'behind the scenes' if facts else 'context notes'})", "audience": audience,
+                 "scope": spec.get("scope") or ("Behind the Scenes notes from the fact sheet, placed on the subtitles"
+                                                if facts else "Dialogue notes written from the subtitles only (no "
+                                                              "video or audio was analysed)"),
                  "generated_by": by, "subtitles": Path(srt_path).name})
+    if facts:
+        spec.update({"track": BTS, "facts": Path(facts).name})
+        if facts_made:                           # which look-up: a newer one means these notes are written again
+            spec["facts_made"] = facts_made
     if video_offset is not None:
         spec["video_offset"] = round(float(video_offset), 2)
     if foreign:
@@ -714,7 +818,7 @@ def notes_file(base, notes, cues, title, audience, model, srt_path, video_offset
 def generate(srt_path, notes_path, model=claude_api.DEFAULT_MODEL, audience=None, title=None, language="English",
              assume_yes=False, key_file=None, api_url=claude_api.API_URL, film_language=None, original_srt=None,
              limit=None, video_offset=None, effort=None, max_tokens=claude_api.MAX_TOKENS, year=None, estimate_only=False,
-             extend=False, route="api", fallback_usd=0.0):
+             extend=False, route="api", fallback_usd=0.0, facts=None):
     """Write the notes file. With estimate_only, stop after the size and cost estimate: no API key is needed,
     nothing is sent and nothing is written (returns None). `route`: "plan" (through Claude Code, on your Claude plan)
     or "api"; `fallback_usd`: the API credit the run may use if the plan can't go on (sending.Sender). With extend,
@@ -722,7 +826,17 @@ def generate(srt_path, notes_path, model=claude_api.DEFAULT_MODEL, audience=None
     them: everything else in that file (the frames step's notes and record, the look settings) is kept too.
 
     The steps: what to send (read_cues, notes_to_extend, starting_point, Parts), the estimate and the question,
-    then the parts one at a time (sending.send_parts with a Writing), and the notes file (notes_file)."""
+    then the parts one at a time (sending.send_parts with a Writing), and the notes file (notes_file).
+
+    `facts`: the fact sheet (research.py) for the Behind the Scenes track. The notes are then written from its facts
+    only, each placed on the line where its moment is, and marked when they give away something later (spoiler)."""
+    sheet = None
+    if facts:
+        import research
+        sheet = research.load_sheet(facts)
+        if not sheet["facts"]:
+            sys.exit(f"{Path(facts).name} has no facts in it, so there's nothing to write Behind the Scenes notes from. "
+                     f"Look the film up again: {prompts.PYTHON} research.py <the video> --again")
     all_cues, cues = read_cues(srt_path, limit)
     base, extending = None, None                 # with extend: the notes file being added to
     if extend and Path(notes_path).exists():
@@ -740,7 +854,8 @@ def generate(srt_path, notes_path, model=claude_api.DEFAULT_MODEL, audience=None
     sender.ready(estimate_only)                  # fail early if there's no usable key (or say Claude Code can't be used)
     title = title or Path(srt_path).stem
     situation, extra = subtitle_setup(cues, film_language, original_srt)
-    audience = audience or (base or {}).get("audience") or default_audience(film_language, situation)
+    audience = audience or (base or {}).get("audience") or (BTS_AUDIENCE if sheet else
+                                                            default_audience(film_language, situation))
     if limit:
         print(f"Limited to the first {timecode.fmt_limit(limit)}: {len(cues)} of {len(all_cues)} lines.")
     partial = Path(notes_path).with_suffix(".partial.json")
@@ -752,6 +867,10 @@ def generate(srt_path, notes_path, model=claude_api.DEFAULT_MODEL, audience=None
               f"is next.")
     pieces = [estimate(p, extra) for p in parts.again] + ([estimate(parts.rest, extra)] if parts.rest else [])
     n_send, est_in, est_out = [sum(x[i] for x in pieces) for i in range(3)] if pieces else (0, 0, 0)
+    if sheet:                                    # every request carries the fact sheet; fewer notes come back
+        system = bts_system_prompt(audience, language, sheet["facts"], film_language)
+        est_in += int(n_send * (len(system) - len(SYSTEM)) / 3.5)
+        est_out = min(est_out, len(sheet["facts"]) * 90 + n_send * 20)
     c = claude_api.cost(model, est_in, est_out)
     print(f"Plan: {len(parts.send)} lines in {n_send} request(s) to {model}; about {est_in:,} tokens in and "
           f"{est_out:,} out" + sending.cost_words(c, sender.on_plan))
@@ -771,17 +890,21 @@ def generate(srt_path, notes_path, model=claude_api.DEFAULT_MODEL, audience=None
         backup = fileio.unique_backup(notes_path)
         shutil.copy2(notes_path, backup)
         print(f"Kept a backup: {backup.name}")
-    sender.system = system_prompt(audience, language, year, film_language, situation)
+    sender.system = (bts_system_prompt(audience, language, sheet["facts"], film_language) if sheet
+                     else system_prompt(audience, language, year, film_language, situation))
 
     usage.begin(film=usage.film_name(notes_path), step="generate", per_request=None if sender.on_plan else per_request)
     run = Writing(cues, parts, title, extra, earlier, through, unread, partial, notes_path,
                   {"subtitles": Path(srt_path).name, "film_language": film_language,
                    "limit": round(limit, 1) if limit else None, "model": model})
+    run.bts = sheet is not None
+    run.fact_ids = {f.get("id"): bool(f.get("spoiler")) for f in sheet["facts"]} if sheet else None
     sending.send_parts(run, run.jobs(), sender, "generate", parts.first - 1 if parts.todo else 0, assume_yes)
 
     notes, unread = run.notes, run.unread
     spec = notes_file(base, notes, cues, title, audience, model, srt_path, video_offset, situation is not None,
-                      film_language, original_srt, limit, year, unread)
+                      film_language, original_srt, limit, year, unread, facts=facts,
+                      facts_made=(sheet or {}).get("made"))
     fileio.write_text_safely(notes_path, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
     try:
         partial.unlink()                         # its notes are in the notes file now
@@ -789,6 +912,12 @@ def generate(srt_path, notes_path, model=claude_api.DEFAULT_MODEL, audience=None
         pass
 
     print(f"Wrote {len(notes)} notes -> {notes_path}")
+    if sheet:
+        left = len(sheet["facts"]) - len(facts_used(notes))
+        spoilers = sum(1 for n in notes if n.get("spoiler"))
+        print(f"  {len(facts_used(notes))} of the {len(sheet['facts'])} facts are placed on a line"
+              + (f"; the frames step looks for the other {left}" if left > 0 else "") + "."
+              + (f" {spoilers} note(s) give away something later (spoilers)." if spoilers else ""))
     print(sending.used_line(sender, model, run.tokens.input, run.tokens.output))
     usage.finish()
     for p in run.problems:

@@ -56,7 +56,7 @@ out). On the API there is no `route` field.
 
 | Field | Meaning |
 |---|---|
-| `step` | `generate` (notes from the dialogue) or `refine` (the video-frames pass) |
+| `step` | `generate` (notes from the dialogue), `refine` (the video-frames pass) or `research` (the Behind the Scenes look-up, `research.py`) |
 | `model`, `requests` | which Claude model, and how many API requests |
 | `input_tokens`, `output_tokens`, `cost_usd` | the estimate; `cost_usd` is `null` when the model's price isn't known |
 | `limit` | seconds, when `--limit` is in force; otherwise `null` |
@@ -64,6 +64,7 @@ out). On the API there is no `route` field.
 | `route`, `api_cost_usd` | on the plan only: `"plan"`, and the cost in API credits if it had to move to them |
 | `lines` | generate only: subtitle lines sent |
 | `mode`, `offset`, `images`, `notes` | refine only: `full` or `visual-only`; the sync offset used; how many contact-sheet images; how many existing notes |
+| `searches`, `commentary_tracks` | research only: the most web searches it may make (0 when only commentaries are left), and how many commentary tracks it reads. Its tokens and cost are an upper bound: the pages it reads aren't known beforehand |
 
 ### `usage`
 
@@ -122,6 +123,7 @@ This reports how far a long task has got, for a progress bar.
 |---|---|---|
 | `soundtrack` | `analyze.py`: the sync check, and the start of `--refine` | seconds of the film |
 | `frames` | `analyze.py`: pulling frames for the contact sheets | frames. `total` is `null` until it's done, so show a spinner |
+| `subs-check` | `tidy.py --inside`, `subcheck.py --inside`: pulling out each video's subtitle tracks | videos |
 | `transcribe` | speech recognition: `--align`, the alignment check, subtitles from the soundtrack | seconds. A `text` field says what it's doing while `done` is 0 |
 | `generate` | `generate_notes.py` | requests to the API |
 | `refine` | `refine_notes.py` | requests to the API |
@@ -142,8 +144,8 @@ These come from `context_notes.py`, so a GUI can show which video and which step
 ```
 
 - `video`: starting video `index` of `total`.
-- `step`: `subtitles`, `sync`, `generate`, `refine`, `build` or `alignment`. Only the steps that actually run
-  are sent.
+- `step`: `subtitles`, `sync`, `research` (`--behind-the-scenes`: the look-up), `generate`, `refine`, `build` or
+  `alignment`. Only the steps that actually run are sent.
 - `video-result`: `ready` (built now), `done` (nothing needed doing) or `stopped` (with a `reason`). It isn't
   sent for a video whose run was cancelled.
 
@@ -165,6 +167,10 @@ These come from `context_notes.py`, so a GUI can show which video and which step
   refine asks `refine.unreadable` and sends just those.
 - `tidy`: how many working files an earlier version left beside this video. They work where they are; `tidy.py`
   moves them into its `context-notes` folder (README, "Where the files go"). 0 when there are none.
+- `track`: `context`, or `behind-the-scenes` with `--behind-the-scenes`, when everything above is about the Behind
+  the Scenes track (its notes, its `.ass`). Then `facts` is how many facts the finished look-up found, or `null`
+  when the film hasn't been looked up yet (a video with no notes and no finished look-up isn't `done`). The
+  `rebuild` check also covers the spoiler choice (`--spoilers`, or the film's own).
 
 ### `tidy`, `tidy-skip` and `tidy-done`
 
@@ -175,6 +181,17 @@ moving, `tidy-done` says how it went (the app's Tidy button runs it with `--dry-
 @context-notes {"v": 1, "type": "tidy", "video": "/Movies/Amelie.mkv", "folder": "/Movies/context-notes/Amelie.mkv", "items": [{"from": "notes-Amelie.json", "to": "notes-Amelie.json", "folder": false}, {"from": "Amelie analysis", "to": "analysis", "folder": true}]}
 @context-notes {"v": 1, "type": "tidy-skip", "path": "/Movies/notes-Film.json", "reason": "it could belong to Film.mkv or Film.mp4"}
 @context-notes {"v": 1, "type": "tidy-done", "moved": 2, "problems": []}
+```
+
+`tidy.py` (unless `--no-check-subs` or Settings' `check_subs` is off), `subcheck.py` and a run of `context_notes.py`
+(on the subtitles it's about to use) send one `subs-check` per damaged subtitle file or track; tidy sends them before
+the `tidy` events, and `/api/tidy` returns them as `subs` (the dialog lists them; moving runs with `--no-check-subs`).
+`where` is the file's name or "inside, track N (language)"; `problems` has a `count` and up to 3 `examples` for each
+of `mangled`, `lookalike`, `broken`, `l-for-I`, `unreadable` and `mislabeled` (mislabeled or corrupted: the label's
+language isn't the text's). With `--inside` there's `progress` too (task `subs-check`, unit videos):
+
+```
+@context-notes {"v": 1, "type": "subs-check", "video": "/TV/Show - s05e08.mkv", "where": "inside, track 1 (English)", "problems": {"mangled": {"count": 167, "examples": ["Î½ (should be ν)"]}}}
 ```
 
 ### `embed-plan`, `embed-video`, `embed-result` and `embed-backup`
@@ -221,6 +238,10 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 |---|---|---|---|
 | `generate.send` | `generate_notes.py` | y / n (**n**) | Send the subtitles to Claude (the plan or the API: see `estimate`) |
 | `refine.send` | `refine_notes.py` | y / n (**n**) | Send frames and subtitles to Claude |
+| `research.send` | `research.py` | y / n (**n**) | Have Claude look the film up for its Behind the Scenes notes: the web search (and the commentary tracks' transcripts, if any). On the API, each search costs about 1 cent on top of the tokens |
+| `research.resume` | `research.py` | p / s (p) | The last look-up stopped part-way: pick up (keeps the facts found; sends only the rest), or start again |
+| `research.commentary` | `research.py` | y / n (y) | The film has commentary tracks: transcribe them on this computer (free, slow) and use them, or use the web only |
+| `bts.spoilers` | `make_ass.py --behind-the-scenes` | y / n (y) | Spoilers set to "ask" (Settings, or `--spoilers ask`): show the Behind the Scenes notes that give away something later in the film? Asked once per film, when it has some; the answer is kept in its notes file and used from then on (`--spoilers include` or `leave-out` changes it) |
 | `plan.fallback` | `generate_notes.py`, `refine_notes.py`, `context_notes.py` | y / n (**n**) | The Claude plan can't go on (its usage limit, the 5-hour session at 90%, or Claude Code missing or signed out) and no API credits are allowed for the run (`--api-fallback`): carry on with API credits? The text says what the rest would cost. A yes holds for the rest of the run (the later steps don't ask). With `--yes` the answer is no, and the run stops with what was written kept |
 | `plan.allowance` | `generate_notes.py`, `refine_notes.py` | y / n (**n**) | The next API request would go past the run's `--api-fallback` allowance: carry on anyway? |
 | `credit.continue` | `generate_notes.py`, `refine_notes.py` | y / n (**n**) | A balance is set (`usage.py`) and the next request is expected to cost more than what's left: carry on anyway? Asked once per run, between requests. With `--yes` the answer is no, and the run stops with what was written kept |
@@ -235,6 +256,7 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 | `notes.unreadable` | `context_notes.py` | y / n (y) | Claude's reply for some parts couldn't be read last time: send just those lines again (no frames step) |
 | `folder.next` | `context_notes.py` | y / n (y) | One video stopped: go on to the next? |
 | `tidy.move` | `tidy.py` | y / n (y) | Move the working files listed above into their `context-notes` folders |
+| `venv.replace` | `make_venv.py` | y / n (**n**) | `.venv` was made with another Python than `.python-version` says: rename it to `.venv-<version>` (kept) and make a new one? Not run by the app |
 | `embed.go` | `embed.py` | y / n (y) | Put the notes inside the films listed above (rewrites each; the original is kept) |
 | `embed.delete` | `embed.py --delete-backups` | y / n (n) | Delete the kept originals listed (can't be undone) |
 | `subs.download` | `context_notes.py` (y), `find_subs.py` (n) | y / n | Download subtitles from OpenSubtitles.com (uses a daily download) |
@@ -257,11 +279,13 @@ asking, and no `question` event is sent for them; the log gets a line ending "(Y
 |---|---|
 | `subs.download`, `subs.transcribe`, `sync.unmeasured`, `alignment.check`, `alignment.fix`, `notes.unreadable`, `refine.unreadable`, `folder.next`, `embed.go` | y |
 | `notes.limited` | a (add the rest) |
-| `generate.resume`, `refine.resume` | p (pick up) |
+| `generate.resume`, `refine.resume`, `research.resume` | p (pick up) |
+| `research.commentary` | y (transcribe the commentaries) |
+| `bts.spoilers` | its default (show them, unless the film's earlier choice was to leave them out) |
 | `sync.drift` | its default (a, or c when re-timing isn't possible) |
 
 It's a list (`prompts.YES_TO_ALL`), so a question added later is asked until it's put there. Sending
-(`generate.send`, `refine.send`), API credits (`plan.fallback`, `plan.allowance`, `credit.continue`) and deleting
+(`generate.send`, `refine.send`, `research.send`), API credits (`plan.fallback`, `plan.allowance`, `credit.continue`) and deleting
 (`embed.delete`) are never on it.
 
 ## `--yes` and `--estimate-only`

@@ -107,6 +107,7 @@ def home(tmp_path, monkeypatch):
     h = tmp_path / "home"
     h.mkdir()
     monkeypatch.setenv("HOME", str(h))
+    monkeypatch.setenv("USERPROFILE", str(h))                # Windows reads this one, not HOME
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("CONTEXT_NOTES_UI", raising=False)     # tests choose the GUI mode themselves
@@ -119,7 +120,7 @@ def run_cli(script, *args, cwd=None, home_dir=None, stdin=None, env_extra=None):
     env.pop("ANTHROPIC_API_KEY", None)
     env.pop("CONTEXT_NOTES_UI", None)                         # tests choose the GUI mode themselves (env_extra)
     if home_dir:
-        env["HOME"] = str(home_dir)
+        env["HOME"] = env["USERPROFILE"] = str(home_dir)       # Windows reads USERPROFILE, not HOME
         env.pop("XDG_CONFIG_HOME", None)
     env.update(env_extra or {})
     # start_new_session: no terminal attached. Otherwise a hidden prompt (getpass) reads the real terminal you ran

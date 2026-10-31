@@ -20,6 +20,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import pickle
 import re
 import shutil
@@ -271,7 +272,13 @@ def cmd_run(a):
     prep.mkdir(exist_ok=True)
     link = prep / video.name
     if not link.exists():
-        link.symlink_to(video)          # so the analysis folder is created here, not beside your real video
+        try:
+            link.symlink_to(video)      # so the analysis folder is created here, not beside your real video
+        except OSError:                 # Windows without Developer Mode can't make symlinks: a hard link or a copy
+            try:
+                os.link(video, link)
+            except OSError:
+                shutil.copy2(video, link)
     pkl = prep / f"analysis-{int(limit)}s.pkl"
     if not pkl.exists():
         import analyze

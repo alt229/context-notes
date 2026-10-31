@@ -41,6 +41,8 @@ YES_TO_ALL = {
     "refine.unreadable": "y",
     "generate.resume": "p", "refine.resume": "p",          # pick up where a stopped run left off
     "folder.next": "y", "embed.go": "y",                   # go on to the next video; --embed: put the notes inside
+    "research.resume": "p", "research.commentary": "y",    # Behind the Scenes: pick up a look-up; transcribe a commentary
+    "bts.spoilers": None,                                  # ...and the spoilers: the question's default
 }
 
 
@@ -60,6 +62,20 @@ if os.name == "nt" and machine() and hasattr(signal, "SIGBREAK"):
         signal.signal(signal.SIGBREAK, _stop_on_break)
     except ValueError:                                     # not the main thread: nothing to do
         pass
+
+# On Windows a pipe (Claude Code's Bash tool, `> log.txt`, Task Scheduler) is cp1252 unless PYTHONUTF8 is set, and
+# the first character it can't write (a Japanese title, a Russian subtitle line) would end the run. A console and the
+# app's runs are UTF-8 already; here the character becomes "?" instead.
+if os.name == "nt":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):               # no such stream, or not a text stream
+            pass
+
+# The Python command in printed hints: `python3` on macOS and Linux, `python` on Windows (where `python3` is the
+# Microsoft Store stub).
+PYTHON = "python" if os.name == "nt" else "python3"
 
 
 def interactive():

@@ -69,10 +69,14 @@ class Sender:
     open with its Read tool (the contact sheets); `workdir`: the folder it runs in (the notes'), never this repo."""
 
     def __init__(self, step, model, route="api", fallback_usd=0.0, effort=None, max_tokens=claude_api.MAX_TOKENS,
-                 timeout=300, key_file=None, api_url=claude_api.API_URL, assume_yes=False, workdir=None, folders=()):
+                 timeout=300, key_file=None, api_url=claude_api.API_URL, assume_yes=False, workdir=None, folders=(),
+                 web=False):
         self.step, self.model, self.effort, self.max_tokens, self.timeout = step, model, effort, max_tokens, timeout
         self.key_file, self.api_url, self.assume_yes = key_file, api_url, assume_yes
         self.workdir, self.folders = workdir, list(folders)
+        self.web = web                   # the research step: Claude may search the web (and nothing else)
+        self.next_usd = None             # this request in API credits, when the step knows (research: per job)
+        self.left_usd = None             # ...and the rest of the run's requests, this one included
         self.route = route
         self.fallback_usd = float(fallback_usd or 0)
         self.allowance = None            # API dollars this run may use after leaving the plan; None: no limit of ours
@@ -113,7 +117,8 @@ class Sender:
     def leave_plan(self, reason, left, before=False):
         """The plan can't go on: carry on with API credits if that's allowed, else stop (sys.exit, after which the
         step keeps what was written)."""
-        rest = None if self.per_request_usd is None else self.per_request_usd * left
+        rest = (self.left_usd if self.left_usd is not None
+                else None if self.per_request_usd is None else self.per_request_usd * left)
         rest_words = (f" The {left} request{'s' if left != 1 else ''} left would cost about {usage.money(rest)}."
                       if rest is not None else "")
         bal = usage.balance()
@@ -164,7 +169,8 @@ class Sender:
         """Before each API request after leaving the plan: stop (or ask) at the run's allowance."""
         if self.allowance is None:
             return
-        spent, nxt = usage.run_api_spent(), usage.next_cost() or self.per_request_usd or 0.0
+        spent = usage.run_api_spent()
+        nxt = max(usage.next_cost() or self.per_request_usd or 0.0, self.next_usd or 0.0)
         if spent + nxt <= self.allowance + 1e-9:
             return
         text = (f"This run has used about {usage.money(spent)} of API credits, and the next request (about "
@@ -178,6 +184,15 @@ class Sender:
         self.allowance = None
         print("  carrying on ...", end=" ", flush=True)
 
+    def before_continuing(self):
+        """Before each further part of a paused web search on the API (claude_api._call_api): the allowance, and the
+        credit. Either can stop the run (sys.exit), and the step then keeps what it has."""
+        self.within_allowance()
+        halt = usage.guard(self.assume_yes)
+        if halt:
+            print()
+            sys.exit(halt)
+
     def __call__(self, message, left=1):
         if self.route == "plan":
             full = usage.session_full()
@@ -185,16 +200,19 @@ class Sender:
                 self.leave_plan(full + " Stopping before the plan's limit.", left)
             else:
                 try:
+                    more = {"web": True} if self.web else {}
                     reply = claude_code.call(self.model, self.system, message, effort=self.effort,
                                              workdir=self.workdir, folders=self.folders,
-                                             timeout=claude_code.TIMEOUT if self.folders else 600)
+                                             timeout=claude_code.WEB_TIMEOUT if self.web else
+                                             claude_code.TIMEOUT if self.folders else 600, **more)
                     self.plan_requests += 1
                     return reply
                 except claude_code.CantGoOn as e:
                     self.leave_plan(str(e), left)
         self.within_allowance()
+        more = {"web": True, "before_more": self.before_continuing} if self.web else {}
         return claude_api.call_api(self.key, self.model, self.system, message, self.api_url, timeout=self.timeout,
-                                   max_tokens=self.max_tokens, effort=self.effort)
+                                   max_tokens=self.max_tokens, effort=self.effort, **more)
 
 
 def used_line(sender, model, tin, tout):
@@ -232,9 +250,14 @@ def send_parts(run, jobs, send, step, done_before, assume_yes):
     `send(message, left)` makes the request (a Sender) and returns the reply; `left` counts this one. `done_before`:
     parts finished by an earlier run, so the app's progress counts from there."""
     total = done_before + len(jobs)
+    priced = hasattr(run, "cost_of") and hasattr(send, "next_usd")   # the step knows what each job costs (research)
     try:
         for j, job in enumerate(jobs):
-            stop = usage.guard(assume_yes)
+            if priced:
+                send.next_usd = run.cost_of(job)
+                rest = [run.cost_of(x) for x in jobs[j:]]
+                send.left_usd = None if None in rest else sum(rest)
+            stop = usage.guard(assume_yes, next_usd=send.next_usd if priced else None)
             if stop:                             # about to run out of credit: keep what was paid for, then say so
                 run.keep()
                 sys.exit(stop)

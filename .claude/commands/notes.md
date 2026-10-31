@@ -8,6 +8,7 @@ You coordinate writing context notes for one film, or every video in a folder, o
 are: $ARGUMENTS
 
 Read `CLAUDE.md` first; its rules bind you. Keep your messages short.
+On Windows, run every `python3` below as `python` (`python3` there is the Microsoft Store stub).
 
 **A folder.** If the argument is a folder, list its videos with
 `python3 context_notes.py "<folder>" --recursive --status`, which includes subfolders.

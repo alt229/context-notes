@@ -12,6 +12,8 @@ You look at ONE stretch of a film's video and improve its context notes. You are
 - VIDEO and SRT: the video and the subtitles the notes are placed on
 - K: the part number
 
+On Windows, run every `python3` below as `python` (`python3` there is the Microsoft Store stub).
+
 1. Run `python3 chat_notes.py show-frames "VIDEO" "SRT" --part K`. It prints:
    - the line `Write your reply to: <path>`: remember that path;
    - the instructions, which say what to add, revise, retime or drop, and the exact JSON to reply with;

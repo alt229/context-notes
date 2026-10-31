@@ -84,9 +84,15 @@ def clean(text):
 
 def need(module, hint):
     try:
-        return __import__(module)
+        m = __import__(module)
     except ImportError:
         sys.exit(f"This step needs '{module}'. Install it with:  {hint}")
+    if getattr(m, "__file__", None) is None:     # only a folder of that name: an install half-done or half-removed
+        where = next(iter(getattr(m, "__path__", [])), "?")
+        sys.exit(f"'{module}' is damaged in this Python ({sys.executable}): {where} has no {module} in it, which "
+                 f"happens when an install or upgrade is interrupted. Reinstall it with:\n"
+                 f"  \"{sys.executable}\" -m pip install --force-reinstall {module}")
+    return m
 
 
 def ffmpeg_hint():
@@ -630,14 +636,16 @@ def aligned_path(srt, limit=None, video=None):
     return workfiles.folder_for(srt, video) / f"{srt.stem}.aligned{'.first' + str(int(round(limit))) + 's' if limit else ''}.srt"
 
 
-def transcribe(video, astream, model_name, cache, language="en", limit=None, task="transcribe"):
-    """Speech to text with timings. task="translate" gives English text for speech in another language."""
+def transcribe(video, astream, model_name, cache, language="en", limit=None, task="transcribe", stream=None):
+    """Speech to text with timings. task="translate" gives English text for speech in another language. `stream`:
+    the file's stream index of the audio track to use (a commentary, say); None for the default one."""
     if cache.exists():
         print(f"  using cached transcript {cache.name}")
-        return [json.loads(line) for line in cache.open()]
+        return [json.loads(line) for line in cache.open(encoding="utf-8")]
     np = need("numpy", "pip3 install numpy")
     fw = need("faster_whisper", "pip3 install faster-whisper")
-    cmd = ["ffmpeg", "-v", "error", *limit_args(limit), "-i", str(video), "-vn", "-af", audio_filter(astream),
+    pick = ["-map", f"0:{stream}"] if stream is not None else []
+    cmd = ["ffmpeg", "-v", "error", *limit_args(limit), "-i", str(video), *pick, "-vn", "-af", audio_filter(astream),
            "-ac", "1", "-ar", str(SR), "-f", "s16le", "-"]
     prompts.progress("transcribe", 0, None, "seconds", text="reading the soundtrack")
     raw = subprocess.run(cmd, capture_output=True).stdout
@@ -651,7 +659,7 @@ def transcribe(video, astream, model_name, cache, language="en", limit=None, tas
     out = []
     # Written to a temporary file that becomes the cache only once every segment is in. A cache file is reused
     # whenever it exists, so a stopped run must never leave a partial one behind.
-    with fileio.replacing(cache) as tmp, open(tmp, "w") as f:
+    with fileio.replacing(cache) as tmp, open(tmp, "w", encoding="utf-8") as f:
         for s in segs:
             row = {"s": s.start, "e": s.end, "t": s.text,
                    "w": [[w.start, w.end, w.word] for w in (s.words or [])]}

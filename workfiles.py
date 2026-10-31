@@ -7,12 +7,15 @@ Beside the video stays only what players use:
     Parasite.mkv
     Parasite.notes.ass               the notes, for VLC (made by make_ass.py)
     Parasite.en.ass                  the same notes, named for Plex
+    Parasite.behind-the-scenes.notes.ass   the Behind the Scenes notes, if made (context_notes.py --behind-the-scenes)
     Parasite.en.srt                  subtitles: yours, or ones find_subs.py found or downloaded
 
 Everything else goes in a folder of its own, inside one "context-notes" folder beside the videos:
 
     context-notes/Parasite.mkv/
         notes-Parasite.json          the notes, with their backups (.bak), refine report and pick-up files
+        behind-the-scenes-Parasite.json  the Behind the Scenes notes (the same kinds of files beside them), and
+        facts-Parasite.json          the fact sheet they're written from (research.py)
         Parasite.embedded.en.srt     subtitles pulled out of the video, re-timed (.aligned) or written by speech
                                      recognition (.transcribed); numbered transcripts; the chat upload file
         analysis/                    the sync report, contact sheets, soundtrack and speech-recognition caches
@@ -86,7 +89,8 @@ def started_before(video):
     except OSError:
         return False
     stem = nfc(video.stem)
-    mine = [n for n in names if (n.startswith(stem + ".") or n.startswith(f"notes-{stem}.")) and is_working(n, stem)
+    mine = [n for n in names if (n.startswith(stem + ".") or any(n.startswith(f"{p}{stem}.") for p in PREFIXES))
+            and is_working(n, stem)
             and not n.endswith(".chat-replies.txt")]          # that one you make yourself (chat_notes.py)
     if not mine:
         return False
@@ -181,6 +185,36 @@ def subtitle_dirs(video):
     return [folder(video), Path(video).parent]
 
 
+# ---------------------------------------------------------------- the Behind the Scenes track
+BTS = "behind-the-scenes"                # its name in file names
+# Beside the video, next to the context notes: <video name>.behind-the-scenes.notes.ass. Its name ends like theirs,
+# so the VLC extension finds both and loads both (Erin, 2026-10-30).
+BTS_ASS = f".{BTS}.notes.ass"
+# Working files named for their video, as <prefix><video name>.<...>: the notes, the Behind the Scenes notes and the
+# fact sheet they're written from (research.py).
+PREFIXES = ("notes-", f"{BTS}-", "facts-")
+
+
+def _named(video, name):
+    """A working file called `name`: where it is (the working folder, or beside the video), else where it goes."""
+    return find(video, name) or place(video) / name
+
+
+def bts_notes_path(video):
+    """The Behind the Scenes notes: behind-the-scenes-<video name>.json in the video's working folder."""
+    return _named(video, f"{BTS}-{Path(video).stem}.json")
+
+
+def facts_path(video):
+    """The fact sheet the Behind the Scenes notes are written from (research.py): facts-<video name>.json."""
+    return _named(video, f"facts-{Path(video).stem}.json")
+
+
+def bts_ass_path(video):
+    """The Behind the Scenes track for players, beside the video."""
+    return Path(str(Path(video).with_suffix("")) + BTS_ASS)
+
+
 def notes_path(video, srt=None):
     """An existing notes file for this video (named for the video, its subtitles, or the subtitles before
     re-timing), in its working folder or beside it; else notes-<video name>.json where its new working files go
@@ -216,7 +250,7 @@ def _owner(name, videos):
     best, owners = -1, []
     for v in videos:
         stem = nfc(v.stem)
-        hit = (name.startswith(stem + ".") or name.startswith(f"notes-{stem}.")
+        hit = (name.startswith(stem + ".") or any(name.startswith(f"{p}{stem}.") for p in PREFIXES)
                or any(name == stem + suffix for suffix in MOVED_DIRS))
         if hit and len(stem) >= best:
             if len(stem) > best:
@@ -231,9 +265,27 @@ def is_working(name, stem, is_dir=False):
     weren't pulled out of the video, re-timed or written by speech recognition)."""
     if is_dir:
         return any(name == stem + suffix for suffix in MOVED_DIRS)
-    if name.startswith(f"notes-{stem}."):
+    if any(name.startswith(f"{p}{stem}.") for p in PREFIXES):
         return True
     return name.startswith(stem + ".") and bool(WORKING_REST.fullmatch(name[len(stem):]))
+
+
+BACKUP = re.compile(r"\.bak\d*$")
+
+
+def _free_name(dest, taken):
+    """Where a file tidy.py moves goes. A backup (.bak, .bak2 ...) whose name is already taken in the working folder,
+    or by another file in this move, gets the next free number instead, so both are kept and neither is overwritten.
+    Any other file keeps its name (tidy.py then leaves it where it is)."""
+    if not BACKUP.search(dest.name) or not (dest.exists() or dest in taken):
+        return dest
+    base = BACKUP.sub("", dest.name)
+    n = 1
+    while True:
+        b = dest.with_name(base + (".bak" if n == 1 else f".bak{n}"))
+        if not b.exists() and b not in taken:
+            return b
+        n += 1
 
 
 def old_files(directory, videos=None):
@@ -247,7 +299,7 @@ def old_files(directory, videos=None):
         return {}, []
     if videos is None:
         videos = [p for p in entries if p.suffix.lower() in VIDEO_EXTS and not p.name.startswith(".") and p.is_file()]
-    plan, skipped = {}, []
+    plan, skipped, taken = {}, [], set()
     for p in entries:
         name = nfc(p.name)
         if name.startswith(".") or name == FOLDER or p.suffix.lower() in VIDEO_EXTS:
@@ -262,6 +314,10 @@ def old_files(directory, videos=None):
             skipped.append((p, f"it could belong to {' or '.join(v.name for v in owners)}"))
             continue
         video = owners[0]
-        dest = folder(video) / ((MOVED_DIRS[name[len(nfc(video.stem)):]] or p.name) if is_dir else p.name)
+        if is_dir:
+            dest = folder(video) / (MOVED_DIRS[name[len(nfc(video.stem)):]] or p.name)
+        else:
+            dest = _free_name(folder(video) / p.name, taken)
+            taken.add(dest)
         plan.setdefault(video, []).append((p, dest))
     return plan, skipped

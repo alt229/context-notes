@@ -85,8 +85,8 @@ def test_yes_to_all_answers_only_the_questions_about_the_work(monkeypatch, capsy
 
 
 def test_yes_to_all_leaves_money_and_deleting_alone():
-    never = {"generate.send", "refine.send", "plan.fallback", "plan.allowance", "credit.continue", "embed.delete",
-             "tidy.move", "api-key"}
+    never = {"generate.send", "refine.send", "research.send", "plan.fallback", "plan.allowance", "credit.continue",
+             "embed.delete", "tidy.move", "api-key"}
     assert not never & set(prompts.YES_TO_ALL)
     documented = (ROOT / "docs" / "gui-protocol.md").read_text(encoding="utf-8")
     for qid in prompts.YES_TO_ALL:
@@ -280,7 +280,8 @@ def drive(args, answers, cwd, home, script="context_notes.py", on_event=None):
     """Run a script the way a GUI would: read its output line by line and answer each question by id (anything not
     in `answers` gets an empty line, the default). `on_event(event, process)` sees every event, e.g. to press
     Cancel. Returns (exit code, output, events)."""
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8", "HOME": str(home), **GUI}
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8", "HOME": str(home),
+           "USERPROFILE": str(home), **GUI}
     env.pop("ANTHROPIC_API_KEY", None)
     env.pop("XDG_CONFIG_HOME", None)
     p = subprocess.Popen([sys.executable, str(ROOT / script), *map(str, args)], cwd=cwd, env=env,

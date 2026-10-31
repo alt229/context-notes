@@ -47,8 +47,11 @@ Notes appear as small boxed overlays while you watch, in VLC (or any player that
 | `dedupe.py` | Lists notes that explain something an earlier note already did (the build leaves those out). |
 | `chat_notes.py` | Write the dialogue notes in a claude.ai chat or with Claude Code (your subscription) instead of the API. |
 | `languages.py` | Language codes and names shared by the scripts (`fr`, `fre`, `French` are all French). |
+| `make_venv.py` | Makes this folder's `.venv` with the Python in `.python-version` and installs `requirements.txt` into it. |
 | `tidy.py` | Moves the working files earlier versions left beside your videos into their `context-notes` folders (see [Where the files go](#where-the-files-go)). |
+| `subcheck.py` | Looks for damaged subtitles: mangled characters ("Î½" for "v", "Ã©" for "é") and text-recognition mistakes ("l told you", "g reat"). Reports only; every run and `tidy.py` use it too (see [Damaged subtitles](#damaged-subtitles)). |
 | `embed.py` | Puts a film's notes inside the `.mkv` as a subtitle track, for films that already have a `.notes.ass` (see [Putting the notes inside the film](#putting-the-notes-inside-the-film)). |
+| `research.py` | Looks a film up for its Behind the Scenes track: its commentary tracks, if any, and the web, with a source for every fact (see [Behind the Scenes](#behind-the-scenes-how-a-film-was-made)). |
 | `workfiles.py` | Where each script puts a video's working files, and finds them again. |
 | `prompts.py` | How the scripts ask questions: in Terminal as usual, or answered by another program such as a GUI ([docs/gui-protocol.md](docs/gui-protocol.md)). |
 
@@ -64,13 +67,17 @@ The shared code the scripts above are built from (none of these are run on their
 | `usage.py` | The ledger of what each request cost, the credit estimate and the session meter. |
 | `subtitles.py` | Reading and writing `.srt` files, and finding a note's quoted words in them. |
 | `timecode.py` | Times: `1:02:03,500`, `5:00`, `5m` and the like, read and written. |
+| `pythonpin.py` | The Python version `.venv` is made with (`.python-version`), and the note when a newer one starts the app. |
 | `fileio.py` | Writing files all at once (so a stop never leaves half a file), backups, and the config folder. |
 
 ## Requirements
 
-- Python 3.9 or newer
+- Python 3.14 for the environment (the version in `.python-version`; the scripts run on 3.9 or newer). Python 3.15
+  is out, but speech recognition can't be installed on it yet (onnxruntime, which faster-whisper needs, has no 3.15
+  build), so `make_venv.py` makes `.venv` with 3.14 and the app says so when a newer one starts it. Intel Macs: there's
+  no 3.14 build of it either, so speech recognition is left out there (everything else works); Python 3.13 has one.
 - `ffmpeg` and `ffprobe` for anything that touches a video (`brew install ffmpeg`, `apt install ffmpeg`, or [ffmpeg.org](https://ffmpeg.org/download.html))
-- `pip install -r requirements.txt` (one step: numpy and Pillow for the video checks, faster-whisper for speech recognition, and pytest and ruff for development. faster-whisper is a large download; skip it with `pip install numpy Pillow` if you won't use speech recognition)
+- `python3 make_venv.py` (one step: makes `.venv` with Python 3.14 and installs `requirements.txt`: numpy and Pillow for the video checks, faster-whisper for speech recognition, and pytest and ruff for development. faster-whisper is a large download; in an environment of your own, skip it with `pip install numpy Pillow` if you won't use speech recognition)
 - Only if you want Claude to write or refine notes: [Claude Code](https://claude.com/claude-code) signed in with a
   Claude Pro or Max plan (the default; no API credits), or an Anthropic API key
 
@@ -81,8 +88,9 @@ Writing notes by hand and building the `.ass` needs nothing beyond Python.
 ```bash
 git clone https://github.com/alt229/context-notes.git
 cd context-notes
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+brew install python@3.14            # Linux: python3.14 from your package manager (Ubuntu: the deadsnakes PPA)
+python3 make_venv.py                # makes .venv with Python 3.14 and installs requirements.txt
+source .venv/bin/activate
 
 # Try the bundled example (no API key, no video needed)
 python3 make_ass.py examples/help-desk/the-help-desk.srt examples/help-desk/notes-the-help-desk.json -o /tmp/demo.ass
@@ -130,16 +138,17 @@ Your video has subtitles inside it? Skip the SRT: `python3 analyze.py episode.mp
 Everything runs on Windows itself; WSL isn't needed. In PowerShell:
 
 ```powershell
-winget install Python.Python.3.13 Gyan.FFmpeg VideoLAN.VLC Git.Git
+winget install Python.Python.3.14 Gyan.FFmpeg VideoLAN.VLC Git.Git
 # then open a new PowerShell window, so it finds them
 git clone https://github.com/alt229/context-notes.git
 cd context-notes
-python -m venv .venv
+python make_venv.py                 # makes .venv with Python 3.14 (py -3.14) and installs requirements.txt
 .venv\Scripts\Activate.ps1          # if PowerShell refuses: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-pip install -r requirements.txt
 python app.py
 ```
 
+- Already set up with another Python (3.15, say)? `python make_venv.py` keeps your `.venv` as `.venv-3.15` and makes
+  a new one with 3.14 (install 3.14 first: `winget install Python.Python.3.14`). Close the app before you run it.
 - To start the app without PowerShell, double-click `make-shortcut.bat` once: it puts a "Context Notes" shortcut on
   your desktop (it runs `context-notes.bat`, which uses the `.venv` folder made above).
 - To write notes on your Claude plan, install Claude Code too: `irm https://claude.ai/install.ps1 | iex` in PowerShell
@@ -148,6 +157,12 @@ python app.py
 - Your API key is kept in `C:\Users\<you>\.config\context-notes\api-key`.
 - Network drives and shares (`Y:\Movies`, `\\nas\Movies`) work as they are.
 - The VLC extension goes in `%APPDATA%\vlc\lua\extensions\`, and the app's Settings can put it there.
+- The key file is "readable only by you" through your user folder's permissions, as all your files are; the
+  `chmod 600` that macOS and Linux add doesn't exist on Windows. Don't keep it on a shared account.
+- Deep media folders can push a path past Windows' 260-character limit (the `context-notes` folder and its
+  `.notes.ass`, `.chat-upload.txt` and backup names add to it), which fails with "file not found". Switch long paths
+  on once, in an administrator PowerShell:
+  `Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' LongPathsEnabled 1`, then sign out and in.
 - Windows support is new, and so far less tried than macOS.
 
 ## The app, in your browser
@@ -159,6 +174,10 @@ python3 app.py
 ```
 
 - **Choose** a film or a folder of episodes. The list shows what's already done for each video.
+- **Which notes:** the context notes, or **Behind the Scenes** for a film you know (see
+  [Behind the Scenes](#behind-the-scenes-how-a-film-was-made)). With Behind the Scenes, the list shows each film's
+  Behind the Scenes state instead, the button becomes "Make Behind the Scenes", and two more choices appear: what to
+  do with the notes that give away the plot, and "Look the film up again". The default for spoilers is in Settings.
 - **Pick how the notes are written:** best (Claude Opus) or cheaper (Claude Sonnet), whether Claude also looks at the
   frames, and how much of the film. More options has the rest: subtitles in another language, who the notes are for
   (the default is fluent in American English), how hard the model thinks, and whether to search online for subtitles.
@@ -234,10 +253,13 @@ beside the videos, with a folder for each video:
 Parasite.mkv
 Parasite.notes.ass
 Parasite.en.ass
+Parasite.behind-the-scenes.notes.ass       the Behind the Scenes track, if you made one
 Parasite.en.srt
 context-notes/
     Parasite.mkv/
         notes-Parasite.json          the notes, with their .bak backups, refine report and pick-up files
+        behind-the-scenes-Parasite.json   the Behind the Scenes notes, and the fact sheet they come from:
+        facts-Parasite.json
         Parasite.embedded.en.srt     subtitles pulled out of the video, re-timed (.aligned) or written by
                                      speech recognition (.transcribed)
         Parasite.en.transcript.txt   the numbered transcript
@@ -256,6 +278,33 @@ tidy.py "/Volumes/Movies" --recursive --dry-run   # list what would move, and mo
 tidy.py "/Volumes/Movies" --recursive             # move it (it asks first; --yes doesn't)
 tidy.py film.mkv                                  # one video
 ```
+
+### Damaged subtitles
+
+Subtitles made by text recognition from a DVD's or Blu-ray's picture subtitles, or saved with the wrong character
+set, can show strange characters: "loÎ½es" for "loves", "cafÃ©" for "café", "l told you" for "I told you", "g reat"
+for "great". Subtitles can also be mislabeled or corrupted: named or tagged English, but in French (Das Boot's
+`.es.srt` here was Portuguese).
+
+**Every run checks the subtitles it's about to use** (Settings: "Check subtitles for damage", on by default;
+`--no-subs-check`). When they're damaged it says how, then uses a clean subtitle file of that language beside the
+video if there is one, else fetches a copy from OpenSubtitles.com, checks it, and uses it if it's clean (Settings:
+"Get a clean copy when they're damaged", on by default; `--no-replace-bad-subs`). That needs your OpenSubtitles login
+(`find_subs.py --set-opensubtitles`), uses one of your daily downloads, and happens once per film: the download
+stays beside the video, so the next run finds it. A film that already has notes keeps its subtitles, because the notes
+are anchored to their lines. Nothing is changed or deleted; the damaged file stays where it was.
+
+**Tidy checks the `.srt` files beside the videos too** (quick), and lists the damaged ones:
+
+```bash
+tidy.py "/Volumes/TV Shows/Dr Who" --recursive --dry-run           # lists what would move, and damaged subtitles
+tidy.py "/Volumes/TV Shows/Dr Who" --recursive --inside --dry-run  # the tracks inside the videos too: slow
+tidy.py "/Volumes/Movies" --no-check-subs                          # only the tidying
+subcheck.py film.srt                                               # one subtitle file
+```
+
+`--inside` pulls each text subtitle track out of the video to look at it, which means reading the whole video: a
+minute or two an episode over a network drive. The broken-word and "l" checks are for English subtitles only.
 
 ### Putting the notes inside the film
 
@@ -289,6 +338,48 @@ python3 embed.py "/Volumes/Movies" --delete-backups  # free the space the kept o
 
 Files are moved as they are, never changed or overwritten. A file whose name is already taken in the folder, or that
 could belong to two videos (`film.mkv` and `film.mp4`), stays where it is and is listed.
+
+### Behind the Scenes: how a film was made
+
+For a film you already know, a second track of notes, like the trivia track on a special-edition DVD: the stunt where
+the actor broke two toes and the take was kept, who's in a cameo, what changed from the book, how an effect was done.
+It's its own file, `<video>.behind-the-scenes.notes.ass`, beside the context notes, so you choose one or the other in the
+player (and both go inside an `.mkv` with `--embed`).
+
+```bash
+python3 context_notes.py "film.mkv" --behind-the-scenes                       # look it up, then write the notes
+python3 context_notes.py "film.mkv" --behind-the-scenes --spoilers leave-out  # without the notes that give away the plot
+python3 context_notes.py "film.mkv" --behind-the-scenes --research-again      # a new look-up, then new notes
+python3 research.py "film.mkv" --list-audio                                   # the film's audio tracks, numbered
+python3 research.py "film.mkv" --commentary 3                                 # use track 3 as a commentary
+```
+
+1. **The look-up** (`research.py`). Behind-the-scenes stories are where Claude's memory is least reliable and trivia
+   sites are full of myths, so the notes aren't written from memory. First, if the film has a commentary track (an
+   audio track whose title says "commentary", or the one you name), it's transcribed on your computer (free, but slow)
+   and Claude picks out the stories, each timed to when it was said. Then
+   Claude searches the web and keeps only facts it found a source for: interviews, the film's own extras, books,
+   reputable articles. Each fact says where in the film it belongs, its source, how sure Claude is, and whether it
+   gives away the plot. The result is `facts-<video>.json` in the film's working folder; open it to see every source.
+   On your plan, Claude Code may only search and read web pages (no files, no commands); with API credits it's the
+   API's web search tool, about 1 cent a search on top of the tokens. The run shows the estimate and asks first.
+2. **The notes.** The subtitles go to Claude with the fact sheet, and each fact is placed on the line where its moment
+   is. Nothing outside the sheet is added: a note that tells no fact from it is left out.
+3. **The frames.** Facts whose moment has no dialogue (a scream, a stunt, a set) are placed by looking at the frames,
+   and the notes are checked against the picture. `--no-refine` skips this, as for the context notes.
+4. **The build.** `<video>.behind-the-scenes.notes.ass`, with no Plex copy (that name is the context notes').
+
+**Spoilers.** A note that gives away something later in the film (or in a sequel) is marked `(spoiler)` on screen.
+Facts about the real world, like an actor's later life or who was cast, never count. Whether they're shown is
+decided at the build, so changing it later is free (only the `.ass` is rebuilt): `--spoilers include` (the default),
+`leave-out`, or `ask` (once per film; the answer is kept). The default for every film is in Settings.
+
+**In VLC**, the extension loads both: the context notes are shown, and the Behind the Scenes notes are a second
+subtitle track (switch with Subtitle, Sub Track). Its topic boxes cover the new kinds of notes too: "How it was made",
+"Casting, cameos & easter eggs" and "Goofs & myths". Update the extension once (Settings in the app offers it) to get
+this; an older copy still finds and shows the context notes.
+
+Not yet: the Behind the Scenes track in a Claude Code conversation (`/notes`).
 
 ### `context_notes.py`
 
@@ -429,8 +520,8 @@ each finished video once, for free. Options given only to `make_ass.py` by hand 
 
 Before a rebuild the app shows what will change: the box, the opacity and the speed now and after, the subtitles,
 and the files written (`context_notes.py --preview-rebuild` gives the same list in Terminal). Every rebuild keeps the
-`.notes.ass` it replaces as `<name>.notes.ass.bak`, then `.bak2` and so on, so an older look can always be found
-again. The same dialog can also put the new notes inside the `.mkv` afterwards.
+`.notes.ass` it replaces as `<name>.notes.ass.bak`, then `.bak2` and so on, in the film's context-notes folder, so an
+older look can always be found again. The same dialog can also put the new notes inside the `.mkv` afterwards.
 
 ### Checking every note's timing
 
@@ -504,7 +595,9 @@ Copy `vlc/context_notes.lua` into VLC's extensions folder, restart VLC, then cho
 | Linux | `~/.local/share/vlc/lua/extensions/` |
 | Windows | `%APPDATA%\vlc\lua\extensions\` |
 
-The extension looks for `<video name>.notes.ass` beside the video and gives you checkboxes for each kind of note. It has mainly been tried on macOS; reports from other systems are welcome. The `.notes.ass` file also works in any player without the extension, with every note shown.
+The extension looks for `<video name>.notes.ass` beside the video and gives you checkboxes for each kind of note.
+A film with Behind the Scenes notes (`<video name>.behind-the-scenes.notes.ass`) gets them too, as a second subtitle
+track to switch to (Subtitle, Sub Track); the same checkboxes filter both. It has mainly been tried on macOS; reports from other systems are welcome. The `.notes.ass` file also works in any player without the extension, with every note shown.
 
 ## Your Claude plan or API credits
 
@@ -583,6 +676,8 @@ what it hears. To switch it on, make `.claude/settings.local.json` (this is your
 { "statusLine": { "type": "command", "command": "python3 \"/path/to/context-notes/.claude/statusline.py\"" } }
 ```
 
+(On Windows: `python` instead of `python3`, and the path with `/` or doubled `\\`.)
+
 Claude Code then shows `[Opus 4.5] 5h 42% (resets 8:10 PM) · 7d 18% · API ~$17.82`, `python3 usage.py --session`
 prints the same reading in a sentence, and `/notes` repeats it after each part. Notes written on the plan in the
 background bring a reading back with every request too (Claude Code reports the plan's windows with each answer), so
@@ -609,7 +704,7 @@ after Claude's first reply.
 
 ## Privacy
 
-`--generate` sends the subtitle text to Claude (through Claude Code on your plan, or the Anthropic API). `--refine` also sends frames from your video as small JPEG contact sheets. Nothing is sent without the confirmation prompt (unless you pass `--yes`), and nothing else leaves your machine. The scripts use only the Python standard library for networking.
+`--generate` sends the subtitle text to Claude (through Claude Code on your plan, or the Anthropic API). `--refine` also sends frames from your video as small JPEG contact sheets. The Behind the Scenes look-up (`research.py`) sends the film's title, running time and file name, and the transcript of any commentary track it uses, and Claude searches the web for the film. Nothing is sent without the confirmation prompt (unless you pass `--yes`), and nothing else leaves your machine. The scripts use only the Python standard library for networking.
 
 ## Limitations
 
@@ -625,10 +720,13 @@ Do not add video files, full subtitle files, or generated `.ass`/transcripts of 
 ## Development
 
 ```bash
-pip install -r requirements.txt
+python3 make_venv.py && source .venv/bin/activate     # or pip install -r requirements.txt in your own environment
 pytest          # no network, no API key, no real video needed (a fake API server and synthetic ffmpeg clips are used)
 ruff check .
 ```
+
+The VLC extension's tests run it in Lua 5.2 (VLC 3's), through `lupa`: `pip install lupa` to include them; without
+it they're skipped.
 
 Each script keeps only its own job; the shared pieces are in the second table above. A change to how the Claude
 options work, for example, is made once in `cli_common.py` and both `context_notes.py` and `make_ass.py` get it.

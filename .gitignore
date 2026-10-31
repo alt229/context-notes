@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-*/
 venv/
 .pytest_cache/
 .ruff_cache/
@@ -50,6 +51,10 @@ api-key
 
 notes-*.json
 notes-*.json.*
+behind-the-scenes-*.json
+behind-the-scenes-*.json.*
+facts-*.json
+facts-*.json.*
 
 # ...except the invented example scene that ships with the project
 !examples/help-desk/

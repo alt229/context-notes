@@ -63,6 +63,7 @@ import languages  # noqa: E402
 import cli_common  # noqa: E402  (--note-opacity's check)
 import make_ass  # noqa: E402
 import prompts  # noqa: E402
+import pythonpin  # noqa: E402  (the Python version .venv is meant to be made with)
 import settings  # noqa: E402  (this install's defaults, shared with the terminal)
 import usage  # noqa: E402  (what the API calls cost, and the credit left)
 import workfiles  # noqa: E402
@@ -500,6 +501,15 @@ def common_args(o):
         args.append("--no-refine")
     if o.get("redo"):
         args.append("--redo")
+    if o.get("track") == workfiles.BTS:          # the Behind the Scenes track instead of the context notes
+        args.append("--behind-the-scenes")
+        spoilers = o.get("spoilers")
+        if spoilers:
+            if spoilers not in settings.SPOILERS:
+                raise BadRequest(f"That doesn't look right: {spoilers}")
+            args += ["--spoilers", spoilers]
+        if o.get("research_again"):              # like "Write the notes again": never remembered
+            args.append("--research-again")
     if o.get("offline"):
         args.append("--offline")
     return args
@@ -684,7 +694,7 @@ class App:
         return {"local": local, "mode": mode,         # local: the browser is on this computer (see LOCAL_ONLY)
                 "system": system(), "home": str(Path.home()), "key": key_info(), "opensubtitles": opensubtitles_info(),
                 "vlc": vlc_info(), "dialogs": dialog_command("file") is not None,
-                "speech": find_subs.have_whisper(), "usage": usage.summary(5),
+                "speech": find_subs.have_whisper(), "python": pythonpin.status(), "usage": usage.summary(5),
                 "languages": [{"code": c, "name": n} for c, (n, _) in languages.LANGUAGES.items()],
                 "claude": claude_code.status(),
                 "settings": settings.effective(), "settings_built_in": settings.BUILT_IN,
@@ -758,11 +768,12 @@ class App:
             if p is None or not p.exists():
                 return 400, {"error": "Choose a film or a folder first."}
             args = [p, *(["--recursive"] if o.get("recursive") and p.is_dir() else []),
-                    "--yes" if o.get("move") else "--dry-run"]
+                    *(["--yes", "--no-check-subs"] if o.get("move") else ["--dry-run"])]   # subtitles: checked on the list
             code, lines, events = run_quietly(script("tidy.py", *args), timeout=600)
         return 200, {"videos": [e for e in events if e.get("type") == "tidy"],
                      "skipped": [e for e in events if e.get("type") == "tidy-skip"],
                      "done": next((e for e in events if e.get("type") == "tidy-done"), None),
+                     "subs": [e for e in events if e.get("type") == "subs-check"],
                      "ok": code == 0, "lines": lines}
 
     def embed(self, o):
@@ -1250,6 +1261,8 @@ def main(argv=None):
               "Keep this window open while you use it. Press Ctrl-C here to stop.", flush=True)
     else:
         print(hosted_message(server, url, mode), flush=True)
+    if pythonpin.newer_than_pin():
+        print(f"\nNote: {pythonpin.newer_than_pin()}", flush=True)
     if not a.no_browser:
         open_browser(url)
     try:

@@ -1,13 +1,17 @@
 // ---------------------------------------------------------------- the form
+function btsOn() { return document.querySelector("input[name=track]:checked").value === BTS; }
 function options() {
+  const bts = btsOn();
   return {
     path: $("path").value.trim(), recursive: $("recursive").checked,
+    track: bts ? BTS : "context", spoilers: bts ? $("spoilers").value : "",
+    research_again: bts && $("research_again").checked,
     quality: document.querySelector("input[name=quality]:checked").value,
     film_language: $("film_language").value, refine: $("refine").checked, limit: $("limit").value.trim(),
     subs_language: $("subs_language").value, show_subs: $("show_subs").value,
     notes_language: $("notes_language").value.trim(), show: $("show").value.trim(),
     title: videos.length === 1 ? $("titleInput").value.trim() : "",
-    check_alignment: $("check_alignment").checked, frames: $("dense").checked ? "dense" : "keyframes",
+    check_alignment: !bts && $("check_alignment").checked, frames: $("dense").checked ? "dense" : "keyframes",
     redo: $("redo").checked, audience: $("audience").value.trim(), offline: $("offline").checked,
     effort: $("effort").value, seconds_per_word: $("spw").value.trim(), note_background: $("note_background").value,
     box_opacity: $("note_background").value === "see-through" ? $("opacity").value.trim() : "",
@@ -20,6 +24,13 @@ function showFallback() {
   $("api_fallback_usd").disabled = !$("api_fallback").checked;
 }
 function showOpacity() { $("opacityField").hidden = $("note_background").value !== "see-through"; }
+// Behind the Scenes: its own options; the timing check is about the context notes only.
+function showTrack() {
+  const bts = btsOn();
+  $("btsOptions").hidden = !bts;
+  $("alignmentRow").hidden = bts;
+}
+function alignmentOn() { return !btsOn() && $("check_alignment").checked; }
 // The form starts from this install's defaults (settings.json, from the Settings page). Nothing is remembered in the
 // browser any more: the app picks a new port each start, so a browser would forget it anyway.
 function applySettings() {
@@ -65,11 +76,15 @@ function renderDefaults() {
   $("d_spw").value = s.seconds_per_word == null ? "" : String(s.seconds_per_word);
   $("d_background").value = s.note_background;
   $("d_opacity").value = String(s.note_opacity);
+  $("d_bts_spoilers").value = s.bts_spoilers;
   $("d_frames").checked = s.frames === "dense";
   $("d_check_alignment").checked = s.check_alignment;
   $("d_offline").checked = s.offline;
   $("d_download_subs").checked = s.download_subs;
   $("d_download_subs").disabled = s.offline;
+  $("d_check_subs").checked = s.check_subs;
+  $("d_replace_bad_subs").checked = s.replace_bad_subs;
+  $("d_replace_bad_subs").disabled = s.offline || !s.check_subs;
   $("d_recursive").checked = s.recursive;
   $("d_remember_start").checked = s.remember_start_folder;
   $("d_start_folder").textContent = s.start_folder || "none yet";
@@ -91,7 +106,8 @@ async function saveDefaults() {
     frames: $("d_frames").checked ? "dense" : "keyframes", check_alignment: $("d_check_alignment").checked,
     offline: $("d_offline").checked, download_subs: $("d_download_subs").checked, recursive: $("d_recursive").checked,
     remember_start_folder: $("d_remember_start").checked, yes_to_all: $("d_yes_to_all").checked,
-    autosend: $("d_autosend").checked,
+    autosend: $("d_autosend").checked, bts_spoilers: $("d_bts_spoilers").value,
+    check_subs: $("d_check_subs").checked, replace_bad_subs: $("d_replace_bad_subs").checked,
   };
   const r = await api("/api/settings", body);
   if (r.error) return settingsMsg(r.error, false);

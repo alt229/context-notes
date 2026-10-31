@@ -1,6 +1,8 @@
-# One command sets up everything the scripts use:  pip install -r requirements.txt
+# Set up with:  python3 make_venv.py  (it makes .venv with the Python in .python-version and installs these).
+# In an environment you made yourself:  pip install -r requirements.txt
 numpy>=1.21                # the video checks (analyze.py --video, make_ass.py --refine)
 Pillow>=9.0                # the video checks
-faster-whisper>=1.0        # speech recognition (analyze.py --align, find_subs.py); a large download
+faster-whisper>=1.0; python_version < "3.15"   # speech recognition (analyze.py --align, find_subs.py); a large download.
+                           # No Python 3.15 build of onnxruntime yet: lift this with .python-version (pythonpin.py)
 pytest>=7.0                # the tests (for working on the project)
 ruff>=0.4                  # linting (for working on the project)

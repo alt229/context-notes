@@ -28,7 +28,13 @@ $("redoGo").addEventListener("click", redoGo);
 $("rebuildGo").addEventListener("click", rebuildGo);
 $("rebuildNo").addEventListener("click", () => $("rebuild").close());
 $("d_save").addEventListener("click", saveDefaults);
-$("d_offline").addEventListener("change", () => { $("d_download_subs").disabled = $("d_offline").checked; });
+$("d_offline").addEventListener("change", () => {
+  $("d_download_subs").disabled = $("d_offline").checked;
+  $("d_replace_bad_subs").disabled = $("d_offline").checked || !$("d_check_subs").checked;
+});
+$("d_check_subs").addEventListener("change", () => {
+  $("d_replace_bad_subs").disabled = $("d_offline").checked || !$("d_check_subs").checked;
+});
 $("c_save").addEventListener("click", saveClaude);
 $("claudeCheckBtn").addEventListener("click", checkClaude);
 $("claudeLoginBtn").addEventListener("click", startClaudeLogin);
@@ -47,6 +53,11 @@ $("useFolderBtn").addEventListener("click", () => { $("browser").close(); setPat
 $("path").addEventListener("change", () => refresh());
 $("path").addEventListener("keydown", (e) => { if (e.key === "Enter") refresh(); });
 $("note_background").addEventListener("change", showOpacity);
+for (const r of document.querySelectorAll("input[name=track]")) {
+  r.addEventListener("change", () => { showTrack(); refresh(); });
+}
+$("spoilers").addEventListener("change", () => refresh());
+$("research_again").addEventListener("change", () => refresh());
 for (const id of ["recursive", "film_language", "subs_language", "show_subs", "limit", "refine", "redo", "spw",
                   "note_background", "opacity"]) {
   $(id).addEventListener("change", () => refresh());
@@ -59,6 +70,7 @@ $("cancelBtn").addEventListener("click", cancel);
   fillLanguages();
   applySettings();
   showOpacity();
+  showTrack();
   if (info.running) {
     await refresh();
     $("log").dataset.fresh = "yes";

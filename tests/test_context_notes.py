@@ -362,10 +362,26 @@ def test_subtitles_in_another_language_are_named_in_the_message(tmp_path):
 def test_a_rebuild_keeps_a_backup_of_the_ass_it_replaces(tmp_path):
     video = tmp_path / "Film.mkv"
     (tmp_path / "Film.notes.ass").write_text("old look", encoding="utf-8")
+    w = workfiles.folder(video)
+    w.mkdir(parents=True)
+    (w / "Film.notes.ass.bak").write_text("kept by the frames step", encoding="utf-8")
+    cn.keep_old_ass(video)                                          # in the working folder, beside the frames step's
+    assert (w / "Film.notes.ass.bak2").read_text(encoding="utf-8") == "old look"
+    assert (w / "Film.notes.ass.bak").read_text(encoding="utf-8") == "kept by the frames step"
+    cn.keep_old_ass(video)                                          # a second rebuild keeps this one too
+    assert (w / "Film.notes.ass.bak3").exists()
+    assert not list(tmp_path.glob("*.bak*"))                        # nothing beside the film for Tidy to move
+    assert workfiles.old_files(tmp_path) == ({}, [])
+
+
+def test_a_rebuild_of_a_film_an_earlier_version_started_keeps_its_backup_beside_it(tmp_path):
+    video = tmp_path / "Film.mkv"
+    video.write_bytes(b"")
+    (tmp_path / "Film.notes.ass").write_text("old look", encoding="utf-8")
+    (tmp_path / "notes-Film.json").write_text("{}", encoding="utf-8")     # its notes are still beside it
     cn.keep_old_ass(video)
     assert (tmp_path / "Film.notes.ass.bak").read_text(encoding="utf-8") == "old look"
-    cn.keep_old_ass(video)                                          # a second rebuild keeps this one too
-    assert (tmp_path / "Film.notes.ass.bak2").exists()
+    assert not workfiles.folder(video).exists()                     # no working folder made: it carries on as before
 
 
 def test_the_rebuild_diff_shows_the_look_now_and_after(tmp_path):

@@ -67,7 +67,7 @@ async function rebuildGo() {
 function startPolling(fresh) {
   if (fresh) job = { next: 0 };
   lastEstimate = null;
-  resetSteps($("check_alignment").checked);
+  resetSteps(alignmentOn(), btsOn());
   setRunning(true);
   hideNote("left");
   showScreen();
@@ -100,7 +100,7 @@ function handle(item) {
     const v = videoRow(ev.path);
     if (v) { v.state = "working"; v.reason = null; renderVideos(); }
     title(stem(baseName(ev.path)), ev.total > 1 ? `Video ${ev.index} of ${ev.total}` : "");
-    resetSteps($("check_alignment").checked);
+    resetSteps(alignmentOn(), btsOn());
     hideNote("right");
   } else if (ev.type === "embed-video") {
     const v = videoRow(ev.path);
@@ -137,6 +137,12 @@ function costText(e) {
   const cost = money(e.cost_usd);
   const price = e.route === "plan" ? ", on your Claude plan through Claude Code, with no API credits."
     : cost ? `, for ${cost} of API credit` : ". (The price of this model isn't known here.)";
+  if (e.step === "research") {
+    const commentary = e.commentary_tracks ? ` and read ${plural(e.commentary_tracks, "commentary track")}` : "";
+    return `Claude will look the film up on the web${commentary}` + (e.searches ? ` (up to ${e.searches} searches)` : "")
+      + `, in ${plural(e.requests, "request")} to ${model}${price}${cost && e.route !== "plan" ? "." : ""}`
+      + " It keeps only facts it finds a source for.";
+  }
   if (e.step === "refine") {
     let t = `Claude will look at ${plural(e.images, "contact sheet")} of frames, with the dialogue and your ${plural(e.notes, "note")}, in ${plural(e.requests, "request")} to ${model}${price}`;
     if (cost && e.route !== "plan") t += ".";
@@ -160,7 +166,7 @@ function stopCountdown() {
 function ask(ev) {
   stopCountdown();
   asking = true;
-  const send = ev.id === "generate.send" || ev.id === "refine.send";
+  const send = ev.id === "generate.send" || ev.id === "refine.send" || ev.id === "research.send";
   const plan = ev.id === "plan.fallback" || ev.id === "plan.allowance";
   const label = send ? "Cost" : ev.id && ev.id.endsWith(".resume") ? "Pick up" : ev.id === "credit.continue" ? "Credit"
     : plan ? "Claude plan" : "Question";

@@ -53,6 +53,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import dedupe  # noqa: E402
 import generate_notes as gn  # noqa: E402
+import prompts  # noqa: E402
 import fileio  # noqa: E402
 import subtitles  # noqa: E402
 import timecode  # noqa: E402
@@ -246,7 +247,7 @@ def collect(a):
     print(f"Wrote {len(notes)} notes -> {dest}")
     dups, similar = dedupe.find_duplicates(spec["notes"])
     print(f"  {len(dups)} repeated explanation(s) will be left out of the .ass, {len(similar)} near-miss(es) kept "
-          f"(python3 dedupe.py {dest.name} lists them)")
+          f"({prompts.PYTHON} dedupe.py {dest.name} lists them)")
     for j, i, why in dups[:8]:
         print(f"    #{j + 1} {why} (first in #{i + 1})")
     if empty:

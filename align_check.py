@@ -250,7 +250,7 @@ def run_check(video, srt, notes_path, original=None, film_lang=None, window=10.0
             f"roughly a tenth of the film's running time. Done once; later checks and analyze.py --align reuse it.")
         transcript = analyze.transcript_cache(folder, name, film_lang, limit)
         analyze.transcribe(video, astream, name, transcript, language=film_lang, limit=limit)
-    asr = [json.loads(line) for line in transcript.open()]
+    asr = [json.loads(line) for line in transcript.open(encoding="utf-8")]
     ref = asr_cue_offsets(ref_cues, asr)
     cue_offsets = ref if ref_cues is cues else through_original(cues, ref_cues, ref)
     in_range = len(subtitles.limit_cues(cues, limit))

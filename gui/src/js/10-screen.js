@@ -38,12 +38,12 @@ function progress(ev) {
   bar.querySelector("span").style.width = ev.total ? `${Math.min(100, (100 * ev.done) / ev.total)}%` : "";
 }
 
-function resetSteps(alignment) {
+function resetSteps(alignment, research) {
   const ol = $("steps");
   ol.hidden = false;
   for (const li of ol.children) {
     li.className = "";
-    li.hidden = li.dataset.step === "alignment" && !alignment;
+    li.hidden = (li.dataset.step === "alignment" && !alignment) || (li.dataset.step === "research" && !research);
   }
 }
 function step(name) {

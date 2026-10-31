@@ -3,7 +3,11 @@
   ---------------------------------
   When a video starts, looks for "<video name>.notes.ass" next to it and loads
   it as a subtitle track, keeping only the kinds of notes you've switched on
-  (British English, IT in-jokes, visual gags, ...).
+  (British English, IT in-jokes, visual gags, ...). If the film also has
+  Behind the Scenes notes ("<video name>.behind-the-scenes.notes.ass", from
+  context_notes.py --behind-the-scenes), they're loaded too, as a second
+  track: switch to them with Subtitle > Sub Track. The context notes stay the
+  one shown first (or the Behind the Scenes notes, when they're all there is).
 
   Install (macOS): copy this file to
       ~/Library/Application Support/org.videolan.vlc/lua/extensions/
@@ -16,6 +20,7 @@
 ]]
 
 local NOTES_SUFFIX = ".notes.ass"
+local BTS_SUFFIX = ".behind-the-scenes.notes.ass"   -- the Behind the Scenes notes (workfiles.BTS_ASS)
 
 -- Topic checkboxes, and the note categories each one covers.
 local TOPICS = {
@@ -23,7 +28,8 @@ local TOPICS = {
     cats = { "british english", "british slang", "idiom", "wordplay", "archaic word",
              "translation", "register", "slang", "dialect" } },
   { key = "bawdy",     label = "Bawdy jokes",            cats = { "bawdy" } },
-  { key = "culture",   label = "History & culture",      cats = { "cultural reference", "historical context" } },
+  { key = "culture",   label = "History & culture",      cats = { "cultural reference", "historical context",
+                                                                   "history" } },
   { key = "it",        label = "IT in-jokes",            cats = { "it in-joke" } },
   { key = "character", label = "Character & delivery",   cats = { "character", "delivery", "theme" } },
   { key = "gags",      label = "Running gags & payoffs", cats = { "running gag", "setup", "payoff" } },
@@ -31,6 +37,12 @@ local TOPICS = {
     cats = { "visual gag", "staging", "on-screen text" } },
   { key = "set",       label = "Props, sets & costume", cats = { "prop", "background", "costume" } },
   { key = "trivia",    label = "Trivia & play-vs-film",  cats = { "trivia", "about these notes", "adaptation" } },
+  -- the Behind the Scenes notes (generate_notes.BTS_CATEGORIES); "Adaptation" is under Trivia, "History" under culture
+  { key = "making",    label = "How it was made",
+    cats = { "behind the scenes", "stunt", "injury", "improvised", "effects", "design", "location", "music",
+             "deleted scene" } },
+  { key = "casting",   label = "Casting, cameos & easter eggs", cats = { "casting", "cameo", "easter egg" } },
+  { key = "goofs",     label = "Goofs & myths",          cats = { "goof", "myth" } },
 }
 
 local OPTIONS = {
@@ -46,17 +58,18 @@ local widgets = {}       -- key -> checkbox
 local dlg, status_label
 local last_uri           -- video we last loaded notes for
 local temp_counter = 0
-local last_temp
+local last_temps = {}    -- the filtered copies loaded for the video playing now
 
 ---------------------------------------------------------------- descriptor
 function descriptor()
   return {
     title = "Context Notes",
-    version = "0.2.4",
+    version = "0.3.0",
     author = "Great Scott CS + Claude",
     shortdesc = "Context Notes",
-    description = "Loads <video>.notes.ass and lets you choose which kinds of "
-               .. "context notes (British English, IT jokes, visual gags...) to show.",
+    description = "Loads <video>.notes.ass (and <video>.behind-the-scenes.notes.ass, as a second "
+               .. "subtitle track) and lets you choose which kinds of notes (British English, IT jokes, "
+               .. "visual gags, stunts...) to show.",
     capabilities = { "menu", "input-listener" },
   }
 end
@@ -204,16 +217,27 @@ local function find_notes_file(video_path)
   local base = video_path:match("^(.*)%.[^./\\]+$") or video_path
   local candidate = base .. NOTES_SUFFIX
   if file_exists(candidate) then return candidate end
-  -- fall back to the only *.notes.ass in the same folder, if there is one
+  -- fall back to the only *.notes.ass in the same folder, if there is one (not counting Behind the Scenes notes)
   local dir = video_path:match("^(.*)[/\\]") or "."
   local found
   for _, name in ipairs(list_dir(dir)) do
-    if ends_with(name, NOTES_SUFFIX) then
+    if ends_with(name, NOTES_SUFFIX) and not ends_with(name, BTS_SUFFIX) then
       if found then return nil end                    -- ambiguous
       found = dir .. "/" .. name
     end
   end
   return found
+end
+
+-- The Behind the Scenes notes: beside the video, or beside the context notes found for it.
+local function find_bts_file(video_path, notes_path)
+  local base = video_path:match("^(.*)%.[^./\\]+$") or video_path
+  if file_exists(base .. BTS_SUFFIX) then return base .. BTS_SUFFIX end
+  if notes_path then
+    local other = notes_path:sub(1, #notes_path - #NOTES_SUFFIX) .. BTS_SUFFIX
+    if file_exists(other) then return other end
+  end
+  return nil
 end
 
 local function set_status(text)
@@ -232,32 +256,45 @@ function load_for_current(force)
   last_uri = uri
 
   local notes_path = find_notes_file(video)
-  if not notes_path then
+  local bts_path = find_bts_file(video, notes_path)
+  if not notes_path and not bts_path then
     set_status("No notes for this video. Looking for: "
                .. ((video:match("([^/\\]+)$") or video):gsub("%.[^.]+$", "")) .. NOTES_SUFFIX)
     return
   end
-  local text = read_all(notes_path)
-  if not text then
-    set_status("Couldn't read " .. notes_path)
-    return
-  end
 
-  local filtered, kept, total = filter_ass(text, settings)
+  -- The context notes first, shown; then the Behind the Scenes notes, as a second track to switch to (shown
+  -- when they're all there is). Each is filtered by the same switches.
   local dir = vlc.config.userdatadir() .. "/context-notes"
   pcall(vlc.io.mkdir, dir, "0700")
-  temp_counter = temp_counter + 1
-  local temp = dir .. "/current-" .. temp_counter .. ".ass"
-  if not write_all(temp, filtered) then
-    set_status("Couldn't write " .. temp)
-    return
+  local loading = {}
+  if notes_path then loading[#loading + 1] = { path = notes_path, label = "notes" } end
+  if bts_path then loading[#loading + 1] = { path = bts_path, label = "Behind the Scenes notes" } end
+  local temps, said = {}, {}
+  for i, item in ipairs(loading) do
+    local text = read_all(item.path)
+    if not text then
+      said[#said + 1] = "Couldn't read " .. item.path
+    else
+      local filtered, kept, total = filter_ass(text, settings)
+      temp_counter = temp_counter + 1
+      local temp = dir .. "/current-" .. temp_counter .. ".ass"
+      if not write_all(temp, filtered) then
+        said[#said + 1] = "Couldn't write " .. temp
+      else
+        temps[#temps + 1] = temp
+        vlc.input.add_subtitle(temp, #temps == 1)
+        said[#said + 1] = string.format("%s %d of %d %s from %s", #temps == 1 and "Showing" or "Also loaded:",
+                                        kept, total, item.label, item.path:match("([^/\\]+)$") or item.path)
+        if #temps > 1 then said[#said] = said[#said] .. " (Subtitle > Sub Track)" end
+      end
+    end
   end
-  if last_temp and vlc.io and vlc.io.unlink then pcall(vlc.io.unlink, last_temp) end
-  last_temp = temp
-
-  vlc.input.add_subtitle(temp, true)
-  set_status(string.format("Showing %d of %d notes from %s", kept, total,
-                           notes_path:match("([^/\\]+)$") or notes_path))
+  if vlc.io and vlc.io.unlink then
+    for _, old in ipairs(last_temps) do pcall(vlc.io.unlink, old) end
+  end
+  last_temps = temps
+  set_status(table.concat(said, ". "))
 end
 
 ---------------------------------------------------------------- dialog

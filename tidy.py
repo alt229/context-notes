@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
 tidy.py - move the working files earlier versions left beside your videos into their context-notes folders.
-Created 2026-10-24, modified 2026-10-26.
+Created 2026-10-24, modified 2026-10-30.
 
     python3 tidy.py "/Volumes/Movies"               one folder: lists what would move, asks, then moves it
     python3 tidy.py "/Volumes/Movies" --recursive   that folder and every folder under it
     python3 tidy.py "/Volumes/Movies" --dry-run     only list what would move
     python3 tidy.py film.mkv                        one video's files
+    python3 tidy.py "/Volumes/TV" --inside          check the subtitles inside the videos too (reads each one in full)
+    python3 tidy.py "/Volumes/TV" --no-check-subs   don't check the subtitles beside the videos for damage
+
+It also checks the .srt files beside the videos for damage (subcheck.py: mangled characters, text-recognition
+mistakes, mislabeled or corrupted), unless Settings' "Check subtitles for damage" is off. It reports and changes
+nothing.
 
 Beside each video stays only what players use: <video>.notes.ass, its Plex copy (<video>.en.ass) and real
 subtitles (yours, or ones find_subs.py found or downloaded). The rest moves into context-notes/<video file name>/
@@ -14,8 +20,9 @@ subtitles (yours, or ones find_subs.py found or downloaded). The rest moves into
 re-timed (.aligned) or written by speech recognition (.transcribed); numbered transcripts; chat upload files
 and the "<video name> chat-replies" folder; and the "<video name> analysis" folder, which becomes analysis/.
 
-Files are moved as they are, never copied, changed or overwritten. A file whose name is already taken in the
-folder, or that could belong to two videos (film.mkv and film.mp4), stays where it is and is listed.
+Files are moved as they are, never copied, changed or overwritten. A backup (.bak, .bak2 ...) whose name is
+already taken in the folder gets the next free number. Any other file whose name is taken, or that could belong to
+two videos (film.mkv and film.mp4), stays where it is and is listed.
 The scripts find files in either place, so nothing has to be tidied before the next run.
 """
 import argparse
@@ -26,6 +33,8 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import prompts  # noqa: E402
+import settings  # noqa: E402
+import subcheck  # noqa: E402
 import workfiles  # noqa: E402
 
 
@@ -63,7 +72,8 @@ def describe(path, plan, skipped):
         shown = os.path.relpath(where, path if path.is_dir() else path.parent)
         lines.append(f"{video.name}: {len(moves)} item(s) -> {shown}{os.sep}")
         for src, dest in moves:
-            arrow = f"  ->  {dest.name}{os.sep}" if src.is_dir() else ""
+            arrow = (f"  ->  {dest.name}{os.sep}" if src.is_dir()
+                     else f"  ->  {dest.name}" if dest.name != src.name else "")
             lines.append(f"    {src.name}{os.sep if src.is_dir() else ''}{arrow}")
     for src, why in skipped:
         lines.append(f"  (staying where it is: {src}, because {why})")
@@ -94,10 +104,19 @@ def main(argv=None):
     ap.add_argument("--recursive", action="store_true", help="with a folder: include every folder under it")
     ap.add_argument("--dry-run", action="store_true", help="only list what would move")
     ap.add_argument("--yes", action="store_true", help="move them without asking")
+    ap.add_argument("--no-check-subs", dest="check_subs", action="store_false",
+                    help="don't check the subtitles beside the videos for damage (Settings: \"Check subtitles for "
+                         "damage\")")
+    ap.add_argument("--inside", action="store_true",
+                    help="check the text tracks inside each video too (reads the whole video: slow on a NAS)")
+    ap.set_defaults(check_subs=settings.effective()["check_subs"])
     a = ap.parse_args(argv)
     path = Path(os.path.abspath(Path(a.path).expanduser()))
     if not path.exists():
         sys.exit(f"Can't find {path}")
+    if a.check_subs or a.inside:
+        subcheck.check_folder(path, a.recursive, a.inside)
+        print()
     plan, skipped = plan_for(path, a.recursive)
     if not plan:
         print("Nothing to tidy: no working files beside the videos"

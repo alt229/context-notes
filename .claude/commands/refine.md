@@ -10,6 +10,7 @@ step as the API's `--refine`, with the same instructions, stretches, backups and
 $ARGUMENTS
 
 Read `CLAUDE.md` first; its rules bind you. Keep your messages short.
+On Windows, run every `python3` below as `python` (`python3` there is the Microsoft Store stub).
 
 1. **Find the files.** Run `python3 context_notes.py "<video>" --status`. It says which subtitles the notes are placed
    on (SRT) and whether the notes exist. If there are no notes yet, stop and suggest `/notes "<video>"` first.

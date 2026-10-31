@@ -37,10 +37,12 @@ async function api(path, body) {
 
 const MODELS = { "claude-opus-5-5": "Claude Opus", "claude-sonnet-5-5": "Claude Sonnet" };
 const TASKS = { soundtrack: "Listening to the soundtrack", frames: "Pulling frames", transcribe: "Recognising speech",
-                generate: "Writing notes", refine: "Looking at the frames", embed: "Putting the notes inside" };
+                generate: "Writing notes", refine: "Looking at the frames", embed: "Putting the notes inside",
+                research: "Looking the film up" };
 const STATES = { ready: "Ready", todo: "To do", rebuild: "Needs a rebuild", stopped: "Stopped part-way",
                  working: "Working on it", problem: "Stopped" };
-const STEPS = ["subtitles", "sync", "generate", "refine", "alignment", "done"];
+const STEPS = ["subtitles", "sync", "research", "generate", "refine", "alignment", "done"];
+const BTS = "behind-the-scenes";              // the Behind the Scenes track (workfiles.BTS)
 
 let info = null;
 let videos = [];

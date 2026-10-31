@@ -64,10 +64,19 @@
         <select id="d_background"><option value="see-through">See-through box</option><option value="dark">Dark box (before 0.2.0)</option><option value="none">No box, outlined text</option></select></label>
       <label class="field"><span>How solid the see-through box is (%)</span>
         <input id="d_opacity" type="text" inputmode="numeric" placeholder="30"></label>
+      <label class="field"><span>Behind the Scenes notes that give away the plot</span>
+        <select id="d_bts_spoilers"><option value="include">Show them (marked as spoilers)</option>
+          <option value="leave-out">Leave them out</option><option value="ask">Ask once per film</option></select></label>
       <label class="check"><input type="checkbox" id="d_frames"><span>Look at more frames<small>Catches more sight gags; costs several times more.</small></span></label>
       <label class="check"><input type="checkbox" id="d_check_alignment"><span>Check every note's timing against the speech<small>Slow the first time; free.</small></span></label>
       <label class="check"><input type="checkbox" id="d_offline"><span>Don't search online for subtitles<small>Subtitles are looked for inside the video only.</small></span></label>
       <label class="check"><input type="checkbox" id="d_download_subs"><span>Always download subtitles<small>When OpenSubtitles.com has subtitles for a film that has none, download them without asking. Each uses one of your daily downloads.</small></span></label>
+      <label class="check"><input type="checkbox" id="d_check_subs"><span>Check subtitles for damage<small>Before a
+        run uses them, and when you tidy: mangled characters (like "Î½" for "v"), text-recognition mistakes ("l told
+        you"), and subtitles mislabeled or corrupted (labeled English, but in French). Quick; changes nothing.</small></span></label>
+      <label class="check"><input type="checkbox" id="d_replace_bad_subs"><span>Get a clean copy when they're damaged<small>Downloads
+        subtitles from OpenSubtitles.com, checks them, and uses them instead, once per film (it uses one of your daily
+        downloads, and needs your OpenSubtitles login). Not for a film that already has notes.</small></span></label>
       <label class="check"><input type="checkbox" id="d_recursive"><span>Include subfolders</span></label>
       <label class="check"><input type="checkbox" id="d_remember_start"><span>Remember starting folder<small>The folder you choose opens next time. Off: the app opens empty and doesn't record folders.</small></span></label>
       <p class="hint">Starting folder: <span id="d_start_folder"></span></p>

@@ -9,6 +9,23 @@
       <h2>How to write the notes</h2>
       <fieldset id="optionsSet">
         <fieldset>
+          <legend>Which notes</legend>
+          <label class="choice"><input type="radio" name="track" value="context" checked>
+            <span>Context notes<small>Idioms, slang, history and culture the film takes for granted.</small></span></label>
+          <label class="choice"><input type="radio" name="track" value="behind-the-scenes">
+            <span>Behind the Scenes<small>For a film you know: how it was made. Claude looks it up first, with a
+              source for every fact. A track of its own, beside the context notes.</small></span></label>
+        </fieldset>
+        <div class="field" id="btsOptions" hidden>
+          <label class="field"><span>Notes that give away the plot</span>
+            <select id="spoilers"><option value="">Each film's own choice, else Settings</option>
+              <option value="include">Show them (marked as spoilers)</option><option value="leave-out">Leave them out</option>
+              <option value="ask">Ask once per film</option></select></label>
+          <small>Changing this later is free: only the subtitle file is rebuilt.</small>
+          <label class="check"><input type="checkbox" id="research_again">
+            <span>Look the film up again<small>A new fact sheet, then new notes from it. The old ones are kept as .bak.</small></span></label>
+        </div>
+        <fieldset>
           <legend>Quality</legend>
           <label class="choice"><input type="radio" name="quality" value="best" checked>
             <span>Best notes<small>Claude Opus. Most accurate, especially on history and culture.</small></span></label>
@@ -73,7 +90,7 @@
               <option value="xhigh">Extra high</option><option value="max">Max</option></select></label>
           <label class="check"><input type="checkbox" id="offline">
             <span>Don't search online for subtitles<small>When a film has none beside it or inside it, it isn't searched for on OpenSubtitles.com.</small></span></label>
-          <label class="check"><input type="checkbox" id="check_alignment">
+          <label class="check" id="alignmentRow"><input type="checkbox" id="check_alignment">
             <span>Check every note's timing against the speech<small id="speechHint">Slow the first time; free.</small></span></label>
           <label class="check"><input type="checkbox" id="dense">
             <span>Look at more frames<small>Catches more sight gags; costs several times more.</small></span></label>

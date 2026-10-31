@@ -21,6 +21,7 @@ EFFORTS = ("", "low", "medium", "high", "xhigh", "max")               # "" = hig
 BACKGROUNDS = ("see-through", "dark", "none")                         # make_ass.BACKGROUNDS (checked by a test)
 FRAMES = ("keyframes", "dense")
 ROUTES = ("plan", "api")                  # your Claude plan (through Claude Code), or API credits
+SPOILERS = ("include", "leave-out", "ask")   # Behind the Scenes notes that give away something later in the film
 
 BUILT_IN = {
     "route": "plan",                      # where the notes are written: the plan, unless it can't (see api_fallback)
@@ -38,11 +39,14 @@ BUILT_IN = {
     "check_alignment": False,
     "offline": False,                     # True = don't search OpenSubtitles.com for subtitles
     "download_subs": False,               # True = download what OpenSubtitles.com finds without asking
+    "check_subs": True,                   # check subtitles for damage before using them (subcheck.py), and in tidy
+    "replace_bad_subs": True,             # damaged ones: fetch a clean copy from OpenSubtitles.com (once per film)
     "yes_to_all": False,                  # True = answer the questions about the work without asking (prompts.py)
     "recursive": False,
     "autosend": True,                     # send 10 seconds after showing the cost; untick to be asked each time
     "start_folder": "",
     "remember_start_folder": True,
+    "bts_spoilers": "include",            # Behind the Scenes: include the spoilers, leave them out, or ask per film
 }
 # kind, and what it allows
 KEYS = {
@@ -61,11 +65,14 @@ KEYS = {
     "check_alignment": ("bool", None),
     "offline": ("bool", None),
     "download_subs": ("bool", None),
+    "check_subs": ("bool", None),
+    "replace_bad_subs": ("bool", None),
     "yes_to_all": ("bool", None),
     "recursive": ("bool", None),
     "autosend": ("bool", None),
     "start_folder": ("text", 1024),
     "remember_start_folder": ("bool", None),
+    "bts_spoilers": ("choice", SPOILERS),
 }
 
 
@@ -160,7 +167,8 @@ def cli_defaults():
     return {"model": MODELS[s["quality"]], "effort": s["effort"] or "high", "audience": s["audience"] or None,
             "notes_language": s["notes_language"] or None, "frames": s["frames"],
             "check_alignment": s["check_alignment"], "recursive": s["recursive"], "offline": s["offline"],
-            "download_subs": s["download_subs"], "yes_to_all": s["yes_to_all"]}
+            "download_subs": s["download_subs"], "yes_to_all": s["yes_to_all"], "subs_check": s["check_subs"],
+            "replace_bad_subs": s["replace_bad_subs"]}
 
 
 def route_defaults():
@@ -178,6 +186,13 @@ def look_defaults():
     spw = s["seconds_per_word"]
     return {"background": s["note_background"], "opacity": s["note_opacity"],
             "wpm": 60 / spw if spw else 150}
+
+
+def spoilers_default():
+    """What a Behind the Scenes build does with the notes marked as spoilers, when neither --spoilers nor the film's
+    own notes file says: "include" (the built-in default), "leave-out", or "ask" (once per film; the answer is kept
+    in its notes file)."""
+    return effective()["bts_spoilers"]
 
 
 def custom_audience():

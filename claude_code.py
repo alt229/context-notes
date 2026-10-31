@@ -443,12 +443,18 @@ def _stop(p):
         pass
 
 
-def call(model, system, content, effort=None, workdir=None, folders=(), timeout=TIMEOUT, record=True):
+WEB_TOOLS = ("WebSearch", "WebFetch")      # the research step (research.py): looking a film up, nothing else
+WEB_TURNS = 80                             # turns the research step may take (each search or page is one or two)
+WEB_TIMEOUT = 2400                         # seconds for one research request (it searches and reads for a while)
+
+
+def call(model, system, content, effort=None, workdir=None, folders=(), timeout=TIMEOUT, record=True, web=False):
     """One request on the plan. Returns a dict shaped like the API's reply: {"content": [{"type": "text", ...}],
     "usage": {"input_tokens", "output_tokens"}, "stop_reason", "route": "plan", "plan_reading": the plan's windows
     as Claude Code reported them, or None}, and notes it in usage.py's ledger (no dollars) unless `record` is False.
     The plan's windows are saved for the meter and the 90% stop (usage.save_plan_reading). Raises CantGoOn when the
-    plan can't take it; exits with Claude Code's message for anything else."""
+    plan can't take it; exits with Claude Code's message for anything else. `web`: the research step, which may
+    search the web and read pages (WebSearch and WebFetch, allowed without asking) and nothing else."""
     import claude_api
     import usage
     cmd = command()
@@ -466,7 +472,15 @@ def call(model, system, content, effort=None, workdir=None, folders=(), timeout=
             args.append(flag)
     if effort and "--effort" in flags and claude_api.supports_effort(model):
         args += ["--effort", effort]
-    if images:
+    if web:
+        if "--allowed-tools" not in flags:
+            raise CantGoOn("This Claude Code is too old to be allowed to search the web without asking. Update it "
+                           "(`claude update`), then run this again.")
+        tools = ",".join(WEB_TOOLS)
+        args += ["--tools", tools, "--allowed-tools", tools, "--max-turns", str(WEB_TURNS)]
+        if "--permission-mode" in flags:
+            args += ["--permission-mode", "dontAsk"]        # anything else that would need a yes is refused
+    elif images:
         args += ["--tools", "Read"]
         for d in sorted({str(Path(f).resolve()) for f in folders} | {str(Path(i).parent) for i in images}):
             args += ["--add-dir", d]

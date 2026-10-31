@@ -175,10 +175,13 @@ def next_cost():
 
 
 def film_name(notes_path):
-    """The name a film goes by in the ledger: its notes file without 'notes-' and '.json'."""
+    """The name a film goes by in the ledger: its notes file (or Behind the Scenes notes, or fact sheet) without
+    'notes-' (or 'behind-the-scenes-', 'facts-') and '.json'."""
     name = Path(notes_path).name
-    if name.startswith("notes-"):
-        name = name[len("notes-"):]
+    for prefix in ("notes-", "behind-the-scenes-", "facts-"):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+            break
     return name[:-len(".json")] if name.lower().endswith(".json") else name
 
 
@@ -589,8 +592,9 @@ def week_line(s=None):
 
 
 # ---------------------------------------------------------------- stopping at the credit
-def guard(assume_yes=False):
-    """Call before each request. Returns None to go on, or a one-line message to stop with.
+def guard(assume_yes=False, next_usd=None):
+    """Call before each request. Returns None to go on, or a one-line message to stop with. `next_usd`: what this
+    request is expected to cost when the step knows better than the run's average (the research step's web search).
 
     With a balance set and the next request expected to cost more than what's left, ask whether to carry on (the
     estimate can be out of date: credit added and not mentioned). Asked once per run. With --yes, or nobody to ask, the
@@ -598,6 +602,8 @@ def guard(assume_yes=False):
     if _run["carry_on"]:
         return None
     bal, cost = balance(), next_cost()
+    if next_usd is not None and (cost is None or next_usd > cost):
+        cost = next_usd
     if bal is None or cost is None or bal["balance_usd"] >= cost:
         return None
     import prompts

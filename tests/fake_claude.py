@@ -10,7 +10,7 @@ conftest.py points CONTEXT_NOTES_CLAUDE at this file for every test. Environment
                      "limit-reached" (the other wording of the limit), "crash-after" (a reply that mentions a
                      session limit, then a non-zero exit), "hang" (never answers), "limit-quiet" (refused, says
                      only so in its rate_limit_event)
-  FAKE_CLAUDE_HELP   "old": a --help without the newer options
+  FAKE_CLAUDE_HELP   "old": a --help without the newer options; "no-allowed-tools": one without --allowed-tools
   FAKE_CLAUDE_RATE   the plan's windows it reports with --output-format stream-json: "five,seven" as fractions
                      ("0.42,0.11" by default), or "none"
   FAKE_CLAUDE_LOG    a file that gets one JSON line per `claude -p` run: its arguments, the prompt, the folder it ran
@@ -28,7 +28,8 @@ import sys
 from pathlib import Path
 
 NEW_FLAGS = ("--tools --effort --safe-mode --no-session-persistence --strict-mcp-config --disable-slash-commands "
-             "--permission-mode --add-dir --max-turns --system-prompt --output-format --model --print")
+             "--permission-mode --add-dir --max-turns --system-prompt --output-format --model --print "
+             "--allowedTools, --allowed-tools")
 
 
 def log(entry):
@@ -70,7 +71,7 @@ def options(argv):
     """The -p run's options: {flag: [values]} (a flag with no value gets [True])."""
     out, i = {}, 0
     takes = {"--model", "--system-prompt", "--output-format", "--tools", "--add-dir", "--max-turns", "--effort",
-             "--permission-mode"}
+             "--permission-mode", "--allowed-tools"}
     while i < len(argv):
         a = argv[i]
         if a in takes and i + 1 < len(argv):
@@ -87,8 +88,10 @@ def main(argv):
         print("2.1.999 (Claude Code)")
         return 0
     if argv[:1] in (["--help"], ["-h"]):
+        help_kind = os.environ.get("FAKE_CLAUDE_HELP")
+        flags = NEW_FLAGS.replace("--allowedTools, --allowed-tools", "") if help_kind == "no-allowed-tools" else NEW_FLAGS
         print("Usage: claude [options]\n" + ("--model --print --output-format --system-prompt"
-                                             if os.environ.get("FAKE_CLAUDE_HELP") == "old" else NEW_FLAGS))
+                                             if help_kind == "old" else flags))
         return 0
     signin = os.environ.get("FAKE_CLAUDE_SIGNIN")
     if argv[:2] == ["auth", "status"]:
@@ -163,6 +166,19 @@ def main(argv):
     if mode == "hang":
         import time
         time.sleep(120)
+    if "You research a film" in system:          # research.py's web search: it may only search and read pages
+        if tools != "WebSearch,WebFetch" or (opts.get("--allowed-tools") or [None])[0] != "WebSearch,WebFetch":
+            result(f"Not allowed to search: tools {tools!r}", error=True)
+        result("I searched and read three pages.\n<facts>" + json.dumps(FACTS) + "</facts>", usage=(30000, 2000))
+    if "audio commentary" in system:
+        times = re.findall(r"^\[(\d+:\d\d:\d\d)\] (.*)$", prompt, re.M)
+        result("<facts>" + json.dumps([{"fact": f"The director says: {t}", "scene": "", "when": w, "category":
+                                        "Behind the scenes", "source": "commentary", "spoiler": False}
+                                       for w, t in times[:2]]) + "</facts>", usage=(4000, 300))
+    if 'refine the "Behind the Scenes"' in system:
+        result(bts_frame_reply(prompt), usage=(5000, 300))
+    if "Behind the Scenes" in system and "Lines to annotate" in prompt:
+        result(bts_notes_reply(prompt), usage=(2000, 300))
     if "You refine" in system:
         if pictures and len(opened) != len(pictures):
             result(f"Couldn't open {sorted(set(pictures) - set(opened))}", error=True)
@@ -183,6 +199,50 @@ def notes_reply(n, user):
               "confidence": "low"},
              {"cue": 9999, "match": "x", "category": "Trivia", "text": "Out of range"}]
     return "```json\n" + json.dumps(notes) + "\n```"
+
+
+# research.py's web search: three facts, one a spoiler, one with no dialogue (for the frames step to place)
+FACTS = [{"fact": "The actor broke two toes kicking a helmet here, and the take was kept.", "scene": "the kick",
+          "line": "", "category": "Injury", "source": "https://example.com/interview", "spoiler": False,
+          "confidence": "high"},
+         {"fact": "This character turns out to be the villain.", "scene": "the first meeting", "category": "Casting",
+          "source": "https://example.com/book", "spoiler": True, "confidence": "medium"},
+         {"fact": "The castle is a painted model.", "scene": "the castle on the hill, no dialogue", "category":
+          "Effects", "source": "https://example.com/vfx", "spoiler": False, "confidence": "high"}]
+
+
+def bts_notes_reply(user):
+    """The Behind the Scenes notes for a part: facts 1 and 2 on its second and third lines (2 a spoiler on the sheet,
+    which this note doesn't repeat), and one that tells no fact from the sheet (#99), which the step leaves out.
+    Facts already used aren't used again."""
+    lo = int(re.search(r"Lines to annotate \((\d+) to", user).group(1))
+    lines = dict(re.findall(r"^(\d+) \[[\d:]+\] (.*)$", user, re.M))
+    used = {int(i) for i in re.findall(r"#(\d+)", user.split("Facts already used", 1)[1])} if \
+        "Facts already used" in user else set()
+    out = []
+    for fact, k, spoiler in ((1, lo + 1, False), (2, lo + 2, True)):
+        if fact in used or str(k) not in lines:
+            continue
+        note = {"cue": k, "match": " ".join(lines[str(k)].split()[:3]), "fact": fact, "category": "Injury",
+                "text": f"Fact {fact} told here", "spoiler": spoiler, "confidence": "high"}
+        if spoiler:                              # not said: the step takes the fact sheet's own mark
+            del note["spoiler"]
+        out.append(note)
+    out.append({"cue": lo, "match": "x", "fact": 99, "category": "Trivia", "text": "Not on the sheet"})
+    return json.dumps(out)
+
+
+def bts_frame_reply(user):
+    """The frames step: fact 3 at five seconds into the stretch (if it's still to place), and a note with no fact,
+    which the step leaves out."""
+    h, m, s = re.search(r"This stretch: (\S+) to", user).group(1).split(":")
+    lo = int(h) * 3600 + int(m) * 60 + float(s)
+    left = re.search(r"Facts not placed yet[^:]*: (.*)$", user, re.M)
+    add = [{"at": hms(lo + 5), "kind": "visual", "category": "Prop", "text": "Not a fact from the sheet"}]
+    if left and "#3" in left.group(1):
+        add.append({"at": hms(lo + 5), "kind": "visual", "fact": 3, "category": "Effects",
+                    "text": "That castle is a painted model", "spoiler": False, "confidence": "high"})
+    return json.dumps({"add": add})
 
 
 def hms(t):

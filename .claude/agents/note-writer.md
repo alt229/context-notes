@@ -13,6 +13,8 @@ You write context notes for ONE part of a film. You are given three things:
 - K: the part number
 - DIR: the replies folder
 
+On Windows, run every `python3` below as `python` (`python3` there is the Microsoft Store stub).
+
 1. Run `python3 chat_notes.py show "UPLOAD" --part K --covered "DIR"`. It prints the instructions for this film,
    the last lines of the previous part (context only), the topics earlier parts already covered, and the lines of
    PART K.

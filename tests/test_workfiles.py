@@ -154,6 +154,26 @@ def test_tidy_never_overwrites_or_guesses(tmp_path):
     assert taken.read_text() == "newer" and (tmp_path / "notes-Film.json").exists()
 
 
+def test_tidy_gives_a_backup_whose_name_is_taken_the_next_number(tmp_path):
+    """The frames step kept Film.notes.ass.bak in the working folder; an older rebuild kept two more beside the
+    film. Tidy moves them as .bak2 and .bak3, and nothing is overwritten."""
+    touch(tmp_path / "Film.mkv")
+    touch(tmp_path / "Film.notes.ass")
+    w = tmp_path / "context-notes" / "Film.mkv"
+    touch(w / "Film.notes.ass.bak", "frames step")
+    touch(tmp_path / "Film.notes.ass.bak", "rebuild 1")
+    touch(tmp_path / "Film.notes.ass.bak2", "rebuild 2")
+    plan, skipped = workfiles.old_files(tmp_path)
+    assert skipped == []
+    assert [(s.name, d.name) for s, d in plan[tmp_path / "Film.mkv"]] == [
+        ("Film.notes.ass.bak", "Film.notes.ass.bak2"), ("Film.notes.ass.bak2", "Film.notes.ass.bak3")]
+    assert "    Film.notes.ass.bak  ->  Film.notes.ass.bak2" in tidy.describe(tmp_path, plan, skipped)
+    assert tidy.move(plan) == (2, [])
+    assert [(p.name, p.read_text()) for p in sorted(w.iterdir())] == [
+        ("Film.notes.ass.bak", "frames step"), ("Film.notes.ass.bak2", "rebuild 1"), ("Film.notes.ass.bak3", "rebuild 2")]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["Film.mkv", "Film.notes.ass", "context-notes"]
+
+
 def test_tidy_one_video_and_the_wrapper_points_to_it(tmp_path, home):
     v = old_film(tmp_path)
     other = old_film(tmp_path, "Other")

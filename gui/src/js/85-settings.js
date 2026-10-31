@@ -35,7 +35,9 @@ function renderSettings() {
   const systems = { mac: "a Mac", linux: "Linux", wsl: "Linux in Windows (WSL)", windows: "Windows" };
   $("aboutText").textContent = (info.local === false ? "You're using it from another device. " : "")
     + `Running on ${systems[info.system] || info.system}. Speech recognition (for re-timing subtitles and checking notes) is `
-    + (info.speech ? "installed." : "not installed. To add it: pip3 install faster-whisper");
+    + (info.speech ? "installed." : info.python && info.python.newer ? "not installed."
+       : "not installed. To add it: pip3 install faster-whisper")
+    + (info.python && info.python.newer ? " " + info.python.advice : "");
   $("speechHint").textContent = info.speech ? "Slow the first time; free." : "Needs speech recognition, which isn't installed (see Settings).";
 }
 async function reloadInfo() {

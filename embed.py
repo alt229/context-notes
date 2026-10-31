@@ -14,6 +14,8 @@ It works on films that already have a <video>.notes.ass, however it was made: by
 this for you after the notes are done) or earlier. No Claude, no cost: ffmpeg copies every track as it is (no
 re-encoding) and adds the .ass as one more, called "Context Notes". The track keeps its styling: the colours,
 positions and fades of the notes work in VLC, Infuse and other players that show ASS subtitles.
+A film with a Behind the Scenes track (<video>.behind-the-scenes.notes.ass, from context_notes.py --behind-the-scenes)
+gets that too, as a second track called "Behind the Scenes": choose either one in the player.
 
 How it stays safe:
   - The new file is made first, in the film's context-notes folder (which media servers skip), and checked: the
@@ -47,6 +49,11 @@ import workfiles  # noqa: E402
 
 TRACK_TITLE = "Context Notes"
 HASH_TAG = "CONTEXT_NOTES_SHA1"          # on the track: which .notes.ass it was made from
+# The tracks this puts inside a film, in this order: each from its .ass beside the film, with its own title and tag.
+CONTEXT_TRACK = {"key": "context", "title": TRACK_TITLE, "hash_tag": HASH_TAG, "suffix": ".notes.ass"}
+BTS_TRACK = {"key": workfiles.BTS, "title": "Behind the Scenes", "hash_tag": "CONTEXT_NOTES_BTS_SHA1",
+             "suffix": workfiles.BTS_ASS}
+TRACKS = (CONTEXT_TRACK, BTS_TRACK)
 LANGUAGE = "eng"
 CONTAINERS = {".mkv"}
 SPACE_MARGIN = 0.02                      # free space needed: the film's size plus this much, plus 64 MB
@@ -75,8 +82,13 @@ def have_ffmpeg():
     return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
-def ass_path(video):
-    return Path(str(Path(video).with_suffix("")) + ".notes.ass")
+def ass_path(video, track=CONTEXT_TRACK):
+    return Path(str(Path(video).with_suffix("")) + track["suffix"])
+
+
+def has_notes(video):
+    """Is there an .ass of any of our tracks beside the film?"""
+    return any(ass_path(video, t).exists() for t in TRACKS)
 
 
 def sha1(path):
@@ -129,10 +141,12 @@ def look_of(ass):
 
 
 def film_state(video):
-    """For the page: what embedding would do for one film ("add", "update", "current" or "skip", and why), and the
-    look its notes were built with (look_of)."""
+    """For the page: what embedding would do for one film ("add", "update", "current" or "skip", and why), the look
+    its notes were built with (look_of), and the same for each track ("tracks": {key: {action, reason}})."""
     item = inspect(video)
-    return {"action": item["action"], "reason": item["reason"], "look": look_of(ass_path(video))}
+    return {"action": item["action"], "reason": item["reason"], "look": look_of(ass_path(video)),
+            "tracks": {t["track"]["key"]: {"action": t["action"], "reason": t["reason"], "look": look_of(t["ass"])}
+                       for t in item["tracks"]}}
 
 
 def tag(stream, name):
@@ -142,15 +156,21 @@ def tag(stream, name):
     return None
 
 
-def notes_tracks(info):
-    """Subtitle streams this tool made: titled "Context Notes" and carrying the hash tag."""
+def notes_tracks(info, track=CONTEXT_TRACK):
+    """Subtitle streams this tool made for one track: titled "Context Notes" (or "Behind the Scenes") and carrying
+    its hash tag."""
     return [s for s in info["streams"] if s.get("codec_type") == "subtitle"
-            and tag(s, "title") == TRACK_TITLE and tag(s, HASH_TAG)]
+            and tag(s, "title") == track["title"] and tag(s, track["hash_tag"])]
 
 
-def partial_notes(video):
+def partial_notes(video, track=CONTEXT_TRACK):
     """The limit (seconds) of a notes file that only covers the start of the film, else None."""
     video = Path(video)
+    if track is BTS_TRACK:
+        try:
+            return json.loads(workfiles.bts_notes_path(video).read_text(encoding="utf-8")).get("limit") or None
+        except (OSError, ValueError, AttributeError):
+            return None
     path = workfiles.notes_path(video)
     if not path.exists():
         found = []
@@ -166,20 +186,24 @@ def partial_notes(video):
         return None
 
 
-def inspect(video, convert=False):
-    """What embedding would do for one video: {"video", "action", "reason", "size", ...}.
+def inspect(video, convert=False, only=None):
+    """What embedding would do for one video: {"video", "action", "reason", "size", "new", "tracks", ...}.
     action: add, update, current (nothing to do), or skip (reason says why). convert: an .mp4 is rewritten as an
-    .mkv first (CONVERT_FROM), and its original goes to context-notes/originals."""
+    .mkv first (CONVERT_FROM), and its original goes to context-notes/originals. "tracks": each of our tracks with
+    an .ass beside the film, with its own action; "new": the tracks the new file gets (all of them, rewritten
+    together, when any one needs it); "old": the streams of ours those replace. `only`: judge just that track (for
+    the page: is this track inside, and current?)."""
     video = Path(video)
-    out = {"video": video, "action": "skip", "reason": "", "size": 0, "sha1": None, "old": [], "convert": False}
-    ass = ass_path(video)
+    out = {"video": video, "action": "skip", "reason": "", "size": 0, "sha1": None, "old": [], "convert": False,
+           "new": [], "tracks": []}
     converting = convert and video.suffix.lower() in CONVERT_FROM
     if video.suffix.lower() not in CONTAINERS and not converting:
         out["reason"] = (f"{video.suffix.lower() or 'this kind of file'} can't hold these subtitles without losing "
                          f"their styling, so it stays as it is (.mkv only for now)")
         return out
-    if not ass.exists():
-        out["reason"] = f"no {ass.name} beside it yet"
+    present = [t for t in ((only,) if only else TRACKS) if ass_path(video, t).exists()]
+    if not present:
+        out["reason"] = f"no {ass_path(video, only or CONTEXT_TRACK).name} beside it yet"
         return out
     if video.is_symlink():
         out["reason"] = "it is a link to a file elsewhere; embed the file itself"
@@ -191,25 +215,44 @@ def inspect(video, convert=False):
                              else f"its .mp4 is already kept in {workfiles.FOLDER}/originals")
             return out
         out["convert"] = True
-    limit = partial_notes(video)
-    if limit:
+    wanted, partial = [], []
+    for t in present:
+        limit = partial_notes(video, t)
+        (partial if limit else wanted).append((t, limit))
+    if not wanted:
+        limit = partial[0][1]
         out["reason"] = (f"the notes only cover the first {int(limit) // 60}:{int(limit) % 60:02d}; "
                          f"run the whole film first")
         return out
     try:
         out["size"] = video.stat().st_size
-        out["sha1"] = sha1(ass)
         info = probe(video)
+        for t, _ in wanted:
+            out["tracks"].append({"track": t, "ass": ass_path(video, t), "sha1": sha1(ass_path(video, t))})
     except (OSError, Problem) as e:
         out["reason"] = f"couldn't read it: {e}"
         return out
-    old = notes_tracks(info)
-    out["old"] = [s["index"] for s in old]
+    for t, limit in partial:                     # not embedded until the whole film has its notes
+        out["tracks"].append({"track": t, "ass": ass_path(video, t), "sha1": None, "old": [], "action": "skip",
+                              "reason": f"the notes only cover the first {int(limit) // 60}:{int(limit) % 60:02d}"})
+    for item in out["tracks"]:
+        if item["sha1"] is None:
+            continue
+        old = notes_tracks(info, item["track"])
+        item["old"] = [s["index"] for s in old]
+        if len(old) == 1 and tag(old[0], item["track"]["hash_tag"]) == item["sha1"]:
+            item["action"], item["reason"] = "current", "already inside"
+        else:
+            item["action"], item["reason"] = ("update" if old else "add"), ""
     out["info"] = info
-    if len(old) == 1 and tag(old[0], HASH_TAG) == out["sha1"]:
+    ours = [i for i in out["tracks"] if i["sha1"] is not None]
+    out["new"] = ours
+    out["old"] = sorted(x for i in ours for x in i["old"])
+    out["sha1"] = next((i["sha1"] for i in ours if i["track"] is CONTEXT_TRACK), ours[0]["sha1"])
+    if all(i["action"] == "current" for i in ours):
         out["action"], out["reason"] = "current", "already has these notes inside"
     else:
-        out["action"] = "update" if old else "add"
+        out["action"] = "update" if out["old"] else "add"
     return out
 
 
@@ -228,7 +271,7 @@ def plan_for(path, recursive=False, convert=False):
         for p in names:
             if p.suffix.lower() not in workfiles.VIDEO_EXTS or p.name.startswith(".") or not p.is_file():
                 continue
-            if ass_path(p).exists():
+            if has_notes(p):
                 plan.append(inspect(p, convert))
             else:
                 without += 1
@@ -257,6 +300,9 @@ def describe(item, base):
         verb = "put the notes inside" if act == "add" else "replace the notes inside (the .notes.ass changed)"
         if item.get("convert"):
             verb = "convert to .mkv, then put the notes inside"
+        if any(i["track"] is not CONTEXT_TRACK for i in item.get("new", [])):
+            verb += " (" + ", ".join(f"{i['track']['title']}: {'already inside' if i['action'] == 'current' else i['action']}"
+                                     for i in item["new"]) + ")"
         low, high = rewrite_seconds(item["size"])
         return (f"{name}: {verb}  ({size_text(item['size'])}, about {minutes_text(low)} to {minutes_text(high)})"
                 + dropped_text(item))
@@ -305,24 +351,41 @@ def check_space(video, size):
                       f"where {Path(video).name} is")
 
 
+def new_tracks(item, ass=None):
+    """[(track, its .ass, its sha1)] for the tracks the new file gets, in order. An inspect() result from before
+    there were two tracks (a test's, say) has only "sha1": the Context Notes track, from `ass`."""
+    if item.get("new"):
+        return [(i["track"], i["ass"], i["sha1"]) for i in item["new"]]
+    return [(CONTEXT_TRACK, ass or ass_path(item["video"]), item["sha1"])]
+
+
 def build_command(video, ass, tmp, item, make_default):
     old = item["old"]
     kept_subs = [s["index"] for s in item["info"]["streams"]
                  if s.get("codec_type") == "subtitle" and s["index"] not in old]
     n = len(kept_subs)
-    cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-progress", "pipe:1", "-nostats", "-i", str(video),
-           "-i", str(ass), "-map", "0", "-map", "-0:d"]     # data tracks (a camera's timecode) can't go into an MKV
+    adding = new_tracks(item, ass)
+    cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-progress", "pipe:1", "-nostats", "-i", str(video)]
+    for _, path, _ in adding:
+        cmd += ["-i", str(path)]
+    cmd += ["-map", "0", "-map", "-0:d"]     # data tracks (a camera's timecode) can't go into an MKV
     for i in old:
         cmd += ["-map", f"-0:{i}"]
-    cmd += ["-map", "1", "-map_chapters", "0", "-c", "copy",
-            f"-metadata:s:s:{n}", f"language={LANGUAGE}", f"-metadata:s:s:{n}", f"title={TRACK_TITLE}",
-            f"-metadata:s:s:{n}", f"{HASH_TAG}={item['sha1']}"]
-    if make_default:
+    for k in range(len(adding)):
+        cmd += ["-map", str(k + 1)]
+    cmd += ["-map_chapters", "0", "-c", "copy"]
+    for k, (track, _, digest) in enumerate(adding):
+        cmd += [f"-metadata:s:s:{n + k}", f"language={LANGUAGE}", f"-metadata:s:s:{n + k}", f"title={track['title']}",
+                f"-metadata:s:s:{n + k}", f"{track['hash_tag']}={digest}"]
+    if make_default:                         # the first of ours plays; the others are there to choose
         for k in range(n):
             cmd += [f"-disposition:s:{k}", "0"]
         cmd += [f"-disposition:s:{n}", "default"]
+        for k in range(1, len(adding)):
+            cmd += [f"-disposition:s:{n + k}", "0"]
     else:
-        cmd += [f"-disposition:s:{n}", "0"]
+        for k in range(len(adding)):
+            cmd += [f"-disposition:s:{n + k}", "0"]
     if item.get("convert"):          # an MP4's text subtitles (mov_text) can't go into an MKV as they are: they become SRT
         codecs = {s["index"]: s.get("codec_name") for s in item["info"]["streams"]}
         for k, i in enumerate(kept_subs):
@@ -377,8 +440,9 @@ def verify(before, after, item, size_before, size_after):
             if s["index"] not in skip and s.get("codec_type") != "data":          # data tracks are left out of the copy
                 out[s.get("codec_type")] = out.get(s.get("codec_type"), 0) + 1
         return out
+    adding = new_tracks(item)
     want = kinds(before, skip=old)
-    want["subtitle"] = want.get("subtitle", 0) + 1
+    want["subtitle"] = want.get("subtitle", 0) + len(adding)
     got = kinds(after)
     if want != got:
         return f"the tracks differ (expected {want}, got {got})"
@@ -390,11 +454,12 @@ def verify(before, after, item, size_before, size_after):
     now_subs = [s for s in after["streams"] if s.get("codec_type") == "subtitle"]
     def sub_format(s):               # a converted film's mov_text subtitles come out as SRT
         return "subrip" if item.get("convert") and s.get("codec_name") == "mov_text" else s.get("codec_name")
-    if [sub_format(s) for s in kept_subs] != [s.get("codec_name") for s in now_subs[:-1]]:
+    if [sub_format(s) for s in kept_subs] != [s.get("codec_name") for s in now_subs[:len(now_subs) - len(adding)]]:
         return "an existing subtitle track changed"
-    new = now_subs[-1] if now_subs else {}
-    if new.get("codec_name") != "ass" or tag(new, "title") != TRACK_TITLE or tag(new, HASH_TAG) != item["sha1"]:
-        return "the new subtitle track isn't what was meant"
+    for new, (track, _, digest) in zip(now_subs[len(now_subs) - len(adding):], adding):
+        if (new.get("codec_name") != "ass" or tag(new, "title") != track["title"]
+                or tag(new, track["hash_tag"]) != digest):
+            return "the new subtitle track isn't what was meant"
     if len(before.get("chapters") or []) != len(after.get("chapters") or []):
         return "the chapters differ"
     try:
@@ -453,8 +518,9 @@ def embed_one(item, make_default=False):
     ass = ass_path(video)
     if not have_ffmpeg():
         raise Problem("ffmpeg isn't installed (see the README)")
-    if sha1(ass) != item["sha1"]:
-        raise Problem(f"{ass.name} changed while this was starting; run it again")
+    for _, path, digest in new_tracks(item, ass):
+        if sha1(path) != digest:
+            raise Problem(f"{Path(path).name} changed while this was starting; run it again")
     check_space(video, item["size"])
     wdir = workfiles.make_dirs(workfiles.folder(video))
     tmp = wdir / f"{video.stem}.embedding.mkv"
@@ -585,7 +651,7 @@ def main(argv=None):
     todo = [i for i in plan if i["action"] in ("add", "update")]
     if not todo:
         if not plan:
-            print("Nothing to embed: no video with a .notes.ass beside it"
+            print("Nothing to embed: no video with a .notes.ass (or .behind-the-scenes.notes.ass) beside it"
                   + ("" if a.recursive or path.is_file() else " here (subfolders: add --recursive)") + ".")
         else:
             print("\nNothing to do.")

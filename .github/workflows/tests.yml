@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version-file: ".python-version"          # the version .venv is made with (pythonpin.py)
       - name: ffmpeg (Windows)
         if: runner.os == 'Windows'
         run: choco install ffmpeg -y --no-progress
@@ -33,3 +33,24 @@ jobs:
         run: python -m ruff check .
       - name: Tests
         run: python -m pytest
+
+  # Can the pin in .python-version move up? This installs everything, speech recognition included, on the next
+  # Python. Allowed to fail (the run stays green); when it passes on all three, change .python-version and the
+  # marker on faster-whisper in requirements.txt, then this job's version.
+  newer-python:
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.15"
+          allow-prereleases: true
+      - name: Everything in requirements.txt, and faster-whisper whatever its marker says
+        run: python -m pip install -r requirements.txt faster-whisper
+      - name: Speech recognition imports
+        run: python -c "import faster_whisper, numpy, PIL; print('ok')"

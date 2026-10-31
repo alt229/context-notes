@@ -13,6 +13,7 @@ function describe(v) {
     if (v.refined === "stopped") notes += "; looking at the frames stopped part-way";
     if (v.refine_unreadable) notes += `; Claude's reply about ${v.refine_unreadable} ${v.refine_unreadable === 1 ? "stretch" : "stretches"} of frames couldn't be read, so the next run sends just those again`;
   } else notes = v.notes_stopped ? "Writing the notes stopped part-way" : "No notes yet";
+  if (v.track === BTS) notes = (v.facts != null ? `Looked up: ${plural(v.facts, "fact")}. ` : "Not looked up yet. ") + notes;
   if (v.unreadable) notes += `. Claude's reply for ${plural(v.unreadable, "part")} couldn't be read, so those lines have no notes yet; the next run sends just those again`;
   if (v.rebuild) notes += ". The subtitle file needs a rebuild for these settings (free)";
   const subs = v.subtitles ? `Subtitles: ${v.subtitles}` : "No subtitles beside it yet; it will look inside the video, then online";
@@ -22,6 +23,14 @@ function lookText(look) {
   if (!look) return "its look isn't recorded";
   const solid = look.opacity == null ? "" : `, ${Math.round(look.opacity)}% solid`;
   return `box: ${look.background}${solid}; ${Math.round(look.wpm)} words a minute`;
+}
+// The film's state inside the .mkv, for the track the form is set to.
+function insideFor(v) {
+  const i = v.inside;
+  if (!i || !i.tracks || i.action === "skip") return i;     // skipped as a whole (an .mp4, a link, ...): its reason
+  const key = btsOn() ? BTS : "context";
+  if (i.tracks[key]) return { ...i, ...i.tracks[key] };
+  return { ...i, action: "skip", reason: key === BTS ? "no Behind the Scenes notes yet" : "no context notes yet" };
 }
 function insideText(i) {
   if (i.action === "current") return `Inside the film: yes, these notes. Look: ${lookText(i.look)}. To change it, set the look under How the notes look, press Rebuild (free), then Embed.`;
@@ -43,7 +52,7 @@ function renderVideos() {
       el("div", { class: "name" }, v.name),
       el("div", { class: `state ${v.state}` }, v.stateText || STATES[v.state]),
       el("div", { class: "meta" }, v.reason ? v.reason : describe(v)),
-      v.inside ? el("div", { class: "meta inside" }, insideText(v.inside)) : null,
+      v.inside ? el("div", { class: "meta inside" }, insideText(insideFor(v))) : null,
       acts.length ? el("div", { class: "acts" }, acts) : null));
   }
   $("titleField").hidden = videos.length > 1;
@@ -51,14 +60,16 @@ function renderVideos() {
 }
 function onlyRebuilds() {
   const left = videos.filter((v) => v.state !== "ready");
-  return left.length > 0 && left.every((v) => v.state === "rebuild") && !$("redo").checked;
+  return left.length > 0 && left.every((v) => v.state === "rebuild") && !$("redo").checked && !again();
 }
+function again() { return btsOn() && $("research_again").checked; }
 function updateRunButton() {
   const todo = videos.filter((v) => v.state !== "ready").length;
   const btn = $("runBtn");
-  btn.disabled = running || !videos.length || (!todo && !$("redo").checked);
-  btn.textContent = videos.length && !todo && !$("redo").checked ? "Everything here is done"
-    : onlyRebuilds() ? "Rebuild (free)" : "Write the notes";
+  const redo = $("redo").checked || again();
+  btn.disabled = running || !videos.length || (!todo && !redo);
+  btn.textContent = videos.length && !todo && !redo ? "Everything here is done"
+    : onlyRebuilds() ? "Rebuild (free)" : btsOn() ? "Make Behind the Scenes" : "Write the notes";
 }
 
 // What has to be set up before Claude can write notes, or null: Claude Code on the plan, the API key otherwise.
@@ -91,7 +102,7 @@ function readyScreen() {
   title(name, sub);
   hideNote("right");
   const old = videos.filter((v) => v.tidy > 0).length;
-  if (old) note("right", "Tidy up", (one ? "This film still has its" : `${plural(old, "film")} here still have their`)
+  if (old) note("right", "Tidy up", (one ? "This film still has its" : old === 1 ? "1 film here still has its" : `${old} films here still have their`)
     + " working files beside the video, where an earlier version left them. They work there; Tidy moves them into a "
     + "context-notes folder.", [el("button", { type: "button", class: "primary", onclick: openTidy }, "Tidy…")]);
   const toEmbed = videos.filter((v) => v.inside && (v.inside.action === "add" || v.inside.action === "update")).length;
@@ -102,6 +113,7 @@ function readyScreen() {
     if (setupNeeded()) note("left", "Before you start", setupNeeded());
     else if (videos.length && ready === videos.length) note("left", "Ready", "Everything here has notes. Open a video in VLC from the list.");
     else if (onlyRebuilds()) note("left", "Next", "Press Rebuild. It only remakes the subtitle file with these settings, so it's quick, and nothing is sent to Claude.");
+    else if (btsOn()) note("left", "Next", "Press Make Behind the Scenes. Claude looks the film up first (its commentary tracks, if any, and the web), then places what it found on the film. You'll see the cost before each step.");
     else note("left", "Next", "Choose how the notes are written, then press Write the notes. You'll see the cost first.");
   }
   subline("");

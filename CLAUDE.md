@@ -15,6 +15,17 @@ It's the first thing to read when picking the work up on another computer or aft
 
 - **The repo:** this folder is part of Erin's larger repo in `~/.alt229/`; its `.git` isn't visible from the connected
   folder. Leave changes in place and Erin commits them herself (2026-10-30); friends get them with `git pull`.
+  Erin publishes with her shell alias `context-notes_publish`, which updates both repos (the `~/.alt229` one and
+  github.com/alt229/context-notes); no session needs to touch remotes.
+- **Windows (2026-10-30, not committed):** a friend on Windows hit trouble; the fixes are in place, see
+  CHANGELOG "Fixed": `prompts.py` makes stdout/stderr never raise on a pipe (`errors="replace"`) and defines
+  `PYTHON` ("python" on Windows) for printed hints; `tests/conftest.py` and `tests/test_prompts.py` redirect
+  `USERPROFILE` as well as `HOME`; `.claude/settings.json` has a `python` twin for every `python3` allow entry and
+  the commands/agents say to use `python` on Windows; `bench.py` falls back from symlink to hard link/copy; the
+  transcript cache is explicit UTF-8; README's Windows list gained key-file permissions and long paths. Ruff clean;
+  the suite passed in Claude's Linux VM (one cancel-timing test flaked once under load, passed on rerun). `~/.config`
+  on Windows is **not** a problem: `Path.home()` is `%USERPROFILE%` there. The stale early-October copy in
+  `~/Documents/Claude/Projects/` is now `...-ARCHIVE`; ClaudErius's "two remotes" plan was based on it and is withdrawn.
 - **Committed:** Erin committed step 1 (the modules) on 2026-10-27. Steps 2 to 5 below are not committed yet. Ask Erin
   before committing, and never push (`.claude/settings.json` denies it).
 - **In progress: the ideas from PR #1, done our way** (the plan is the project doc `claude/pr1-plan.md`; none of the
@@ -42,6 +53,116 @@ It's the first thing to read when picking the work up on another computer or aft
      actions hidden and refused, the rest working.
   All five steps are built; steps 2 to 5 aren't committed yet. Still tabled: friend log-ins, and waiting for the
   5-hour reset by itself (now possible: background requests report the reset time).
+- **Dr Who library tidy (2026-10-30, not project code; the scripts were in a session scratchpad):** all 187 videos
+  in `/Volumes/Media/TV Shows/Dr Who` renamed `Doctor Who (AIR YEAR) - sNNeMM.mkv`. 185 episodes carry a segment title
+  and Matroska tags (title, date, season, episode, show). S11E01's audio was retagged German to English. Erin's
+  rule for specials: each goes at the end of its series, in air order; specials from years with no series (2009,
+  2022, 2023) join the series before. So Series 4 runs to E18 (End of Time Part Two), Series 7 to E16 (Time of the
+  Doctor) and Series 13 to E12 (Church on Ruby Road), and Season 00 is empty. Plex's guide (TMDB) lists these as
+  specials, so they may show without artwork. Undo logs are in `~/.config/drwho-rename/` (the Last Christmas WEB-DL
+  copy was deleted and can't be restored). Season 3 E13 is truncated and held until a full copy arrives. Next: a
+  Plex rescan.
+- **Uncommitted, 2026-10-30 (evening): Tidy's "already there", a damaged numpy, Python 3.15.**
+  - Tidy on Father Ted S01E04 left `4. Competition Time.notes.ass.bak` beside the video ("is already there" in its
+    context-notes folder). Cause: `context_notes.keep_old_ass` (every rebuild) kept the `.ass` backup beside the video,
+    while the frames step keeps its own in the working folder; so the app's Tidy note never went away. Now rebuilds
+    use `context_notes.ass_backup` (`workfiles.place(video)`, like refine/chat_notes), and `workfiles.old_files` gives
+    a backup whose name is taken the next free number (`_free_name`: `.bak2`, `.bak3`; other files still stay put).
+    tidy's list and the page show "(becomes X: that name is taken)". Page grammar: "1 film here still has its",
+    "1 item ... moves". Erin's existing stray file moves as `.bak2` on her next Tidy (nothing to restart: tidy runs as
+    a script and the page is read per request).
+  - Breaking Bad S01E01's sync check crashed: `module 'numpy' has no attribute 'frombuffer'` (Python 3.14 on her
+    Mac). No project code touches `sys.modules`; it's a numpy folder with no `__init__.py` (an interrupted install or
+    upgrade). `analyze.need()` now says the package is damaged and prints `"<python>" -m pip install
+    --force-reinstall numpy`. Not confirmed on her Mac: her next run shows either the new message or nothing wrong.
+  - Python pinned to 3.14 (Erin: lock the venv to one version until she updates the repo; no uv, fewer things to
+    depend on). Why: `pip download` checks found `requirements.txt` installs on 3.14 on Windows, Linux (x86_64,
+    aarch64) and Apple Silicon, but on 3.15 (python.org's default now) nowhere: onnxruntime, faster-whisper's, has no
+    3.15 build, and pip then installs nothing, numpy and Pillow included. Intel Macs: onnxruntime stopped at 1.23.2,
+    which has no 3.14 build, so speech recognition there needs 3.13 (README says so). Built: `.python-version`
+    (`3.14`, the one pin); `pythonpin.py` (`pinned`, `newer_than_pin`, `status`); `make_venv.py` (finds 3.14: `py
+    -3.14` on Windows, `python3.14` on the PATH, Homebrew's or python.org's folders; never downloads Python; a `.venv`
+    on another version becomes `.venv-<version>` after a yes (question `venv.replace`; `--yes`), then installs
+    requirements and faster-whisper as a separate step, saying so when it can't); `requirements.txt`'s faster-whisper
+    has `python_version < "3.15"` (a test keeps it one above the pin); the app's window, `context_notes.py` (not in
+    json mode) and Settings' About line say when a newer Python started them; CI tests on `.python-version` and a
+    `newer-python` job (3.15, allowed to fail) shows when to lift the pin. README (Requirements, Quick start, Windows,
+    Development), `.gitignore` (`.venv-*/`). Tried for real in the cloud workspace (Python 3.13, pin set to 3.13 in a
+    copy): a stale `.venv` kept as `.venv-3.1`, the new one imports numpy, Pillow and faster_whisper; with the marker
+    tightened it installed the rest and printed the speech message. Not run on Windows or a Mac.
+    Her Mac has both 3.14 and 3.15 (`__pycache__` has both).
+  - Checked on the real files at 9 pm (after the other session's subtitle-check work had landed, and with all these
+    changes still in place): `tidy.py --dry-run` on Father Ted S1 lists `4. Competition Time.notes.ass.bak ->
+    ...bak2` (the folder's `.bak` is the frames step's, Oct 28 01:27 UTC; the stray one a rebuild's, 17:36; they
+    differ). Breaking Bad S01E01 and E02 in the Linux VM (numpy 2.2.6, so not her Mac's numpy): subtitles clean
+    (`subcheck`), E02's pulled out, and the sync check in sync on both with `--limit 10:00` (a full pass reads the
+    whole 3.5 to 4.3 GB file over the share at about 36 MB/s and doesn't fit the VM's 3-minute limit; E01's full
+    attempt was still reading, no error, when it was stopped). Left in their analysis folders: `analysis.json`,
+    `report.txt` and `soundtrack-first600s.*` (the full run rewrites the first two and makes its own cache).
+    `py_compile` left some `*.cpython-310.pyc` in `__pycache__` (git-ignored; deleting isn't allowed from the VM).
+  - Friend's mp4 to mkv trouble: Erin troubleshoots the file locally (the friend only has the app's screen) and pushes
+    any fix to him.
+  - Another session was editing `tidy.py`, `context_notes.py`, `app.py` and `gui/src/js/60-tidy.js` at the same time
+    (03:52 UTC); one test run caught `tidy.py` half-saved. All of these changes were still in place afterwards.
+  - Tested: 549 tests (all pass but the Windows-only registry test) in the Linux VM, `ruff check .` clean. New tests: `test_tidy_gives_a_backup_whose_name_is_taken_the_next_number`,
+    `test_a_rebuild_of_a_film_an_earlier_version_started_keeps_its_backup_beside_it`, the rebuild-backup test
+    rewritten (it had asserted the old place), `test_a_damaged_package_says_so_instead_of_a_traceback`.
+    The page's wording isn't checked in a browser. Docs: CHANGELOG "Fixed", README (rebuild backups).
+- **Uncommitted, 2026-10-30: damaged-subtitle check, on by default** (S05E08's built-in English track shows "Î½"
+  for every "v": OCR read v as Greek ν, then UTF-8 was read as Latin-1, plus OCR's stray spaces; the rename only
+  changed titles, so it came that way). `subcheck.py` finds `mangled`, `lookalike`, `broken` and `l-for-I` (English
+  only, at least 5 lines and 1%), `unreadable`, and `mislabeled` (Erin's wording: "mislabeled or corrupted"; the
+  label's language vs `languages.guess`). Runs: `context_notes.get_subtitles` -> `checked_subtitles` (a clean file of
+  that language beside it, else one OpenSubtitles download via `find_subs.search_online`, checked; never for a film
+  with notes; never deletes). Settings `check_subs`, `replace_bad_subs` (both on; `--no-subs-check`,
+  `--no-replace-bad-subs`). Tidy checks beside files by default (`--no-check-subs`, `--inside` slow); the app's
+  Tidy dialog lists them (`subs` in `/api/tidy`), Settings has both boxes. Tested: `tests/test_subcheck.py` (13),
+  the full suite, ruff; the real S05E08 (found); all 156 `.srt` on the share: 3 flagged, all real ("l" for "I" in
+  Everything Is Illuminated and Predator; Das Boot's `.es.srt` is Portuguese). Not tried: a real OpenSubtitles
+  download through it, the page in a browser. `--inside` on all of Dr Who Series 5: E07, E08 and E09 damaged (same
+  "Î½" release), the other 11 clean; Breaking Bad S01E01 (both tracks) clean. Fixed: a clean OpenSubtitles
+  `.en.srt` beside each of the three (checked: the right episode, 85-97% words in common; were 0.7-1.0 s early, shifted
+  to 0.0 against the built-in track). The videos are unchanged; pick the external track in VLC/Plex.
+- **Uncommitted, 2026-10-30: Behind the Scenes** (Erin's idea: a director's-cut-DVD style trivia track "for nerds",
+  e.g. Viggo breaking two toes kicking the Uruk-hai helmet in The Two Towers, the take kept). Her choices: facts from
+  web research with a source each (not Claude's memory); commentary tracks used when a film has one; its own track;
+  spoilers included by default, marked "(spoiler)", with leave-out and ask. Built: `research.py` (fact sheet
+  `facts-<video>.json`; commentary transcribed with faster-whisper via `analyze.transcribe(stream=)`; plan: Claude
+  Code with only `--tools/--allowed-tools WebSearch,WebFetch`, `dontAsk`; API: `web_search_20250305`, `SEARCH_USD`
+  per search in the ledger, `pause_turn` sent back), `--behind-the-scenes` in `make_ass.py`/`context_notes.py`
+  (notes `behind-the-scenes-<video>.json`, only facts from the sheet, each note carries `fact` and `spoiler`;
+  `<video>.behind-the-scenes.notes.ass`, no Plex copy; `--spoilers`, Settings `bts_spoilers`, the film's own `spoilers`,
+  question `bts.spoilers`; the look line records it), `--research-again`, `--commentary`, `embed.py` two tracks
+  (`TRACKS`, "Behind the Scenes" with `CONTEXT_NOTES_BTS_SHA1`), the app's "Which notes" choice and Settings.
+  A separate review found 8 defects, all fixed with a test each: the API allowance and credit check now use the web
+  search's own estimate (`Researching.cost_of`, `Sender.next_usd/left_usd`, `usage.guard(next_usd=)`) and are checked
+  before every `pause_turn` part (`Sender.before_continuing`); the estimate is an upper bound (input grows with the
+  square of the searches, `WEB_SEARCHES` 20, shrinking per part); cache tokens are priced in the ledger
+  (`claude_api.billed_input`); a timed-out web request isn't resent; a sheet is complete only when every request was
+  read and it has facts (`parse_facts` returns `(facts, readable)`); a stopped `--research-again` is picked up, and
+  notes from an older sheet are written again (`made` in the sheet, `facts_made` in the notes); "ask" asks once per
+  film and Yes to all takes its default; a note that doesn't say takes its fact's spoiler mark; the page's "Inside the
+  film" line for skipped films. Also fixed on the way (old race): a part is counted before its "N notes" line prints.
+  Tested: 527 tests (22 in `tests/test_behind_the_scenes.py`, 6 in `tests/test_vlc_extension.py`), ruff clean; the app
+  end to end in a headless browser against the fake Claude Code; a frame rendered with libass; the real Claude Code 2.1.314 in the cloud
+  workspace took the web flags and searched without asking (one Haiku request); the commentary track picked by
+  stream index checked on a synthetic two-track mkv (faster-whisper itself not run). First real run (2026-10-30,
+  Erin's yes, her plan via the cloud workspace's Claude Code; the VM's `claude` is a `-p`-only stub that can't be
+  used): Holy Grail, first 15 min (clip cut into `Movies/.context-notes-test`, deleted after). Look-up: 52 facts for the
+  whole film (26 from Wikipedia, 8 Mental Floss, 6 montypython.com; 0 spoilers; 21 medium), one Claude Code request of
+  2.4M tokens in (pages re-read as it works) and 40k out; the 5-hour session read 51% after it, 52% at the end. Notes:
+  13 placed in 15 min (spot-checked, accurate), the frames step 0 added and 1 retimed. Results are beside the film
+  (`...anoXmous_.behind-the-scenes.notes.ass`, working files in its `context-notes/`). Found: the film's subtitles
+  are `...anoXmous.en.srt` but the video is `...anoXmous_.mp4`, so `context_notes.py` doesn't find them (the notes
+  file names the real `.en.srt`, re-timed +0.30 s); continuing that film needs a fix or a rename.
+  None of the 44 films in `/Volumes/Media/Movies` has a commentary track (Holy Grail's and The Untouchables' second
+  English tracks are stereo copies of the soundtrack, 0.92 to 0.99 correlation), and there's no LOTR there.
+  File name (Erin, 2026-10-30): `<video>.behind-the-scenes.notes.ass` (`workfiles.BTS_ASS`), so the VLC extension
+  (0.3.0) finds it beside the context notes and loads both: context shown, Behind the Scenes as a second track (Sub
+  Track), each filtered by the same topic boxes (new: "How it was made", "Casting, cameos & easter eggs", "Goofs &
+  myths"); its fallback guess ignores Behind the Scenes files, and `scan_ass.py` skips them. Tested in Lua 5.1 to 5.4
+  with a VLC stand-in (`tests/test_vlc_extension.py`, needs `pip install lupa`, skipped without), not in VLC itself.
+  Tabled by Erin: `/notes` (chat route) for this track.
 - **Uncommitted, 2026-10-30: Windows shortcut and PATH** (the friend's run said "Claude Code isn't installed, or
   isn't where this can find it" after Erin signed him in; he starts the app from a desktop shortcut Erin made, which
   she thinks runs `python app.py`). A program started from a shortcut keeps Explorer's PATH from when it started.
@@ -96,7 +217,7 @@ It's the first thing to read when picking the work up on another computer or aft
   (delete kept originals, write the notes again), the run options for audience, effort and offline subtitles, the
   rebuild preview with a `.bak` kept on every rebuild and an optional re-embed, the new default audience ("Fluent in
   American English"), a probe cache, the background status check, and the docs and changelog to match.
-- **Tested:** the full suite passes (490 on 2026-10-29, `python3 -m pytest -q`), `ruff check .` is clean. The module split was
+- **Tested:** the full suite passes (549 on 2026-10-30, `python3 -m pytest -q`), `ruff check .` is clean. The module split was
   compared with the code before it, and the API route still is after step 2 (same output, requests and files; only
   the forwarded `--route api --api-fallback 0` and `--help` differ). The Settings "Claude" section and the run option
   were checked in a headless browser. The other dialogs added before step 1 haven't been looked at in a browser.
@@ -115,11 +236,13 @@ It's the first thing to read when picking the work up on another computer or aft
 - **Not in the GUI yet:** `--window`, `--align-model`, and `find_subs.py --transcribe`.
 - **Test media:** the temporary test folders on the NAS (`Movies/.embed-rewrite-test` and `TV Shows/.convert-test`)
   were deleted. Nothing in the library was changed.
-- **New computer:** Python 3 with `pytest`, `ruff`, `numpy` and `pillow` in a virtual environment. `ffmpeg` and
+- **New computer:** Python 3.14 (`.python-version`) and `python3 make_venv.py`, which makes `.venv` with `pytest`,
+  `ruff`, `numpy`, `pillow` and faster-whisper. `ffmpeg` and
   `ffprobe` are needed. MKVToolNix (`mkvpropedit`, `mkvmerge`) is installed here for checks; the code doesn't use it yet.
   The Media share is mounted
   at `/Volumes/Media`. The probe cache lives in `~/.config/context-notes/probe-cache/` and isn't in the repo.
-- **Next step:** Erin commits the uncommitted work and the friend runs `git pull`, double-clicks `make-shortcut.bat`,
+- **Next step:** Tonight's leftovers first: Erin presses Tidy again on Father Ted S1 (the stray `.bak` moves as `.bak2`); re-runs Breaking Bad S01E01 on her Mac (the code is checked; her Mac's numpy isn't: either it works, or the new message names the Python with the damaged numpy and the reinstall command); her friend, once he `git pull`s, installs Python 3.14 and runs `python make_venv.py`. Then: Erin watches Holy Grail's first 15 minutes in VLC (update the extension from the app's Settings) and
+  says what she thinks of the Behind the Scenes notes; then the subtitle-name question (above). Erin commits the uncommitted work and the friend runs `git pull`, double-clicks `make-shortcut.bat`,
   starts the app from the new shortcut and looks at Settings, Claude. If it still can't find Claude Code: his
   `claude --version` and `where.exe claude` in PowerShell, and "Where Claude Code is" in Settings. Then Erin's short
   run on her plan (`context_notes.py film.mkv --limit 5:00`), then step 3. Still waiting: her answer on the Plex copy.
@@ -130,6 +253,8 @@ It's the first thing to read when picking the work up on another computer or aft
    folders, then OpenSubtitles.com, then offers speech recognition.
 2. **Sync.** `analyze.py SRT --video V --frames none --shift auto` fixes a constant offset. `--align` re-times with
    faster-whisper when the offset drifts (different cut).
+   **Behind the Scenes** (`--behind-the-scenes`): after sync, `research.py` writes the fact sheet (commentary tracks,
+   then the web), and steps 3 to 5 work from it, on their own notes file and `.ass` (README, "Behind the Scenes").
 3. **Dialogue notes.** `make_ass.py --generate`, on one of two routes (`--route`, Settings: "Claude"):
    - The plan (the default since 2026-10-27): each part through Claude Code in the background (`claude_code.py`,
      `claude -p`), no API credits. When the plan can't go on (its limit, the 5-hour session at 90%, Claude Code
@@ -153,6 +278,11 @@ It's the first thing to read when picking the work up on another computer or aft
    stretches that are out.
 
 ## Decisions already made (with the evidence: project doc "benchmark-results.md")
+
+- **Behind the Scenes only from sourced facts** (Erin, 2026-10-30). Production trivia is where a model's memory is
+  weakest and trivia sites are full of myths, so the track's notes come only from the fact sheet: a note (or a frames
+  addition) that tells no fact id from it is dropped. Spoilers are a per-note mark decided at the build, never a
+  rewrite; real-world facts (cast, crew, an actor's later life) aren't spoilers. Context notes are never touched.
 
 - **Old-film rule (default, for every route).** A film more than 40 years old gets extra attention to words, people,
   phrases, places and the cultural mood of its period, where a generic viewer wouldn't get them. The year comes from
@@ -373,6 +503,10 @@ Open the module that holds the job, not the script that used to. README's second
   then `_save`. Each reply is read by `read_part` / `apply_reply`.
 - **Options:** `cli_common.py` defines the ones `context_notes.py` and `make_ass.py` share (model, effort, key file,
   `--limit`, the look) and passes them on (`claude_args`, `look_args`, `limit_args`). New Claude options go there.
+- **Behind the Scenes:** `research.py` (the look-up: `research()`, `Researching` for `send_parts`, `parse_facts`,
+  `fact_lines`); `generate_notes.BTS_SYSTEM`/`bts_system_prompt` and `refine_notes.BTS_SYSTEM`; the paths in
+  `workfiles` (`bts_notes_path`, `facts_path`, `bts_ass_path`, `PREFIXES`); `make_ass.spoiler_choice`;
+  `context_notes.track_args`/`wanted_spoilers`; `embed.TRACKS`.
 - **Files and text:** `fileio.py` (writing safely, backups, `config_dir`), `subtitles.py` (`.srt` and quote matching),
   `timecode.py` (times).
 - **Old names still work** (`make_ass.write_text_safely`, `generate_notes.call_api`, `refine_notes.hms`, ...) for older

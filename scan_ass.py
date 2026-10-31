@@ -148,7 +148,9 @@ def files_under(target):
     target = Path(target)
     if target.is_file():
         return [target]
-    return sorted(p for p in target.rglob("*.notes.ass") if not p.name.endswith(".bak"))
+    # the context notes only: the Behind the Scenes notes (.behind-the-scenes.notes.ass) have no Plex copy or notes-*.json
+    return sorted(p for p in target.rglob("*.notes.ass")
+                  if not p.name.endswith(".bak") and not p.name.endswith(workfiles.BTS_ASS))
 
 
 def main(argv=None):

@@ -12,6 +12,7 @@ edit code or notes, and you never run anything that calls the Claude API (`--gen
 `judge.py`).
 
 First run `pwd` in the project folder: that path is `$CN` below. Then work in the video's folder (`cd` there).
+On Windows, run every `python3` below as `python` (`python3` there is the Microsoft Store stub).
 
 1. **Subtitles:** `python3 "$CN/context_notes.py" "VIDEO" --status` shows which subtitle file and notes it found.
    If there are none, run `python3 "$CN/find_subs.py" "VIDEO" --lang LANG --offline` (online only if the
