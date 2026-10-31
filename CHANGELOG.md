@@ -7,6 +7,15 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- **Beta.** Context Notes has graduated from alpha: new notes open with "Beta context notes written by Claude ...",
+  and a film already done shows "Beta" (from "Alpha" or "Pre-alpha") the next time its `.ass` is rebuilt; its notes
+  file is left as it is, and nothing is rebuilt just for this. The README and the VLC extension say beta too.
+- **Windows: one double-click to update, set up and start.** `context-notes.bat` checks the `.venv` before every start
+  (`make_venv.py --ready`: the pinned Python, numpy and Pillow) and sets it up when it's missing, on another Python or
+  damaged, offering to install Python 3.14 with winget. New `update.bat` runs `git pull`, installs what the new
+  version needs, and starts the app. `make-shortcut.bat` now puts both on the desktop ("Context Notes" and "Update
+  Context Notes"). `make_venv.py` reinstalls numpy and Pillow when they're damaged (pip would call them installed),
+  and finds Python installed by python.org's install manager too.
 - `make_venv.py` and `.python-version`: one setup step that makes `.venv` with Python 3.14 and installs
   `requirements.txt`. Python 3.15 is out, but speech recognition can't be installed on it yet (onnxruntime, which
   faster-whisper needs, has no 3.15 build), and when one package fails pip installs none of them. It finds 3.14 itself

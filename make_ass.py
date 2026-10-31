@@ -454,14 +454,23 @@ def opacity_setting(spec=None):
     return value
 
 
-def alpha_intro(note):
-    """Older notes files open with "Pre-alpha context notes ...". That note is shown as "Alpha ..." now; the notes
-    file itself is left as it is."""
+STAGE = "Beta"                 # what the opening note calls these notes (Erin, 2026-10-30: graduated from alpha)
+OLD_STAGES = ("Pre-alpha", "Alpha")
+
+
+def stage_intro(note):
+    """Older notes files open with "Pre-alpha context notes ..." or "Alpha context notes ...". That note is shown as
+    "Beta ..." now, at build time; the notes file itself is left as it is. A film already built shows it the next
+    time its .ass is rebuilt (nothing is rebuilt just for this)."""
     text = note.get("text") if isinstance(note, dict) else None
-    if (isinstance(text, str) and text.startswith("Pre-alpha context notes")
-            and str(note.get("category", "")).lower() == "about these notes"):
-        return {**note, "text": "Alpha" + text[len("Pre-alpha"):]}
+    if isinstance(text, str) and str(note.get("category", "")).lower() == "about these notes":
+        for old in OLD_STAGES:
+            if text.startswith(old + " context notes"):
+                return {**note, "text": STAGE + text[len(old):]}
     return note
+
+
+alpha_intro = stage_intro      # the old name
 
 
 def build(srt_path, notes_path, out_path, offset=0.0, layout="split", display_srt=None, display_offset=0.0,
@@ -483,7 +492,7 @@ def build(srt_path, notes_path, out_path, offset=0.0, layout="split", display_sr
         if not shown:
             sys.exit(f"No subtitle cues found in {display_srt}")
     spec = json.loads(read_text(notes_path))
-    notes = [alpha_intro(n) for n in (spec["notes"] if isinstance(spec, dict) else spec)]
+    notes = [stage_intro(n) for n in (spec["notes"] if isinstance(spec, dict) else spec)]
     title = spec.get("title", Path(srt_path).stem) if isinstance(spec, dict) else Path(srt_path).stem
 
     if timing is None:

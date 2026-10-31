@@ -782,7 +782,7 @@ def notes_file(base, notes, cues, title, audience, model, srt_path, video_offset
         text = (f"Behind the Scenes notes by Claude ({by}), from facts it looked up, each with its source (kept in "
                 f"{Path(facts).name}). “(less sure)” means: check me." + covers)
     else:
-        text = (f"Alpha context notes written by Claude ({by}) for this viewer: {audience.rstrip('.')}. "
+        text = (f"Beta context notes written by Claude ({by}) for this viewer: {audience.rstrip('.')}. "
                 "Each note appears just after its line. “(less sure)” means: check me." + covers)
     intro = {"at": f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}",
              "category": "About these notes", "duration": 9, "kind": "speech", "text": text}

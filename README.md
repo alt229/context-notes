@@ -6,7 +6,7 @@ Notes appear as small boxed overlays while you watch, in VLC (or any player that
 
 ![A note about British slang popping up over a subtitled scene](docs/screenshot.png)
 
-> **Status: alpha.** It works end to end, but it is young, tested mostly on English-language British comedy, and the notes are written by an AI. Expect rough edges, and expect the occasional wrong note (see [Limitations](#limitations)).
+> **Status: beta.** It works end to end and has been used on dozens of films and episodes, but it is still young, tested mostly on English-language British comedy, and the notes are written by an AI. Expect rough edges, and expect the occasional wrong note (see [Limitations](#limitations)).
 
 ## Why
 
@@ -147,10 +147,16 @@ python make_venv.py                 # makes .venv with Python 3.14 (py -3.14) an
 python app.py
 ```
 
-- Already set up with another Python (3.15, say)? `python make_venv.py` keeps your `.venv` as `.venv-3.15` and makes
-  a new one with 3.14 (install 3.14 first: `winget install Python.Python.3.14`). Close the app before you run it.
-- To start the app without PowerShell, double-click `make-shortcut.bat` once: it puts a "Context Notes" shortcut on
-  your desktop (it runs `context-notes.bat`, which uses the `.venv` folder made above).
+- **The easy way, without PowerShell:** double-click `make-shortcut.bat` once. It puts two shortcuts on your desktop:
+  - **Context Notes** starts the app (`context-notes.bat`). Before every start it checks the `.venv` folder
+    (`make_venv.py --ready`): when it's missing, made with another Python (3.15, say) or damaged, it sets it up first
+    with Python 3.14, offering to install 3.14 with winget when it isn't there (answer Y). That takes a few minutes,
+    once. An old `.venv` is kept as `.venv-3.15`.
+  - **Update Context Notes** downloads the latest version (`update.bat`: `git pull`), installs anything new it needs,
+    and starts the app.
+- Already set up with another Python, and you'd rather type it? `python make_venv.py` keeps your `.venv` as
+  `.venv-3.15` and makes a new one with 3.14 (install 3.14 first: `winget install Python.Python.3.14`). Close the app
+  before you run it.
 - To write notes on your Claude plan, install Claude Code too: `irm https://claude.ai/install.ps1 | iex` in PowerShell
   (or `winget install Anthropic.ClaudeCode`), then sign in from the app's Settings, "Sign in to Claude Code…".
 - The commands in this README say `python3`, as on macOS and Linux. On Windows, type `python`.
@@ -711,7 +717,7 @@ after Claude's first reply.
 - **Notes are AI-written and can be wrong.** Medium- and low-confidence notes are marked "(less sure)". Treat them as a starting point, especially for historical claims, etymology and "who is this person" notes. Check anything you intend to rely on or teach.
 - **Tuned for English-language material.** Foreign-language support (`--film-language`) is new and has been tested only on synthetic clips; expect the prompts to need tuning on real French, German and Spanish films. Non-Latin-script subtitles are untested.
 - **Frame sampling is coarse.** A sight gag between sampled frames can be missed.
-- **Alpha.** Interfaces and the notes format may change between releases; see the [changelog](CHANGELOG.md).
+- **Beta.** Interfaces and the notes format may still change between releases; see the [changelog](CHANGELOG.md).
 
 ## Please don't commit media
 

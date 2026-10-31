@@ -5,13 +5,15 @@ install requirements.txt into it. Run it with any Python 3 you have:
 
     python3 make_venv.py           (Windows: python make_venv.py)
     python3 make_venv.py --check   only say which Python it would use and what .venv is now; change nothing
+    python3 make_venv.py --ready   exit 0 if .venv is ready to use (the pinned Python, numpy and Pillow), else 1
 
 It finds that version itself: Windows' py launcher (py -3.14), else python3.14 on the PATH, in Homebrew's folders or
 python.org's. It doesn't download Python: if the version isn't there, it says how to install it. A .venv made with
 another version is renamed to .venv-<that version> (kept, not deleted) after you say yes; a .venv on the right
 version just gets the requirements installed again. Speech recognition (faster-whisper) is installed as a step of
 its own, so a computer it has no build for (an Intel Mac on 3.14, say) still gets everything else.
-Standard library only. Created 2026-10-30.
+context-notes.bat (Windows) runs --ready before every start, and this with --yes when it isn't ready.
+Standard library only. Created 2026-10-30, modified 2026-10-30.
 """
 import argparse
 import os
@@ -73,6 +75,7 @@ def candidates(pin):
                 pass
         local = os.environ.get("LOCALAPPDATA", "")
         yield Path(local) / "Programs" / "Python" / f"Python{v.replace('.', '')}" / "python.exe"
+        yield Path(local) / "Python" / f"pythoncore-{v}-64" / "python.exe"        # python.org's install manager
         return
     found = shutil.which(f"python{v}")
     if found:
@@ -125,6 +128,21 @@ def run(cmd):
     return subprocess.run([str(c) for c in cmd]).returncode
 
 
+def not_ready(venv, pin):
+    """Why .venv can't be used as it is (a sentence), or None when it's on the pinned Python and has what the app
+    needs most (numpy and Pillow)."""
+    have = venv_version(venv) if venv.is_dir() else None
+    if not venv.is_dir() or not venv_python(venv).exists():
+        return "There's no .venv in this folder yet."
+    if have != tuple(pin):
+        return (f".venv was made with Python {pythonpin.dotted(have) if have else '(unknown)'}, not "
+                f"{pythonpin.dotted(pin)}.")
+    missing = [name for module, name in (("numpy", "numpy"), ("PIL", "Pillow")) if not can_import(venv_python(venv), module)]
+    if missing:
+        return f".venv is missing {' and '.join(missing)}, or {'they are' if len(missing) > 1 else 'it is'} damaged."
+    return None
+
+
 def spare_name(venv, version):
     """.venv-3.15, or .venv-3.15-2 ... if that's taken."""
     base = f"{venv.name}-{pythonpin.dotted(version) if version else 'old'}"
@@ -138,12 +156,18 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--check", action="store_true", help="only say which Python it would use; change nothing")
     ap.add_argument("--yes", action="store_true", help="rename a .venv on another version without asking")
+    ap.add_argument("--ready", action="store_true",
+                    help="only check: exit 0 if .venv is on the pinned Python and has numpy and Pillow, else 1")
     a = ap.parse_args(argv)
     venv = HERE / ".venv"
     pin = pythonpin.pinned()
     if not pin:
         sys.exit(f"{pythonpin.PIN_FILE.name} is missing or doesn't name a version, so there's nothing to match.")
     v = pythonpin.dotted(pin)
+    if a.ready:
+        why = not_ready(venv, pin)
+        print(why or f".venv is ready (Python {v}).")
+        return 1 if why else 0
     python = find_python(pin)
     have = venv_version(venv) if venv.is_dir() else None
     print(f"This project is set up for Python {v} ({pythonpin.PIN_FILE.name}).")
@@ -169,11 +193,13 @@ def main(argv=None):
             sys.exit(f"Couldn't rename .venv ({e.strerror or e}). If the app or a script is running from it, close it "
                      "and run this again.")
         print(f"Kept the old one as {spare.name} (delete it once the new one works).")
-    if not venv.is_dir() and run([python, "-m", "venv", venv]) != 0:
+    damaged = venv.is_dir() and bool(not_ready(venv, pin))     # the right Python, but numpy or Pillow broken: pip
+    if not venv.is_dir() and run([python, "-m", "venv", venv]) != 0:  # would call them installed, so reinstall them
         sys.exit("Making the environment failed (see above).")
     vpy = venv_python(venv)
     rest, speech = requirements()
-    if run([vpy, "-m", "pip", "install", "--upgrade", "pip"]) != 0 or run([vpy, "-m", "pip", "install", *rest]) != 0:
+    force = ["--force-reinstall"] if damaged else []
+    if run([vpy, "-m", "pip", "install", "--upgrade", "pip"]) != 0 or run([vpy, "-m", "pip", "install", *force, *rest]) != 0:
         sys.exit("Installing the requirements failed (see above). Run this again once it's sorted out.")
     if speech and (run([vpy, "-m", "pip", "install", *speech]) != 0 or not can_import(vpy, "faster_whisper")):
         print(f"\nSpeech recognition (faster-whisper) isn't installed: it has no build for Python {v} on this "

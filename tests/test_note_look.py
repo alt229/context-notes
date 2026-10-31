@@ -1,6 +1,6 @@
 """How the notes look on screen: the box behind them, the "; Look:" line that records how a .ass was built (so
 context_notes.py can rebuild an out-of-date one for free), seconds a word from the app, and the old "Pre-alpha"
-intro note shown as "Alpha"."""
+and "Alpha" intro notes shown as "Beta"."""
 import json
 import re
 
@@ -174,32 +174,33 @@ def test_cli_remembers_the_background_like_the_timing(tmp_path, home):
     assert r.returncode == 1 and '"note_background" in the notes file must be one of' in r.stderr
 
 
-# ---------------------------------------------------------------- Alpha
-def test_an_old_pre_alpha_intro_shows_as_alpha_and_the_file_is_left_alone(tmp_path):
+# ---------------------------------------------------------------- Beta
+@pytest.mark.parametrize("old", ["Pre-alpha", "Alpha"])
+def test_an_old_intro_shows_as_beta_and_the_file_is_left_alone(tmp_path, old):
     srt = make_srt(tmp_path / "s.srt", n=4)
     notes = tmp_path / "n.json"
     notes.write_text(json.dumps({"notes": [
         {"at": "00:00:01,000", "category": "About these notes", "duration": 9, "kind": "speech",
-         "text": "Pre-alpha context notes written by Claude (claude-opus-5-5) for this viewer: x. Each note..."},
-        {"match": "Line 2", "category": "Idiom", "text": "Pre-alpha context notes, said in another note"}]}),
+         "text": f"{old} context notes written by Claude (claude-opus-5-5) for this viewer: x. Each note..."},
+        {"match": "Line 2", "category": "Idiom", "text": f"{old} context notes, said in another note"}]}),
         encoding="utf-8")
     before = notes.read_bytes()
     out = tmp_path / "s.ass"
     make_ass.build(srt, notes, out, say=quiet)
     text = out.read_text(encoding="utf-8-sig")
-    assert r"\NAlpha context notes written by Claude (claude-opus-5-5)" in text
-    assert "Pre-alpha context notes written" not in text
-    assert "Pre-alpha context notes, said in another note" in text                    # only the intro note changes
+    assert r"\NBeta context notes written by Claude (claude-opus-5-5)" in text
+    assert f"{old} context notes written" not in text
+    assert f"{old} context notes, said in another note" in text                       # only the intro note changes
     assert notes.read_bytes() == before
 
 
-def test_new_notes_say_alpha(tmp_path, api, api_key_file):
+def test_new_notes_say_beta(tmp_path, api, api_key_file):
     import generate_notes as gn
     from test_generate_notes import notes_for_each_part
     api.responder = notes_for_each_part
     spec = gn.generate(make_srt(tmp_path / "ep.srt", n=30), tmp_path / "notes.json", title="T", assume_yes=True,
                        api_url=api.url)
-    assert spec["notes"][0]["text"].startswith("Alpha context notes written by Claude")
+    assert spec["notes"][0]["text"].startswith("Beta context notes written by Claude")
 
 
 # ---------------------------------------------------------------- context_notes.py: a free rebuild

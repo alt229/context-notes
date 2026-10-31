@@ -1,16 +1,20 @@
 @echo off
-rem Puts a "Context Notes" shortcut on your desktop that starts the app from this folder, the same way
-rem context-notes.bat does (this folder's virtual environment, then python app.py). Double-click this file once.
-rem Run it again if you move the folder. It replaces a "Context Notes" shortcut that's already on the desktop.
+rem Puts two shortcuts on your desktop: "Context Notes" starts the app (context-notes.bat: it sets the app up first
+rem when it needs to), and "Update Context Notes" downloads the latest version and starts it (update.bat).
+rem Double-click this file once. Run it again if you move the folder; it replaces shortcuts of those names.
+rem With --no-pause (dookie-update.bat) it doesn't wait for a key at the end. Created 2026-10-30.
 setlocal
 set "CN_HERE=%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; $here = $env:CN_HERE.TrimEnd('\'); $link = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Context Notes.lnk'; $s = (New-Object -ComObject WScript.Shell).CreateShortcut($link); $s.TargetPath = Join-Path $here 'context-notes.bat'; $s.WorkingDirectory = $here; $s.Description = 'Start Context Notes'; $s.Save(); Write-Host ('Made ' + $link)"
-if errorlevel 1 (
-    echo.
-    echo Couldn't make the shortcut. The lines above say why.
-    pause
-    exit /b 1
-)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; $here = $env:CN_HERE.TrimEnd('\'); $desk = [Environment]::GetFolderPath('Desktop'); $sh = New-Object -ComObject WScript.Shell; foreach ($pair in @(@('Context Notes', 'context-notes.bat', 'Start Context Notes'), @('Update Context Notes', 'update.bat', 'Download the latest Context Notes and start it'))) { $link = Join-Path $desk ($pair[0] + '.lnk'); $s = $sh.CreateShortcut($link); $s.TargetPath = Join-Path $here $pair[1]; $s.WorkingDirectory = $here; $s.Description = $pair[2]; $s.Save(); Write-Host ('Made ' + $link) }"
+if errorlevel 1 goto :failed
 echo.
-echo Done. Double-click "Context Notes" on your desktop to start the app.
+echo Done. Double-click "Context Notes" on your desktop to start the app, and "Update Context Notes" to get the
+echo latest version.
+if not "%~1"=="--no-pause" pause
+exit /b 0
+
+:failed
+echo.
+echo Couldn't make the shortcuts. The lines above say why.
 pause
+exit /b 1

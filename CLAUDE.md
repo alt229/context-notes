@@ -8,6 +8,14 @@ know because the film is old or foreign.
 
 Read `README.md` for the full command reference. This file holds what we've learned and the rules.
 
+## Reminders (check at the start of every session in this project)
+
+- **`dookie-update.bat` is temporary** (added 2026-10-30: a one-click first update for Dookie, Erin's Windows beta
+  tester). In the first session on or after the 1st of each month, remind Erin it's still here, then set the month
+  below. If `git log -1 --format=%cs -- dookie-update.bat` is more than 2 months old (or it was never committed), ask
+  instead, with the question prompt: "Remove dookie-update.bat?" with "Remove it (Recommended)" first. Removing it:
+  delete the file, its entry in `tests/test_pythonpin.py`'s launcher check, and this reminder. Last reminded: 2026-10.
+
 ## Where things left off
 
 Last updated 2026-10-30. Replace this section when a session changes the project (see rule 10).
@@ -108,6 +116,18 @@ It's the first thing to read when picking the work up on another computer or aft
     `test_a_rebuild_of_a_film_an_earlier_version_started_keeps_its_backup_beside_it`, the rebuild-backup test
     rewritten (it had asserted the old place), `test_a_damaged_package_says_so_instead_of_a_traceback`.
     The page's wording isn't checked in a browser. Docs: CHANGELOG "Fixed", README (rebuild backups).
+- **Uncommitted, 2026-10-30 (late): Windows one-click launchers** (Erin: "ultra easy" for the friend, who likely
+  installed Python 3.15). `context-notes.bat` runs `make_venv.py --ready` (new: the pinned Python + numpy + Pillow)
+  before every start; when not ready it runs `make_venv.py --yes` with python.org's 3.14 (installer or install manager
+  path) or `py -3.14`, offering `winget install Python.Python.3.14 --scope user` (Y/N) or opening python.org.
+  New `update.bat` (runs from a %TEMP% copy, since `git pull` may replace it): `git pull --ff-only`, tops up `.venv`,
+  then calls `context-notes.bat`. `make-shortcut.bat` makes both desktop shortcuts. `make_venv.py` force-reinstalls
+  when numpy/Pillow are damaged on the right Python. Tested: `tests/test_pythonpin.py` (`--ready`; a static check of
+  the three .bat files: CRLF, ASCII, labels, named files), full suite, ruff. **Not run on Windows**: the friend's first
+  double-click is the test. His first update: Erin sends him `dookie-update.bat` (temporary; see Reminders), which
+  he drops in the folder and double-clicks: it removes its own untracked copy (else `git pull` would refuse), pulls,
+  makes the shortcuts (`make-shortcut.bat --no-pause`) and starts the app. Also 2026-10-30: alpha -> Beta (see
+  Decisions). Both tested only by the suite (all pass) and the static .bat check.
 - **Uncommitted, 2026-10-30: damaged-subtitle check, on by default** (S05E08's built-in English track shows "Î½"
   for every "v": OCR read v as Greek ν, then UTF-8 was read as Latin-1, plus OCR's stray spaces; the rename only
   changed titles, so it came that way). `subcheck.py` finds `mangled`, `lookalike`, `broken` and `l-for-I` (English
@@ -241,7 +261,7 @@ It's the first thing to read when picking the work up on another computer or aft
   `ffprobe` are needed. MKVToolNix (`mkvpropedit`, `mkvmerge`) is installed here for checks; the code doesn't use it yet.
   The Media share is mounted
   at `/Volumes/Media`. The probe cache lives in `~/.config/context-notes/probe-cache/` and isn't in the repo.
-- **Next step:** Tonight's leftovers first: Erin presses Tidy again on Father Ted S1 (the stray `.bak` moves as `.bak2`); re-runs Breaking Bad S01E01 on her Mac (the code is checked; her Mac's numpy isn't: either it works, or the new message names the Python with the damaged numpy and the reinstall command); her friend, once he `git pull`s, installs Python 3.14 and runs `python make_venv.py`. Then: Erin watches Holy Grail's first 15 minutes in VLC (update the extension from the app's Settings) and
+- **Next step:** Tonight's leftovers first: Erin presses Tidy again on Father Ted S1 (the stray `.bak` moves as `.bak2`); Breaking Bad S01E01 is done on her Mac (2026-10-30, in the `alt229-dev` venv, Python 3.14.8, numpy 2.5.3: full sync check in sync, 771 lines); Homebrew's bare `python3` is 3.15 with a damaged numpy, so run with the venv loaded (or reinstall numpy for 3.15); her friend, once he `git pull`s, installs Python 3.14 and runs `python make_venv.py`. Then: Erin watches Holy Grail's first 15 minutes in VLC (update the extension from the app's Settings) and
   says what she thinks of the Behind the Scenes notes; then the subtitle-name question (above). Erin commits the uncommitted work and the friend runs `git pull`, double-clicks `make-shortcut.bat`,
   starts the app from the new shortcut and looks at Settings, Claude. If it still can't find Claude Code: his
   `claude --version` and `where.exe claude` in PowerShell, and "Where Claude Code is" in Settings. Then Erin's short
@@ -324,8 +344,10 @@ It's the first thing to read when picking the work up on another computer or aft
   darker bands, so see-through uses `\ybord0` (the lines' boxes just touch) and a one-colour label line ("(less
   sure)" in the label colour). Checked by rendering with libass (ffmpeg's `ass` filter) on bright, busy and dark
   frames.
-- **"Alpha"** (Erin, 2026-10-24). The intro note of older notes files still says "Pre-alpha"; `make_ass.alpha_intro`
-  shows it as "Alpha" at build time and leaves the file alone.
+- **"Beta"** (Erin, 2026-10-30: "it's graduated"; before that "Alpha", 2026-10-24). New notes open with "Beta context
+  notes ..."; an older intro saying "Pre-alpha" or "Alpha" is shown as "Beta" at build time (`make_ass.stage_intro`,
+  `STAGE`; `alpha_intro` is the old name) and the notes file is left alone. Erin chose not to bump `BUILD` for it: old
+  films say Beta on their next rebuild. README, CONTRIBUTING and the VLC extension's header say beta.
 - **Credit and session meters** (Erin, 2026-10-25: "show the balance of credits as we process movies", for the API
   and for the session that resets every few hours, in the GUI too, and the week's totals).
   - **API credit is an estimate.** Anthropic has no endpoint for the prepaid balance (the Admin API is for

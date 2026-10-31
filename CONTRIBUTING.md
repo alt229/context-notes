@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for looking. This is a small alpha project; issues and pull requests are welcome.
+Thanks for looking. This is a small beta project; issues and pull requests are welcome.
 
 ## Setup
 

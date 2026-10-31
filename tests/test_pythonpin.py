@@ -99,3 +99,40 @@ def test_the_python_found_is_the_pinned_version():
     here = make_venv.find_python(sys.version_info[:2])                 # this one counts
     assert here is not None and make_venv.version_of(here) == tuple(sys.version_info[:2])
     assert make_venv.find_python((3, 99)) is None
+
+
+def test_ready_says_whether_the_launcher_can_start_the_app(tmp_path, monkeypatch, capsys):
+    """context-notes.bat starts the app only when --ready says yes; else it sets .venv up first."""
+    fake_setup(monkeypatch, tmp_path, can_speak=True)
+    monkeypatch.setattr(make_venv, "find_python", lambda pin: (_ for _ in ()).throw(AssertionError("only a check")))
+    venv = tmp_path / ".venv"
+    assert make_venv.main(["--ready"]) == 1 and "no .venv" in capsys.readouterr().out
+    make_venv.venv_python(venv).parent.mkdir(parents=True)
+    make_venv.venv_python(venv).write_text("")
+    (venv / "pyvenv.cfg").write_text("version = 3.1.0\n")
+    assert make_venv.main(["--ready"]) == 1 and "made with Python 3.1, not" in capsys.readouterr().out
+    (venv / "pyvenv.cfg").write_text(f"version = {pythonpin.dotted(pythonpin.pinned())}.2\n")
+    monkeypatch.setattr(make_venv, "can_import", lambda python, module: module != "numpy")    # a damaged numpy
+    assert make_venv.main(["--ready"]) == 1 and "missing numpy, or it is damaged" in capsys.readouterr().out
+    monkeypatch.setattr(make_venv, "can_import", lambda python, module: True)
+    assert make_venv.main(["--ready"]) == 0 and "is ready" in capsys.readouterr().out
+    assert sorted(p.name for p in tmp_path.iterdir()) == [".venv"]                       # a check changes nothing
+
+
+def test_the_windows_launchers_hang_together():
+    """context-notes.bat, update.bat and make-shortcut.bat can't run here, so check what can be: Windows line endings,
+    plain ASCII, every goto/call has its label, and the files they name exist."""
+    import re
+    here = Path(make_venv.__file__).parent
+    for name in ("context-notes.bat", "update.bat", "make-shortcut.bat", "dookie-update.bat"):
+        raw = (here / name).read_bytes()
+        assert raw.count(b"\n") == raw.count(b"\r\n") and raw.isascii(), name
+        text = raw.decode("ascii")
+        labels = set(re.findall(r"(?im)^:(\w+)\s*$", text))
+        for target in re.findall(r"(?i)\b(?:goto|call)\s+:(\w+)", text):
+            assert target.lower() == "eof" or target in labels, f"{name}: no :{target}"
+        for named in re.findall(r"(?<![%~\w.-])[a-z][\w.-]*\.(?:py|bat)\b", text):     # not %~2context-notes.bat
+            if named not in ("activate.bat", "context-notes-update.bat", "dookie-update.bat"):   # .venv, temp copies
+                assert (here / named).exists(), f"{name}: {named}"
+    assert "make_venv.py --ready" in (here / "context-notes.bat").read_text()
+    assert "git pull --ff-only" in (here / "update.bat").read_text()
