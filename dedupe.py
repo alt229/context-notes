@@ -94,7 +94,10 @@ def lead(text):
 # "History: ...", "Pun: ..." label the kind of note, not its subject.
 GENERIC_LEADS = {"history", "historical context", "note", "pun", "wordplay", "reference", "cultural reference", "context",
                  "trivia", "idiom", "slang", "translation", "register", "dialect", "joke", "visual gag", "prop",
-                 "background", "staging", "costume", "delivery", "fun fact", "aside", "nb", "fact", "detail"}
+                 "background", "staging", "costume", "delivery", "fun fact", "aside", "nb", "fact", "detail",
+                 # storytelling devices: "Dramatic irony: ..." three times in an episode is three different scenes
+                 "irony", "dramatic irony", "foreshadowing", "callback", "theme", "symbolism", "motif", "subtext",
+                 "metaphor", "visual metaphor", "double meaning", "parallel", "echo", "in-joke", "easter egg"}
 
 
 def subjects(note):

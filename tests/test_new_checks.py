@@ -47,6 +47,17 @@ def test_mentioning_the_same_thing_with_a_new_point_is_kept():
     assert dups == []
 
 
+def test_a_storytelling_label_is_not_a_subject():
+    # Breaking Bad S01E04: three "Dramatic irony:" notes about three different scenes were left out as repeats.
+    notes = [n("Dramatic irony: we know who cooked the 99.1% meth. It's Walt, Hank's mild chemistry-teacher "
+               "brother-in-law."),
+             n("Dramatic irony: Emilio didn't skip town. He died in the RV in the pilot, and Jesse dissolved his body."),
+             n("Dramatic irony: Jesse is indignant at being treated like a criminal by his parents, days after "
+               "cooking and selling meth.")]
+    dups, _ = dedupe.find_duplicates(notes)
+    assert dups == []
+
+
 def test_apostrophes_are_not_quotes():
     assert dedupe.quoted("Gainsbourg's song 'Le Poinçonneur des Lilas' isn't d'Enghien") == {"le poinconneur des lilas"}
 

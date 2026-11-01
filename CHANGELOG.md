@@ -277,6 +277,9 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- The repeat check took a storytelling label at the start of a note ("Dramatic irony: ...", "Foreshadowing: ...")
+  for its subject, so every later note opening the same way was left out as a repeat (3 notes about different
+  scenes in Breaking Bad S1). Those labels are now ignored, like "History:" and "Pun:" already were.
 - A rebuild (the app's Rebuild, or `context_notes.py` on a finished film) kept the old `.notes.ass` as a `.bak`
   beside the video, where the app then called it a leftover from an earlier version and offered Tidy. Tidy couldn't
   move it when the frames step had already kept a `.bak` of the same name in the film's context-notes folder ("is

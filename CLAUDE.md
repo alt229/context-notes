@@ -261,7 +261,21 @@ It's the first thing to read when picking the work up on another computer or aft
   `ffprobe` are needed. MKVToolNix (`mkvpropedit`, `mkvmerge`) is installed here for checks; the code doesn't use it yet.
   The Media share is mounted
   at `/Volumes/Media`. The probe cache lives in `~/.config/context-notes/probe-cache/` and isn't in the repo.
-- **Next step:** Tonight's leftovers first: Erin presses Tidy again on Father Ted S1 (the stray `.bak` moves as `.bak2`); Breaking Bad S01E01 is done on her Mac (2026-10-30, in the `alt229-dev` venv, Python 3.14.8, numpy 2.5.3: full sync check in sync, 771 lines); Homebrew's bare `python3` is 3.15 with a damaged numpy, so run with the venv loaded (or reinstall numpy for 3.15); her friend, once he `git pull`s, installs Python 3.14 and runs `python make_venv.py`. Then: Erin watches Holy Grail's first 15 minutes in VLC (update the extension from the app's Settings) and
+- **Breaking Bad S1 E02-E07 notes (2026-10-30, late, `/notes` on the plan; media only, no code changed):** all six
+  written (44, 49, 57, 58, 64, 65 notes), built and alignment-checked, `--year 2008` (Erin). Run with
+  `~/.alt229/bin/alt229-dev/bin/python3` (bare `python3` is 3.15). Sync: no drift; E03-E06 built from the
+  `--shift auto` `.aligned.srt` (+0.26 to +0.40 s), E02/E07 unshifted. E02 had 0:31:38-0:32:27 2.7 s late:
+  `align_check --fix`, rebuilt from its `.aligned.srt` (Erin's yes). E04/E07 rebuilt with `--keep-duplicates`
+  (Erin): `dedupe.py` treated the opening "Dramatic irony:" as the topic and dropped 3 notes about different scenes.
+  Fixed (uncommitted): storytelling labels added to `dedupe.GENERIC_LEADS`, test
+  `test_a_storytelling_label_is_not_a_subject` (fails without it), full suite and ruff pass, CHANGELOG "Fixed".
+  Frame pass done on all six (2026-10-31, `--route plan --api-fallback 0 --yes`: `--yes-to-all` alone stops at
+  "confirm sending" when not in a terminal; with fallback 0, `--yes` stops rather than use API credits,
+  `sending.Sender.leave_plan`). $0 API. Now 97, 108, 96, 105, 119, 112 notes; every alignment check after it in
+  step. The whole season (notes + frames) took the 5-hour session from about 7% to 61%. Season 1 is finished. To look into later: `--shift auto` overshoot (below). Plex copy: Erin will say what Plex shows. After the shift, E03-E05 read 0.28-0.34 s late (in
+  tolerance), so `--shift auto` may overshoot a little. The session meter stayed at 7% all run (stale reading), so
+  no parts were measured. Frame pass not run on any of the six.
+- **Next step:** Erin watches Breaking Bad S1 E02-E07 and says what she thinks of the notes. Tonight's leftovers first: Erin presses Tidy again on Father Ted S1 (the stray `.bak` moves as `.bak2`); Breaking Bad S01E01 is done on her Mac (2026-10-30, in the `alt229-dev` venv, Python 3.14.8, numpy 2.5.3: full sync check in sync, 771 lines); Homebrew's bare `python3` is 3.15 with a damaged numpy, so run with the venv loaded (or reinstall numpy for 3.15); her friend, once he `git pull`s, installs Python 3.14 and runs `python make_venv.py`. Then: Erin watches Holy Grail's first 15 minutes in VLC (update the extension from the app's Settings) and
   says what she thinks of the Behind the Scenes notes; then the subtitle-name question (above). Erin commits the uncommitted work and the friend runs `git pull`, double-clicks `make-shortcut.bat`,
   starts the app from the new shortcut and looks at Settings, Claude. If it still can't find Claude Code: his
   `claude --version` and `where.exe claude` in PowerShell, and "Where Claude Code is" in Settings. Then Erin's short
