@@ -14,13 +14,26 @@ Read `README.md` for the full command reference. This file holds what we've lear
   tester). In the first session on or after the 1st of each month, remind Erin it's still here, then set the month
   below. If `git log -1 --format=%cs -- dookie-update.bat` is more than 2 months old (or it was never committed), ask
   instead, with the question prompt: "Remove dookie-update.bat?" with "Remove it (Recommended)" first. Removing it:
-  delete the file, its entry in `tests/test_pythonpin.py`'s launcher check, and this reminder. Last reminded: 2026-10.
+  delete the file, its entry in `tests/test_pythonpin.py`'s launcher check, and this reminder. Last reminded: 2026-11.
 
 ## Where things left off
 
-Last updated 2026-10-30. Replace this section when a session changes the project (see rule 10).
+Last updated 2026-11-02. Replace this section when a session changes the project (see rule 10).
 It's the first thing to read when picking the work up on another computer or after losing the connection.
 
+- **Uncommitted, 2026-11-02: GitHub's tests green again, and a Windows installer.** The `tests` workflow had
+  failed on every push since late October (Linux passed; `newer-python` fails by design and doesn't count). Windows
+  (21): tests read UTF-8 files in cp1252 (now `read_text(encoding="utf-8")` everywhere in `tests/`); the VLC install
+  test wrote to the runner's real `%APPDATA%` (conftest now sets `APPDATA`); a Windows-only folder message; real
+  bugs: `.claude/statusline.py` now prints UTF-8, `prompts.interactive` no longer counts NUL as a terminal
+  (`_terminal`, GetConsoleMode), and `app.py`/`analyze.py`/`claude_api.py`/`find_subs.py` read their files as UTF-8.
+  macOS (1): `app.own_names` called `getfqdn` per request, >30 s on GitHub's Macs: now `lru_cache`d, and the hosted
+  test stubs it. New `install.ps1` (Erin: "easy install script"): `irm .../install.ps1 | iex` installs Git, Python
+  (from `.python-version`), ffmpeg, VLC and Claude Code (both after a yes) with winget, clones to
+  `%USERPROFILE%\context-notes`, runs `make-shortcut.bat --no-pause`, starts `context-notes.bat`. README Windows
+  section, CHANGELOG, `test_the_windows_installer_hangs_together`. Tested on the Mac: full suite, ruff, and
+  `install.ps1` parses in pwsh. **Not run on Windows yet:** Erin is setting up a Windows machine to run
+  `python -m pytest -q` and the installer; GitHub's run after she publishes is the other check.
 - **The repo:** this folder is part of Erin's larger repo in `~/.alt229/`; its `.git` isn't visible from the connected
   folder. Leave changes in place and Erin commits them herself (2026-10-30); friends get them with `git pull`.
   Erin publishes with her shell alias `context-notes_publish`, which updates both repos (the `~/.alt229` one and

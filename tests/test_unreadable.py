@@ -60,9 +60,9 @@ def test_an_unreadable_reply_is_recorded_and_only_its_lines_are_sent_again(tmp_p
     assert r.returncode == 0, r.stdout + r.stderr
     assert len(api.calls) >= 3
     lo, hi = lines_sent(api.calls[1])
-    spec = json.loads((tmp_path / "notes-ep.json").read_text())
+    spec = json.loads((tmp_path / "notes-ep.json").read_text(encoding="utf-8"))
     assert spec["unreadable"] == [{"lines": [lo, hi], "reply": "notes-ep.part2.failed.txt"}]
-    assert "can't produce" in (tmp_path / "notes-ep.part2.failed.txt").read_text()
+    assert "can't produce" in (tmp_path / "notes-ep.part2.failed.txt").read_text(encoding="utf-8")
     assert "The next run offers to send just those again" in r.stdout
     cues = make_ass.parse_srt(srt)
     placed = gn.note_lines(cues, spec["notes"][1:])
@@ -80,7 +80,7 @@ def test_an_unreadable_reply_is_recorded_and_only_its_lines_are_sent_again(tmp_p
     topics = asked.split("Topics already covered by earlier notes (don't repeat):\n")[1].split("\n\n")[0]
     assert len(topics.splitlines()) == len(earlier) > 0                                  # nothing from later on
     assert all(f'"{n["match"]}"' in topics for n in earlier if "match" in n)
-    spec = json.loads((tmp_path / "notes-ep.json").read_text())
+    spec = json.loads((tmp_path / "notes-ep.json").read_text(encoding="utf-8"))
     assert "unreadable" not in spec and (tmp_path / "notes-ep.json.bak").exists()
     lines = [x for x in gn.note_lines(cues, spec["notes"][1:]) if x is not None]
     assert lines == sorted(lines) and any(lo <= x <= hi for x in lines)                # in film order
@@ -95,7 +95,7 @@ def test_unreadable_again_stays_recorded_and_is_never_overwritten(tmp_path, api,
     r = run_cli("make_ass.py", srt, "--generate", "--extend", "--yes", "--api-url", api.url, cwd=tmp_path,
                 home_dir=home)
     assert r.returncode == 0, r.stdout + r.stderr
-    spec = json.loads((tmp_path / "notes-ep.json").read_text())
+    spec = json.loads((tmp_path / "notes-ep.json").read_text(encoding="utf-8"))
     assert [u["reply"] for u in spec["unreadable"]] == ["notes-ep.part2.failed2.txt"]
     assert (tmp_path / "notes-ep.part2.failed.txt").exists()
 
@@ -138,7 +138,7 @@ def unreadable_first_stretch(project, api, home):
     r = run_cli("make_ass.py", *REFINE, "--yes", "--api-url", api.url, cwd=project, home_dir=home)
     assert r.returncode == 0, r.stdout + r.stderr
     first = stretch_start(api.calls[0])
-    refined = json.loads((project / "notes-synced.json").read_text())["refined"]
+    refined = json.loads((project / "notes-synced.json").read_text(encoding="utf-8"))["refined"]
     assert [(u["reply"], abs(u["from"] - first) < 0.01) for u in refined["unreadable"]] == [
         ("notes-synced.refine1.failed.txt", True)]
     assert "stopped_after" not in refined and props(project) == 1                  # only the second part's prop
@@ -157,7 +157,7 @@ def test_refine_sends_an_unreadable_stretch_again_on_its_own(project, api, api_k
     assert asked(evs) == ["refine.unreadable", "refine.send"]
     assert estimate(evs)["requests"] == 1 and len(api.calls) == 1
     assert abs(stretch_start(api.calls[0]) - before["unreadable"][0]["from"]) < 0.01      # just that stretch
-    refined = json.loads((project / "notes-synced.json").read_text())["refined"]
+    refined = json.loads((project / "notes-synced.json").read_text(encoding="utf-8"))["refined"]
     assert refined == {k: v for k, v in before.items() if k != "unreadable"}               # the record stands
     assert props(project) == 2
     r = run_cli("context_notes.py", "synced.mp4", "--status", cwd=project, home_dir=home)
@@ -170,4 +170,4 @@ def test_refine_unreadable_declined_sends_nothing(project, api, api_key_file, ho
     code, out, evs = drive([*REFINE, "--api-url", api.url], {"refine.unreadable": "n"}, project, home,
                            script="make_ass.py")
     assert code == 0 and not api.calls and "Nothing was sent" in out, out
-    assert json.loads((project / "notes-synced.json").read_text())["refined"] == before
+    assert json.loads((project / "notes-synced.json").read_text(encoding="utf-8"))["refined"] == before

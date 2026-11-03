@@ -264,7 +264,7 @@ def os_load():
         say(f"  ! Not using {path}: other users can read it. Lock it down:  chmod 600 \"{path}\"")
         return None
     try:
-        cfg = json.loads(path.read_text())
+        cfg = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         say(f"  ! {path} isn't valid JSON; run  python3 find_subs.py --set-opensubtitles  again.")
         return None

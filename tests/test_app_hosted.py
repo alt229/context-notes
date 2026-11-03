@@ -44,11 +44,14 @@ def test_the_host_header_is_an_address_or_this_computers_name():
 @pytest.fixture
 def hosted(api, home, monkeypatch):
     """A --hosted server, and a switch that makes its requests look like they come from another device."""
+    monkeypatch.setattr(app.socket, "getfqdn", lambda *_: "test-host.example")   # no DNS: on CI's Macs it timed out
+    app.own_names.cache_clear()
     s = app.make_server(0, api.url, "hosted", (), "k" * 32)
     threading.Thread(target=s.serve_forever, daemon=True).start()
     yield s
     s.shutdown()
     s.server_close()
+    app.own_names.cache_clear()                     # the next test looks the real names up again
 
 
 def ask(server, path, body=None, host=None, query_key=False):

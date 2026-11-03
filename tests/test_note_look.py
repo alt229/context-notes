@@ -60,7 +60,7 @@ def test_see_through_boxes_never_overlap(film):
     """A see-through box that overlaps another shows a darker band: the lines' boxes only touch (\\ybord0), and the
     label line is one colour, so it gets one box."""
     srt, notes, out = film
-    spec = json.loads(notes.read_text())
+    spec = json.loads(notes.read_text(encoding="utf-8"))
     spec["notes"][0]["confidence"] = "medium"
     notes.write_text(json.dumps(spec))
     make_ass.build(srt, notes, out, say=quiet)
@@ -97,9 +97,9 @@ def test_cli_opacity_is_remembered_and_checked(tmp_path, home):
         return run_cli("make_ass.py", srt, notes, "--video", "Ep.mp4", *extra, cwd=tmp_path, home_dir=home)
 
     assert build("--note-opacity", "30%").returncode == 0
-    assert "note_opacity" not in json.loads(notes.read_text())                        # the default isn't written in
+    assert "note_opacity" not in json.loads(notes.read_text(encoding="utf-8"))  # the default isn't written in
     assert build("--note-opacity", "55").returncode == 0 and opacity(ass) == 55
-    assert json.loads(notes.read_text())["note_opacity"] == 55
+    assert json.loads(notes.read_text(encoding="utf-8"))["note_opacity"] == 55
     assert build().returncode == 0 and opacity(ass) == 55                            # kept on later rebuilds
     for bad in ("101", "-1", "half"):
         r = build("--note-opacity", bad)
@@ -138,7 +138,7 @@ def test_no_box_outlines_the_text_and_leaves_the_dialogue_alone(film):
 
 def test_the_look_line_and_a_title_that_looks_like_a_placeholder(film):
     srt, notes, out = film
-    spec = json.loads(notes.read_text())
+    spec = json.loads(notes.read_text(encoding="utf-8"))
     notes.write_text(json.dumps({**spec, "title": "Odd {fs} {border} title", "timing": {"wpm": 120},
                                  "note_background": "none"}))
     make_ass.build(srt, notes, out, say=quiet)
@@ -158,15 +158,15 @@ def test_cli_remembers_the_background_like_the_timing(tmp_path, home):
         return run_cli("make_ass.py", srt, notes, "--video", "Ep.mp4", *extra, cwd=tmp_path, home_dir=home)
 
     assert build().returncode == 0
-    assert "note_background" not in json.loads(notes.read_text())                    # the default isn't written in
+    assert "note_background" not in json.loads(notes.read_text(encoding="utf-8"))  # the default isn't written in
     assert look(ass)[1] == "see-through" and look(tmp_path / "Ep.en.ass")[1] == "see-through"
     r = build("--note-background", "none", "--reading-speed", "100")
     assert r.returncode == 0, r.stderr
-    spec = json.loads(notes.read_text())
+    spec = json.loads(notes.read_text(encoding="utf-8"))
     assert spec["note_background"] == "none" and spec["timing"] == {"wpm": 100}
     assert build().returncode == 0 and look(ass) == (make_ass.BUILD, "none", 100.0)   # a later rebuild keeps both
     assert build("--note-background", "see-through").returncode == 0
-    assert json.loads(notes.read_text())["note_background"] == "see-through"           # and switching back works
+    assert json.loads(notes.read_text(encoding="utf-8"))["note_background"] == "see-through"           # and switching back works
     r = build("--note-background", "pink")
     assert r.returncode == 2 and "invalid choice" in r.stderr
     notes.write_text(json.dumps({"note_background": "pink", "notes": [{"cue": 1, "text": "hi"}]}))
@@ -248,7 +248,7 @@ def test_a_new_look_for_a_finished_video_only_rebuilds_it(tmp_path, home):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "--reading-speed 120 --note-background none" in r.stdout
     assert look(ass) == (make_ass.BUILD, "none", 120.0)
-    spec = json.loads(notes.read_text())
+    spec = json.loads(notes.read_text(encoding="utf-8"))
     assert spec["timing"] == {"wpm": 120} and spec["note_background"] == "none"
     for again in ((), ("--reading-speed", "120"), ("--note-background", "none")):      # remembered: nothing to do
         assert "Already done" in wrapper(video, *again, home=home, cwd=tmp_path).stdout

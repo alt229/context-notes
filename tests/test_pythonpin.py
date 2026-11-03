@@ -134,5 +134,20 @@ def test_the_windows_launchers_hang_together():
         for named in re.findall(r"(?<![%~\w.-])[a-z][\w.-]*\.(?:py|bat)\b", text):     # not %~2context-notes.bat
             if named not in ("activate.bat", "context-notes-update.bat", "dookie-update.bat"):   # .venv, temp copies
                 assert (here / named).exists(), f"{name}: {named}"
-    assert "make_venv.py --ready" in (here / "context-notes.bat").read_text()
-    assert "git pull --ff-only" in (here / "update.bat").read_text()
+    assert "make_venv.py --ready" in (here / "context-notes.bat").read_text(encoding="utf-8")
+    assert "git pull --ff-only" in (here / "update.bat").read_text(encoding="utf-8")
+
+
+def test_the_windows_installer_hangs_together():
+    """install.ps1 can't run here: plain ASCII (Windows PowerShell 5.1 reads a file without a BOM in the local code
+    page), Windows line endings, the files it calls exist, and it reads the pin rather than naming a version."""
+    import re
+    here = Path(make_venv.__file__).parent
+    raw = (here / "install.ps1").read_bytes()
+    assert raw.isascii() and raw.count(b"\n") == raw.count(b"\r\n")
+    text = raw.decode("ascii")
+    for named in ("make-shortcut.bat", "context-notes.bat", ".python-version"):
+        assert named in text and (here / named).exists(), named
+    assert "--no-pause" in (here / "make-shortcut.bat").read_text(encoding="utf-8")
+    assert not re.search(r"Python\.Python\.3\.\d", text)                      # the version comes from .python-version
+    assert "raw.githubusercontent.com/alt229/context-notes/master/install.ps1" in text

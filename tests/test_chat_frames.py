@@ -62,15 +62,16 @@ def test_the_chat_route_gives_the_same_notes_as_the_api(tmp_path, clip, api, api
     r = run_cli("make_ass.py", "ep.srt", "notes-ep.json", "--refine", "--video", "ep.mp4", "--yes", "--api-url",
                 api.url, cwd=a, home_dir=home)
     assert r.returncode == 0, r.stdout + r.stderr
-    by_api = json.loads((a / "notes-ep.json").read_text())
+    by_api = json.loads((a / "notes-ep.json").read_text(encoding="utf-8"))
 
     c = film(tmp_path / "chat", clip)
     r = chat(c, home, "show-frames", "ep.mp4", "ep.srt", "--part", "0")
     assert r.returncode == 0, r.stdout + r.stderr
     n = parts_of(r.stdout)
     assert n == len(api.calls) and "Next: part 1" in r.stdout and "Mode: full" in r.stdout
-    start = json.loads((replies(c) / "start.json").read_text())
-    assert (c / start["backup"]).read_text() == (c / "notes-ep.json").read_text()       # kept as it was
+    start = json.loads((replies(c) / "start.json").read_text(encoding="utf-8"))
+    backup = (c / start["backup"]).read_text(encoding="utf-8")
+    assert backup == (c / "notes-ep.json").read_text(encoding="utf-8")                       # kept as it was
     for k in range(1, n + 1):
         r = chat(c, home, "show-frames", "ep.mp4", "ep.srt", "--part", str(k))
         assert r.returncode == 0, r.stdout + r.stderr
@@ -82,7 +83,7 @@ def test_the_chat_route_gives_the_same_notes_as_the_api(tmp_path, clip, api, api
         (replies(c) / f"frames-{k}.txt").write_text(answer(r.stdout))
     r = chat(c, home, "collect-frames", "ep.mp4", "ep.srt")
     assert r.returncode == 0, r.stdout + r.stderr
-    by_chat = json.loads((c / "notes-ep.json").read_text())
+    by_chat = json.loads((c / "notes-ep.json").read_text(encoding="utf-8"))
     assert by_chat["notes"] == by_api["notes"] and by_chat["video_offset"] == by_api["video_offset"]
     assert "stopped_after" not in by_chat["refined"] and by_chat["refined"]["model"] == "Opus in Claude Code (/refine)"
     assert (c / "notes-ep.refine-report.txt").exists()
@@ -99,7 +100,7 @@ def test_part_way_it_records_where_it_stopped_and_picks_up(tmp_path, clip, home)
     (replies(c) / "frames-1.txt").write_text(answer(shown))
     r = chat(c, home, "collect-frames", "ep.mp4", "ep.srt")
     assert r.returncode == 0 and f"for 1 of {n} part(s)" in r.stdout
-    spec = json.loads((c / "notes-ep.json").read_text())
+    spec = json.loads((c / "notes-ep.json").read_text(encoding="utf-8"))
     assert spec["refined"]["stopped_after"]["part"] == 1 and "REVISED" in [x["text"] for x in spec["notes"]]
     r = run_cli("context_notes.py", "ep.mp4", "--status", cwd=c, home_dir=home)
     assert "stopped" in r.stdout.lower()
@@ -109,7 +110,7 @@ def test_part_way_it_records_where_it_stopped_and_picks_up(tmp_path, clip, home)
         shown = chat(c, home, "show-frames", "ep.mp4", "ep.srt", "--part", str(k)).stdout
         (replies(c) / f"frames-{k}.txt").write_text(answer(shown))
     r = chat(c, home, "collect-frames", "ep.mp4", "ep.srt")
-    spec = json.loads((c / "notes-ep.json").read_text())
+    spec = json.loads((c / "notes-ep.json").read_text(encoding="utf-8"))
     assert r.returncode == 0 and "stopped_after" not in spec["refined"]
     # applied to the notes as they were when /refine began, once: part 1's change isn't made a second time
     assert sum(1 for x in spec["notes"] if x.get("original_text") == "Intro") == 1
@@ -125,7 +126,7 @@ def test_an_unreadable_reply_is_recorded_and_the_rest_applied(tmp_path, clip, ho
         (replies(c) / f"frames-{k}.txt").write_text(answer(shown))
     r = chat(c, home, "collect-frames", "ep.mp4", "ep.srt")
     assert r.returncode == 0 and "couldn't read frame-replies/frames-1.txt" in r.stdout
-    spec = json.loads((c / "notes-ep.json").read_text())
+    spec = json.loads((c / "notes-ep.json").read_text(encoding="utf-8"))
     assert spec["refined"]["unreadable"][0]["reply"] == "frame-replies/frames-1.txt"
 
 

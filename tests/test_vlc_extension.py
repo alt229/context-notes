@@ -61,7 +61,7 @@ def play(tmp_path, files, video="Film.mkv", saved=None, reload=False):
     if reload:
         g.load_for_current(True)
     status = said[-1].replace("[Context Notes] ", "", 1)                    # as the extension's window shows it
-    return [(Path(p).name, sel, Path(p).read_text() if Path(p).exists() else None) for p, sel in added], status
+    return [(Path(p).name, sel, Path(p).read_text(encoding="utf-8") if Path(p).exists() else None) for p, sel in added], status
 
 
 def test_both_sets_of_notes_load_and_the_context_notes_show_first(tmp_path):

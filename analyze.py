@@ -292,7 +292,7 @@ def soundtrack_db(video, astream, folder, limit=None, duration=None):
     st = video.stat()
     key = {"size": st.st_size, "mtime": int(st.st_mtime), "limit": limit}
     try:
-        if cache.exists() and json.loads(meta.read_text()) == key:
+        if cache.exists() and json.loads(meta.read_text(encoding="utf-8")) == key:
             return np.load(cache)
     except (OSError, ValueError, EOFError):
         pass

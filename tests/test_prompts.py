@@ -159,7 +159,7 @@ def test_opensubtitles_login_from_a_gui(gui, home, monkeypatch, capsys):
     gui("OSKEY\nerin\npass word\n")
     assert find_subs.os_set_login()
     path = home / ".config" / "context-notes" / "opensubtitles.json"
-    assert json.loads(path.read_text()) == {"api_key": "OSKEY", "username": "erin", "password": "pass word"}
+    assert json.loads(path.read_text(encoding="utf-8")) == {"api_key": "OSKEY", "username": "erin", "password": "pass word"}
     assert_private(path)
     out = capsys.readouterr().out
     assert [(e["id"], e["hidden"]) for e in events(out)] == [
@@ -172,7 +172,7 @@ def test_cli_set_api_key_from_a_gui(tmp_path, home):
     r = run_cli("make_ass.py", "--set-api-key", cwd=tmp_path, home_dir=home, stdin="sk-ant-gui-5678\n", env_extra=GUI)
     assert r.returncode == 0, r.stderr
     path = home / ".config" / "context-notes" / "api-key"
-    assert path.read_text() == "sk-ant-gui-5678\n"
+    assert path.read_text(encoding="utf-8") == "sk-ant-gui-5678\n"
     assert_private(path)
     assert [e["id"] for e in events(r.stdout)] == ["api-key"]
     assert "sk-ant-gui" not in r.stdout + r.stderr and "5678" in r.stdout
@@ -219,10 +219,10 @@ def test_cli_estimate_only_leaves_existing_notes_alone(tmp_path, api, home):
     srt = make_srt(tmp_path / "ep.srt")
     notes = tmp_path / "notes-ep.json"
     notes.write_text('{"notes": [{"match": "Line 2 of", "text": "Mine"}]}')
-    before = notes.read_text()
+    before = notes.read_text(encoding="utf-8")
     r = run_cli("make_ass.py", srt, "--generate", "--estimate-only", cwd=tmp_path, home_dir=home)   # no --force needed
     assert r.returncode == 0, r.stdout + r.stderr
-    assert notes.read_text() == before and not list(tmp_path.glob("*.bak")) and not (tmp_path / "ep.ass").exists()
+    assert notes.read_text(encoding="utf-8") == before and not list(tmp_path.glob("*.bak")) and not (tmp_path / "ep.ass").exists()
 
 
 def test_cli_estimate_only_needs_one_step(tmp_path, home):
@@ -263,7 +263,7 @@ def project(tmp_path, clip):
 
 @needs_ffmpeg
 def test_cli_refine_estimate_only(project, api, home):
-    before = (project / "notes-synced.json").read_text()
+    before = (project / "notes-synced.json").read_text(encoding="utf-8")
     r = run_cli("make_ass.py", "synced.srt", "notes-synced.json", "--refine", "--video", "synced.mp4", "--estimate-only",
                 "--api-url", api.url, cwd=project, home_dir=home, env_extra=GUI)
     assert r.returncode == 0, r.stdout + r.stderr
@@ -272,7 +272,7 @@ def test_cli_refine_estimate_only(project, api, home):
     assert "Estimate only: nothing was sent." in r.stdout and not api.calls
     finished = {e["task"] for e in events(r.stdout) if e["type"] == "progress" and e["total"] and e["done"] == e["total"]}
     assert finished == {"soundtrack", "frames"}                  # the video analysis reports how far it has got
-    assert (project / "notes-synced.json").read_text() == before
+    assert (project / "notes-synced.json").read_text(encoding="utf-8") == before
     assert not (project / "synced.notes.ass").exists() and not list(project.glob("*.bak"))
 
 
@@ -327,4 +327,4 @@ def test_a_gui_can_drive_the_whole_wrapper(tmp_path, clip, api, api_key_file, ho
     finished = {e["task"] for e in evs if e["type"] == "progress" and e["total"] and e["done"] == e["total"]}
     assert {"soundtrack", "generate", "frames", "refine"} <= finished
     assert (tmp_path / "ep.notes.ass").exists() and "Ready: play ep.mp4" in out
-    assert json.loads((tmp_path / "context-notes" / "ep.mp4" / "notes-ep.json").read_text())["refined"]
+    assert json.loads((tmp_path / "context-notes" / "ep.mp4" / "notes-ep.json").read_text(encoding="utf-8"))["refined"]

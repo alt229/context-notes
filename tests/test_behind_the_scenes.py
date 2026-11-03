@@ -80,7 +80,7 @@ def test_research_on_the_plan_searches_the_web_and_nothing_else(tmp_path, clip, 
     video = a_film(tmp_path, clip)
     r = run_cli("research.py", video, "--yes", cwd=tmp_path, home_dir=home)
     assert r.returncode == 0, r.stdout + r.stderr
-    sheet = json.loads(workfiles.facts_path(video).read_text())
+    sheet = json.loads(workfiles.facts_path(video).read_text(encoding="utf-8"))
     assert sheet["complete"] and [f["id"] for f in sheet["facts"]] == [1, 2, 3]
     assert sheet["title"] == "The Two Towers (2002)" and sheet["year"] == 2002 and sheet["video"] == video.name
     assert [f["spoiler"] for f in sheet["facts"]] == [False, True, False]
@@ -104,7 +104,7 @@ def test_research_with_an_old_claude_code_stops_rather_than_ask_for_permission(t
     monkeypatch.setenv("FAKE_CLAUDE_HELP", "no-allowed-tools")
     r = run_cli("research.py", video, "--yes", cwd=tmp_path, home_dir=home)
     assert r.returncode != 0 and "too old to be allowed to search the web" in r.stdout + r.stderr
-    assert not json.loads(workfiles.facts_path(video).read_text())["complete"]
+    assert not json.loads(workfiles.facts_path(video).read_text(encoding="utf-8"))["complete"]
 
 
 def web_replies(n, body, headers):
@@ -131,10 +131,10 @@ def test_research_with_api_credits_uses_the_web_search_tool_and_counts_the_searc
                                "max_uses": claude_api.WEB_SEARCHES}]
     assert second["messages"][-1]["role"] == "assistant"                         # the paused turn, sent back
     assert "up to about $" in r.stdout and "up to 20 searches" in r.stdout
-    ledger = [json.loads(line) for line in (usage_dir / "usage.jsonl").read_text().splitlines()]
+    ledger = [json.loads(line) for line in (usage_dir / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [round(e["usd"], 4) for e in ledger] == [round(20000 * 4e-6 + 100 * 20e-6 + 0.03, 4),
                                                     round(30000 * 4e-6 + 900 * 20e-6 + 0.02, 4)]
-    assert json.loads(workfiles.facts_path(video).read_text())["facts"][0]["fact"] == "Real scream."
+    assert json.loads(workfiles.facts_path(video).read_text(encoding="utf-8"))["facts"][0]["fact"] == "Real scream."
 
 
 @needs_ffmpeg
@@ -149,7 +149,7 @@ def test_a_commentary_track_is_used_first_and_timed(tmp_path, clip, home, monkey
     monkeypatch.setattr(research, "transcribe_commentary", lambda v, t, m=None: [
         {"s": 12.0, "e": 15.0, "t": "We shot this in one take."}, {"s": 40.0, "e": 44.0, "t": "That's my mum."}])
     research.research(mkv, model="claude-opus-5-5", route="plan", assume_yes=True)
-    sheet = json.loads(workfiles.facts_path(mkv).read_text())
+    sheet = json.loads(workfiles.facts_path(mkv).read_text(encoding="utf-8"))
     assert sheet["commentary"] == [{"track": 2, "title": "Commentary by the director"}]
     first = sheet["facts"][:2]
     assert [f["when"] for f in first] == ["0:00:12", "0:00:40"]
@@ -175,7 +175,7 @@ def test_notes_are_written_only_from_the_sheet_and_built_into_their_own_file(tmp
                 cwd=tmp_path, home_dir=home)
     assert r.returncode == 0, r.stdout + r.stderr
     notes_path = workfiles.bts_notes_path(video)
-    spec = json.loads(notes_path.read_text())
+    spec = json.loads(notes_path.read_text(encoding="utf-8"))
     assert notes_path.name == "behind-the-scenes-The Two Towers (2002).json" and spec["track"] == gn.BTS
     told = [n for n in spec["notes"] if n["category"] != "About these notes"]
     assert sorted(n["fact"] for n in told) == [1, 2]                     # once each; #99 isn't on the sheet: left out
@@ -195,7 +195,7 @@ def test_notes_are_written_only_from_the_sheet_and_built_into_their_own_file(tmp
     text = ass.read_text(encoding="utf-8-sig")
     assert "Left out 1 note(s) marked as spoilers" in r.stdout
     assert "spoilers left out" in text and "Fact 2 told here" not in text and "Fact 1 told here" in text
-    assert json.loads(notes_path.read_text())["spoilers"] == "leave-out"
+    assert json.loads(notes_path.read_text(encoding="utf-8"))["spoilers"] == "leave-out"
     run_cli("make_ass.py", srt, "--behind-the-scenes", "--video", video, cwd=tmp_path, home_dir=home)
     assert "spoilers left out" in ass.read_text(encoding="utf-8-sig")        # the film's own choice is kept
 
@@ -210,7 +210,7 @@ def test_spoilers_ask_once_and_keep_the_answer(tmp_path, monkeypatch):
                         or "n")
     a = type("A", (), {"spoilers": None, "yes": False})()
     assert make_ass.spoiler_choice(a, spec, notes) == "leave-out" and asked == [("bts.spoilers", "y")]
-    assert json.loads(notes.read_text())["spoilers"] == "leave-out"
+    assert json.loads(notes.read_text(encoding="utf-8"))["spoilers"] == "leave-out"
     assert make_ass.spoiler_choice(a, spec, notes) == "leave-out" and len(asked) == 1     # kept: not asked again
     monkeypatch.setattr(settings, "spoilers_default", lambda: "include")
     fresh = {"notes": [{"text": "a", "spoiler": True}]}
@@ -227,7 +227,7 @@ def test_the_frames_step_places_facts_with_no_dialogue_and_adds_nothing_else(tmp
     r = run_cli("make_ass.py", srt, "--refine", "--behind-the-scenes", "--video", video, "--yes", "--assume-synced",
                 cwd=tmp_path, home_dir=home)
     assert r.returncode == 0, r.stdout + r.stderr
-    notes = json.loads(workfiles.bts_notes_path(video).read_text())["notes"]
+    notes = json.loads(workfiles.bts_notes_path(video).read_text(encoding="utf-8"))["notes"]
     placed = [n for n in notes if n.get("fact") == 3]
     assert len(placed) == 1 and placed[0]["kind"] == "visual"                   # once, in the first stretch only
     assert not any(n["text"] == "Not a fact from the sheet" for n in notes)
@@ -344,14 +344,14 @@ def test_an_unreadable_look_up_isnt_finished_and_is_sent_again(tmp_path, clip, h
     video = a_film(tmp_path, clip)
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "garbage")
     r = run_cli("research.py", video, "--yes", cwd=tmp_path, home_dir=home)
-    sheet = json.loads(workfiles.facts_path(video).read_text())
+    sheet = json.loads(workfiles.facts_path(video).read_text(encoding="utf-8"))
     assert r.returncode != 0 and not sheet["complete"] and sheet["done"] == [] and "couldn't read the reply" in r.stdout
     assert cn.facts_state(workfiles.facts_path(video))[0] == "partial"
     monkeypatch.delenv("FAKE_CLAUDE_MODE")
     calls = len(claude_calls(fake_claude))
     r = run_cli("research.py", video, "--yes", cwd=tmp_path, home_dir=home)
     assert r.returncode == 0 and len(claude_calls(fake_claude)) == calls + 1
-    assert json.loads(workfiles.facts_path(video).read_text())["complete"]
+    assert json.loads(workfiles.facts_path(video).read_text(encoding="utf-8"))["complete"]
 
 
 @needs_ffmpeg
@@ -380,7 +380,7 @@ def test_a_paused_search_stops_at_the_allowance(tmp_path, clip, api, api_key_fil
     assert r.returncode != 0 and "would go past the $4.50 allowed" in r.stdout + r.stderr, r.stdout + r.stderr
     assert len(api.calls) == 1                                                   # not sent on again
     assert api.calls[0]["body"]["tools"][0]["max_uses"] == claude_api.WEB_SEARCHES
-    ledger = [json.loads(line) for line in (usage_dir / "usage.jsonl").read_text().splitlines()]
+    ledger = [json.loads(line) for line in (usage_dir / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
     assert len(ledger) == 1 and ledger[0]["usd"] > 4
 
 
@@ -389,7 +389,7 @@ def test_cache_tokens_are_counted_in_what_a_request_cost(usage_dir):
                                                            "cache_creation_input_tokens": 10000,
                                                            "cache_read_input_tokens": 100000,
                                                            "server_tool_use": {"web_search_requests": 3}}})
-    entry = json.loads((usage_dir / "usage.jsonl").read_text().splitlines()[-1])
+    entry = json.loads((usage_dir / "usage.jsonl").read_text(encoding="utf-8").splitlines()[-1])
     want = (100 + 1.25 * 10000 + 0.1 * 100000) * 4e-6 + 1000 * 20e-6 + 0.03
     assert abs(entry["usd"] - want) < 1e-6
 
@@ -399,8 +399,8 @@ def test_a_stopped_research_again_is_picked_up_and_the_notes_follow(tmp_path, cl
     video = a_film(tmp_path, clip)
     args = (video, "--behind-the-scenes", "--yes", "--no-refine")
     assert run_cli("context_notes.py", *args, cwd=tmp_path, home_dir=home).returncode == 0
-    first = json.loads(workfiles.facts_path(video).read_text())["made"]
-    assert json.loads(workfiles.bts_notes_path(video).read_text())["facts_made"] == first
+    first = json.loads(workfiles.facts_path(video).read_text(encoding="utf-8"))["made"]
+    assert json.loads(workfiles.bts_notes_path(video).read_text(encoding="utf-8"))["facts_made"] == first
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "fail")
     r = run_cli("context_notes.py", *args, "--research-again", cwd=tmp_path, home_dir=home)
     assert "Stopped at the look-up step" in r.stdout
@@ -409,9 +409,9 @@ def test_a_stopped_research_again_is_picked_up_and_the_notes_follow(tmp_path, cl
     monkeypatch.delenv("FAKE_CLAUDE_MODE")
     r = run_cli("context_notes.py", *args, cwd=tmp_path, home_dir=home)
     assert r.returncode == 0, r.stdout + r.stderr
-    made = json.loads(workfiles.facts_path(video).read_text())["made"]
+    made = json.loads(workfiles.facts_path(video).read_text(encoding="utf-8"))["made"]
     assert made != first and "written again from this one" in r.stdout
-    assert json.loads(workfiles.bts_notes_path(video).read_text())["facts_made"] == made
+    assert json.loads(workfiles.bts_notes_path(video).read_text(encoding="utf-8"))["facts_made"] == made
     r = run_cli("context_notes.py", *args, cwd=tmp_path, home_dir=home)
     assert "Already done" in r.stdout
 

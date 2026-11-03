@@ -102,7 +102,7 @@ def test_generate_on_the_plan(tmp_path, home, fake_claude):
         assert "--safe-mode" in argv and "--no-session-persistence" in argv
         assert "You write short" in c["system"] and "Lines to annotate" in c["prompt"]
         assert c["env"] == [] and c["cwd"] == str(tmp_path.resolve())  # no key, no GUI protocol; the notes' folder
-    spec = json.loads((tmp_path / "notes-ep.json").read_text())
+    spec = json.loads((tmp_path / "notes-ep.json").read_text(encoding="utf-8"))
     assert any(n["text"].startswith("Note ") for n in spec["notes"])
     evs = events_in(r.stdout)
     est = next(e for e in evs if e["type"] == "estimate")
@@ -125,7 +125,7 @@ def test_the_plan_limit_part_way_stops_unattended_and_keeps_the_parts(tmp_path, 
     r = plan_generate(tmp_path)
     assert r.returncode == 1 and "usage limit is reached" in r.stderr and "--api-fallback" in r.stderr
     assert "You've hit your session limit" in r.stderr
-    kept = json.loads((tmp_path / "notes-ep.partial.json").read_text())
+    kept = json.loads((tmp_path / "notes-ep.partial.json").read_text(encoding="utf-8"))
     assert kept["notes"] and not api.calls                         # part 1 kept; no API credit used
     # With an allowance, the rerun picks up on the plan, meets the limit again, and finishes with API credits.
     api.responder = notes_for_each_part
@@ -143,7 +143,7 @@ def test_the_allowance_stops_the_run_when_it_is_used_up(tmp_path, home, monkeypa
     r = plan_generate(tmp_path, "--route", "plan", "--api-fallback", "0.02", "--api-url", api.url)
     assert r.returncode == 1 and len(api.calls) == 1
     assert "would go past the $0.02 allowed for it" in r.stderr
-    assert json.loads((tmp_path / "notes-ep.partial.json").read_text())["notes"]
+    assert json.loads((tmp_path / "notes-ep.partial.json").read_text(encoding="utf-8"))["notes"]
 
 
 def test_signed_out_at_the_start_unattended_sends_nothing(tmp_path, home, monkeypatch, fake_claude, api):
@@ -174,7 +174,7 @@ def test_each_request_brings_back_the_plans_windows(tmp_path, home, monkeypatch,
     assert len(claude_calls(fake_claude)) == 1
     s = usage.session()
     assert s["five_hour"]["percent"] == 95 and s["seven_day"]["percent"] == 30
-    assert json.loads((tmp_path / "notes-ep.partial.json").read_text())["notes"]    # the first part is kept
+    assert json.loads((tmp_path / "notes-ep.partial.json").read_text(encoding="utf-8"))["notes"]    # the first part is kept
 
 
 def test_a_refusal_in_the_plans_windows_is_the_limit(tmp_path, home, monkeypatch):
@@ -256,7 +256,7 @@ def test_refine_on_the_plan_opens_the_contact_sheets_itself(tmp_path, home, fake
         assert argv[argv.index("--tools") + 1] == "Read" and "--add-dir" in argv
         assert argv[argv.index("--permission-mode") + 1] == "dontAsk"
         assert c["pictures"] and c["opened"] == c["pictures"]    # every sheet was inside a folder it may read
-    spec = json.loads((tmp_path / "notes-synced.json").read_text())
+    spec = json.loads((tmp_path / "notes-synced.json").read_text(encoding="utf-8"))
     assert "REVISED" in [n["text"] for n in spec["notes"]] and spec["refined"]["contact_sheets"] > 0
 
 
@@ -299,7 +299,7 @@ def test_signing_in_from_the_page(server, monkeypatch, tmp_path):  # noqa: F811
     assert call(server, "/api/claude/login", {})[1]["ok"]                        # once more, with the right code
     _, r = call(server, "/api/claude/login/code", {"code": "  abc#def  "})
     assert r["waiting"] is False and r["ok"] and r["claude"]["signed_in"] and r["claude"]["problem"] is None
-    assert (tmp_path / "signed-in").read_text() == "abc#def"
+    assert (tmp_path / "signed-in").read_text(encoding="utf-8") == "abc#def"
     assert call(server, "/api/info")[1]["claude"]["signed_in"]
     _, r = call(server, "/api/claude/logout", {})
     assert r["ok"] and not r["claude"]["signed_in"] and not (tmp_path / "signed-in").exists()

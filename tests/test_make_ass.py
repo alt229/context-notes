@@ -97,7 +97,7 @@ def test_cli_creates_blank_notes_then_refuses_to_build_from_it(tmp_path, home):
     r = run_cli("make_ass.py", srt, cwd=tmp_path, home_dir=home)
     assert r.returncode == 0 and "created a blank one" in r.stdout
     blank = tmp_path / "notes-ep.json"
-    assert json.loads(blank.read_text())["notes"] == []
+    assert json.loads(blank.read_text(encoding="utf-8"))["notes"] == []
     r = run_cli("make_ass.py", srt, cwd=tmp_path, home_dir=home)
     assert r.returncode == 1 and "no notes in it yet" in r.stderr
 
@@ -122,7 +122,7 @@ def test_cli_writes_a_plex_copy_but_not_over_someone_elses_file(tmp_path, home):
     theirs = tmp_path / "Other.en.ass"
     theirs.write_text("[Script Info]\nTitle: real subtitles\n")
     r = run_cli("make_ass.py", srt, notes, "--video", "Other.mp4", cwd=tmp_path, home_dir=home)
-    assert "isn't one of ours" in r.stdout and theirs.read_text().endswith("real subtitles\n")
+    assert "isn't one of ours" in r.stdout and theirs.read_text(encoding="utf-8").endswith("real subtitles\n")
     run_cli("make_ass.py", srt, notes, "--video", "Third.mp4", "--no-plex-copy", cwd=tmp_path, home_dir=home)
     assert not (tmp_path / "Third.en.ass").exists()
 
@@ -133,7 +133,7 @@ def test_cli_generate_refuses_to_overwrite_existing_notes(tmp_path, home):
     notes.write_text(json.dumps({"notes": [{"cue": 1, "text": "mine"}]}))
     r = run_cli("make_ass.py", srt, notes, "--generate", "--yes", cwd=tmp_path, home_dir=home)
     assert r.returncode == 1 and "already has 1 notes" in r.stderr
-    assert json.loads(notes.read_text())["notes"][0]["text"] == "mine"
+    assert json.loads(notes.read_text(encoding="utf-8"))["notes"][0]["text"] == "mine"
 
 
 def test_cli_refine_needs_video(tmp_path, home):
@@ -154,6 +154,6 @@ def test_build_can_show_other_subtitles_while_placing_notes_on_the_main_ones(tmp
     ass = (tmp_path / "f.notes.ass").read_text(encoding="utf-8-sig")
     assert "Dialogue: 0,0:00:03.20," in ass and "English line 1" in ass and "Réplique" not in ass
     assert ",speech/note/high," in ass and "0:00:12.20" in ass          # note: end of French line 2 (11.5) + 0.5 + 0.2
-    assert json.loads(notes.read_text())["display_subtitles"] == "f.en.srt"
+    assert json.loads(notes.read_text(encoding="utf-8"))["display_subtitles"] == "f.en.srt"
     r = run_cli("make_ass.py", fr, notes, "--video", "f.mp4", cwd=tmp_path, home_dir=home)    # remembered
     assert "English line 1" in (tmp_path / "f.notes.ass").read_text(encoding="utf-8-sig")

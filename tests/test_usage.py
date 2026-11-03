@@ -227,7 +227,7 @@ def test_a_whole_cli_run_shows_the_cost_and_sends_events(tmp_path, api, api_key_
     assert any(ln.startswith("Tracked credit: about $10.00 left") for ln in lines)
     for event_line in (ln for ln in lines if ln.startswith(prompts.PREFIX)):       # an event always starts its own line
         assert event_line.endswith("}")
-    assert "sk-ant" not in (usage_dir / "usage.jsonl").read_text()
+    assert "sk-ant" not in (usage_dir / "usage.jsonl").read_text(encoding="utf-8")
 
 
 def test_a_cli_run_with_no_balance_set_prints_no_tracked_credit_line(tmp_path, api, api_key_file, home):
@@ -462,7 +462,7 @@ def test_a_run_that_runs_short_part_way_stops_and_keeps_what_it_wrote(tmp_path, 
     with pytest.raises(SystemExit) as e:
         gn.generate(srt, tmp_path / "n.json", assume_yes=True, api_url=api.url)
     assert "Stopped before the next request" in str(e.value) and len(api.calls) == 1
-    assert json.loads((tmp_path / "n.partial.json").read_text())["notes"]            # part 1's notes are kept
+    assert json.loads((tmp_path / "n.partial.json").read_text(encoding="utf-8"))["notes"]            # part 1's notes are kept
     assert not (tmp_path / "n.json").exists()
     usage.add_credit(5)                                                              # topped up: the next run picks up
     gn.generate(srt, tmp_path / "n.json", assume_yes=True, api_url=api.url)

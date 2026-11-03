@@ -7,6 +7,9 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- **Windows: install from nothing with one line.** `install.ps1` (`irm .../install.ps1 | iex` in PowerShell) installs
+  what's missing with winget (Git, the pinned Python, ffmpeg; VLC and Claude Code after a yes), downloads Context Notes
+  to `%USERPROFILE%\context-notes` (or updates it), makes the desktop shortcuts and starts the app.
 - **Beta.** Context Notes has graduated from alpha: new notes open with "Beta context notes written by Claude ...",
   and a film already done shows "Beta" (from "Alpha" or "Pre-alpha") the next time its `.ass` is rebuilt; its notes
   file is left as it is, and nothing is rebuilt just for this. The README and the VLC extension say beta too.
@@ -277,6 +280,13 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- **Windows and the GitHub tests** (they had failed on every push since late October). Windows: the status bar
+  (`.claude/statusline.py`) printed its "·" in the local code page instead of UTF-8; a script started with no input
+  (NUL) took Windows' word that it was a terminal, so `tidy.py` moved files without `--yes` (`prompts.interactive`
+  now asks for a real console); the app read its probe-cache key and config files in the local code page (now
+  UTF-8, so a film named with an accent keeps its cache). macOS: the hosted app looked its own DNS name up on every
+  request with a name in it (now once a run), which took over 30 s on GitHub's Macs. The tests read files as UTF-8,
+  keep the VLC extension's install in the test's own `APPDATA`, and accept Windows' network-drive hint.
 - The repeat check took a storytelling label at the start of a note ("Dramatic irony: ...", "Foreshadowing: ...")
   for its subject, so every later note opening the same way was left out as a repeat (3 notes about different
   scenes in Breaking Bad S1). Those labels are now ignored, like "History:" and "Pun:" already were.

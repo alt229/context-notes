@@ -33,6 +33,7 @@ import hmac
 import ipaddress
 import json
 import os
+import functools
 import platform
 import re
 import secrets
@@ -293,7 +294,7 @@ def key_info():
         try:
             if os.name == "posix" and path.stat().st_mode & 0o077:
                 info["problem"] = f"Other people on this computer can read the key file. Fix it with:  chmod 600 \"{path}\""
-            key = path.read_text().strip()
+            key = path.read_text(encoding="utf-8").strip()
         except OSError as e:
             info["problem"] = f"Can't read the key file: {e.strerror or e}"
             return info
@@ -309,7 +310,7 @@ def key_info():
 def opensubtitles_info():
     path = find_subs.os_config_path()
     try:
-        cfg = json.loads(path.read_text()) if path.exists() else None
+        cfg = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
     except (OSError, ValueError):
         cfg = None
     return {"saved": bool(cfg), "username": (cfg or {}).get("username")}
@@ -1104,7 +1105,9 @@ class Access:
         return self.address(name) is not None or name.lower() in own_names()
 
 
+@functools.lru_cache(maxsize=1)
 def own_names():
+    """Looked up once: getfqdn() asks DNS, which can take half a minute where reverse lookups go unanswered."""
     names = {"localhost"}
     for n in (socket.gethostname(), socket.getfqdn()):
         n = (n or "").lower().rstrip(".")

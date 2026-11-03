@@ -83,7 +83,7 @@ def test_set_key_writes_a_private_file(home, monkeypatch):
     monkeypatch.setattr(getpass, "getpass", lambda prompt: "  sk-ant-abc123456  ")
     gn.set_key()
     path = home / ".config" / "context-notes" / "api-key"
-    assert path.read_text() == "sk-ant-abc123456\n"
+    assert path.read_text(encoding="utf-8") == "sk-ant-abc123456\n"
     assert_private(path)
     assert_private(path.parent, 0o700)
     assert gn.load_key() == "sk-ant-abc123456"
@@ -167,7 +167,7 @@ def test_generate_writes_a_notes_file_and_reports_problems(tmp_path, api, api_ke
     out = tmp_path / "notes.json"
     spec = gn.generate(srt, out, title="Test Show - S01E01", assume_yes=True, api_url=api.url)
     assert len(api.calls) > 2
-    saved = json.loads(out.read_text())
+    saved = json.loads(out.read_text(encoding="utf-8"))
     assert saved == spec and saved["generated_by"] == "claude-sonnet-5-5"
     intro, *notes = saved["notes"]
     assert intro["category"] == "About these notes" and intro["at"] == "00:00:03,000"
@@ -197,7 +197,7 @@ def test_generate_saves_partial_progress_when_the_api_fails(tmp_path, api, api_k
                                         else (400, {"error": {"message": "credit balance is too low"}}))
     with pytest.raises(SystemExit):
         gn.generate(make_srt(tmp_path / "ep.srt", n=30), tmp_path / "n.json", assume_yes=True, api_url=api.url)
-    assert json.loads((tmp_path / "n.partial.json").read_text())["notes"]
+    assert json.loads((tmp_path / "n.partial.json").read_text(encoding="utf-8"))["notes"]
     assert not (tmp_path / "n.json").exists()
 
 
@@ -225,4 +225,4 @@ def test_cli_generate_then_build(tmp_path, api, home):
 def test_cli_set_api_key_reads_from_stdin(tmp_path, home):
     r = run_cli("make_ass.py", "--set-api-key", cwd=tmp_path, home_dir=home, stdin="sk-ant-xyz-9876\n")
     assert r.returncode == 0 and "9876" in r.stdout and "sk-ant-xyz" not in r.stdout
-    assert (home / ".config" / "context-notes" / "api-key").read_text() == "sk-ant-xyz-9876\n"
+    assert (home / ".config" / "context-notes" / "api-key").read_text(encoding="utf-8") == "sk-ant-xyz-9876\n"

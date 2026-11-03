@@ -17,7 +17,7 @@ def test_hms_and_clean():
 def test_write_transcript(tmp_path, sample_srt):
     cues = make_ass.parse_srt(sample_srt)
     out = analyze.write_transcript(cues, tmp_path / "t.txt")
-    lines = out.read_text().splitlines()
+    lines = out.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "1 [0:00:03] Line 1 of the original test script"
     assert len(lines) == len(cues)
 
@@ -72,7 +72,7 @@ def test_extract_embedded_subtitles_end_to_end(tmp_path):
     r = run_cli("analyze.py", video, "--list-tracks")
     assert r.returncode == 0 and "mov_text, eng" in r.stdout
     r = run_cli("analyze.py", video, "--sub-track", 1)
-    assert r.returncode == 0 and "Zeile 1" in (tmp_path / "ep.embedded.transcript.txt").read_text()
+    assert r.returncode == 0 and "Zeile 1" in (tmp_path / "ep.embedded.transcript.txt").read_text(encoding="utf-8")
 
 
 @needs_ffmpeg

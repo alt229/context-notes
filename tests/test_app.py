@@ -106,12 +106,12 @@ def test_saving_a_key(server, home):
     status, r = call(server, "/api/key", {"key": "sk-ant-from-the-page-9876"})
     path = home / ".config" / "context-notes" / "api-key"
     assert status == 200 and r["ok"] and r["key"]["ends"] == "9876", r
-    assert path.read_text() == "sk-ant-from-the-page-9876\n"
+    assert path.read_text(encoding="utf-8") == "sk-ant-from-the-page-9876\n"
     assert_private(path)
     assert "sk-ant-from" not in json.dumps(r)
     _, r = call(server, "/api/key", {"key": "hunter2"})
     assert not r["ok"] and "doesn't look like an Anthropic API key" in r["message"]
-    assert path.read_text() == "sk-ant-from-the-page-9876\n"
+    assert path.read_text(encoding="utf-8") == "sk-ant-from-the-page-9876\n"
 
 
 def test_checking_a_key_is_free_and_says_whether_it_works(api_key_file, home):
@@ -268,7 +268,7 @@ def test_status_of_a_folder(server, episode):
     assert v["name"] == "S01E01 Pilot.mp4" and not v["done"] and v["notes"] == 0 and v["subtitles"] == "S01E01 Pilot.srt"
     assert call(server, "/api/status?id=nothing-like-this")[1]["error"].startswith("That check isn't here")
     r = check_folder(server, {"path": str(episode / "nothing here")})
-    assert "Can't find" in r["error"]
+    assert "Can't find" in r["error"] or "Not found on" in r["error"]   # Windows adds a hint about network drives
 
 
 @needs_ffmpeg

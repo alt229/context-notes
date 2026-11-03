@@ -164,7 +164,7 @@ def project(tmp_path, videos):
     for name in ("synced.mp4", "drift.mp4"):
         place(videos / name, tmp_path / name)
     make_srt(tmp_path / "synced.srt", n=24)
-    (tmp_path / "drift.srt").write_text((tmp_path / "synced.srt").read_text())
+    (tmp_path / "drift.srt").write_text((tmp_path / "synced.srt").read_text(encoding="utf-8"))
     notes = [{"at": "00:00:03,000", "category": "About these notes", "text": "Intro", "kind": "speech"}]
     notes += [{"match": f"Line {i} of", "category": "Idiom", "text": f"Original note {i}", "confidence": "high", "kind": "speech"}
               for i in (2, 5, 8, 12)]
@@ -190,21 +190,21 @@ def refine_responder(n, body, headers):
 def test_refine_end_to_end_synced(project, api, api_key_file, home):
     run_cli("make_ass.py", "synced.srt", "notes-synced.json", "--video", "synced.mp4", cwd=project, home_dir=home)
     old_ass = (project / "synced.notes.ass").read_text(encoding="utf-8-sig")
-    original = (project / "notes-synced.json").read_text()
+    original = (project / "notes-synced.json").read_text(encoding="utf-8")
     api.responder = refine_responder
     r = run_cli("make_ass.py", "synced.srt", "notes-synced.json", "--refine", "--video", "synced.mp4", "--yes",
                 "--api-url", api.url, cwd=project, home_dir=home)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "Mode: full" in r.stdout
 
-    spec = json.loads((project / "notes-synced.json").read_text())
+    spec = json.loads((project / "notes-synced.json").read_text(encoding="utf-8"))
     assert spec["video_offset"] == pytest.approx(0.9, abs=0.1)                       # sync offset written
     assert spec["refined"]["contact_sheets"] > 0
     texts = [n["text"] for n in spec["notes"]]
     assert "REVISED" in texts and "Prop in decimal minutes" in texts
     assert any(n.get("original_text") == "Intro" for n in spec["notes"])        # the first listed note was revised
 
-    assert (project / "notes-synced.json.bak").read_text() == original                # backups
+    assert (project / "notes-synced.json.bak").read_text(encoding="utf-8") == original                # backups
     assert (project / "synced.notes.ass.bak").read_text(encoding="utf-8-sig") == old_ass
     assert (project / "notes-synced.refine-report.txt").exists()
 
@@ -220,13 +220,13 @@ def test_refine_end_to_end_synced(project, api, api_key_file, home):
 
 @needs_ffmpeg
 def test_refine_only_adds_visual_notes_when_sync_cannot_be_confirmed(project, api, api_key_file, home):
-    original = json.loads((project / "notes-drift.json").read_text())["notes"]
+    original = json.loads((project / "notes-drift.json").read_text(encoding="utf-8"))["notes"]
     api.responder = refine_responder
     r = run_cli("make_ass.py", "drift.srt", "notes-drift.json", "--refine", "--video", "drift.mp4", "--yes",
                 "--api-url", api.url, cwd=project, home_dir=home)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "on-screen notes only" in r.stdout and "--assume-synced" in r.stdout
-    notes = json.loads((project / "notes-drift.json").read_text())["notes"]
+    notes = json.loads((project / "notes-drift.json").read_text(encoding="utf-8"))["notes"]
     assert notes[:len(original)] == original and len(notes) > len(original)          # existing notes untouched
     assert all(n["kind"] == "visual" for n in notes[len(original):])
     assert "NOT reliably in step" in api.calls[0]["body"]["system"]
@@ -238,9 +238,9 @@ def test_refine_only_adds_visual_notes_when_sync_cannot_be_confirmed(project, ap
 
 @needs_ffmpeg
 def test_refine_refuses_a_video_for_a_different_episode(project, api, api_key_file, home):
-    (project / "S01E03 Fifty.srt").write_text((project / "synced.srt").read_text())
+    (project / "S01E03 Fifty.srt").write_text((project / "synced.srt").read_text(encoding="utf-8"))
     place(project / "synced.mp4", project / "S01E02 Calamity.mp4")
-    (project / "notes-S01E03.json").write_text((project / "notes-synced.json").read_text())
+    (project / "notes-S01E03.json").write_text((project / "notes-synced.json").read_text(encoding="utf-8"))
     r = run_cli("make_ass.py", "S01E03 Fifty.srt", "notes-S01E03.json", "--refine", "--video", "S01E02 Calamity.mp4",
                 "--yes", "--api-url", api.url, cwd=project, home_dir=home)
     assert r.returncode == 1 and "different episodes" in r.stderr and not api.calls
@@ -248,11 +248,11 @@ def test_refine_refuses_a_video_for_a_different_episode(project, api, api_key_fi
 
 @needs_ffmpeg
 def test_declining_the_prompt_changes_nothing(project, api, api_key_file, home):
-    before = (project / "notes-synced.json").read_text()
+    before = (project / "notes-synced.json").read_text(encoding="utf-8")
     r = run_cli("make_ass.py", "synced.srt", "notes-synced.json", "--refine", "--video", "synced.mp4",
                 "--api-url", api.url, cwd=project, home_dir=home)              # not a terminal, no --yes
     assert r.returncode == 1 and "--yes" in r.stderr and not api.calls
-    assert (project / "notes-synced.json").read_text() == before
+    assert (project / "notes-synced.json").read_text(encoding="utf-8") == before
     assert not list(project.glob("*.bak"))
 
 
@@ -262,7 +262,7 @@ def test_refine_keeps_what_it_has_when_the_api_fails_midway(project, api, api_ke
     r = run_cli("make_ass.py", "synced.srt", "notes-synced.json", "--refine", "--video", "synced.mp4", "--yes",
                 "--api-url", api.url, cwd=project, home_dir=home)
     assert r.returncode == 1 and "Stopped after part 1" in r.stdout
-    assert "STOPPED EARLY" in (project / "notes-synced.refine-report.txt").read_text()
+    assert "STOPPED EARLY" in (project / "notes-synced.refine-report.txt").read_text(encoding="utf-8")
     assert (project / "notes-synced.json.bak").exists()
 
 

@@ -76,7 +76,7 @@ def load_key(explicit=None):
     if path.exists():
         if os.name == "posix" and path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
             sys.exit(f"{path} can be read by other users. Lock it down first:\n  chmod 600 \"{path}\"")
-        key = path.read_text().strip()
+        key = path.read_text(encoding="utf-8").strip()
         if key:
             return key
         sys.exit(f"{path} is empty. Run  {prompts.PYTHON} make_ass.py --set-api-key")

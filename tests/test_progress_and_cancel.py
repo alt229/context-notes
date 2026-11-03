@@ -54,7 +54,7 @@ def test_write_text_safely_writes_and_keeps_permissions(tmp_path):
         assert stat.S_IMODE(new.stat().st_mode) == stat.S_IMODE(plain.stat().st_mode)  # a new file: the usual mode
         plain.chmod(0o640)
     make_ass.write_text_safely(plain, "y")
-    assert plain.read_text() == "y"
+    assert plain.read_text(encoding="utf-8") == "y"
     if not WINDOWS:
         assert stat.S_IMODE(plain.stat().st_mode) == 0o640                              # an old file keeps its own
     assert not leftovers(tmp_path)
@@ -69,7 +69,7 @@ def test_write_text_safely_writes_through_a_symlink(tmp_path):
     except OSError:
         pytest.skip("this system doesn't allow symlinks (Windows without Developer Mode)")
     make_ass.write_text_safely(link, "new")
-    assert link.is_symlink() and real.read_text() == "new"
+    assert link.is_symlink() and real.read_text(encoding="utf-8") == "new"
 
 
 def test_an_interrupted_write_leaves_the_old_file_and_no_temporary_one(tmp_path):
@@ -79,7 +79,7 @@ def test_an_interrupted_write_leaves_the_old_file_and_no_temporary_one(tmp_path)
         with make_ass.replacing(path) as tmp:
             tmp.write_text("half of the new no")
             raise KeyboardInterrupt
-    assert path.read_text() == "the old notes"
+    assert path.read_text(encoding="utf-8") == "the old notes"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["notes.json"]
 
 
@@ -92,7 +92,7 @@ def test_a_folder_that_takes_no_new_files_is_written_in_place_as_before(tmp_path
     folder.chmod(0o500)                     # no new files allowed, but the existing one is still writable
     try:
         make_ass.write_text_safely(path, "new")
-        assert path.read_text() == "new"
+        assert path.read_text(encoding="utf-8") == "new"
     finally:
         folder.chmod(0o700)
 
@@ -171,7 +171,7 @@ def test_a_stopped_transcription_leaves_no_cache_behind(tmp_path, fake_speech):
     assert not cache.exists() and not leftovers(tmp_path)
     fake_speech.stop_at = None
     assert len(analyze.transcribe(tmp_path / "film.mkv", None, "base.en", cache)) == 4
-    assert len(cache.read_text().splitlines()) == 4
+    assert len(cache.read_text(encoding="utf-8").splitlines()) == 4
 
 
 def test_transcription_progress_in_a_gui_and_in_a_terminal(tmp_path, fake_speech, monkeypatch, capsys):
@@ -215,7 +215,7 @@ def test_cancel_while_writing_notes_keeps_what_was_paid_for(tmp_path, api, api_k
         gate.set()
     assert cancel.sent and code in INTERRUPTED, out
     assert "Stopped after part 1 of" in out
-    assert json.loads((tmp_path / "notes-ep.partial.json").read_text())["notes"]      # part 1's notes, kept
+    assert json.loads((tmp_path / "notes-ep.partial.json").read_text(encoding="utf-8"))["notes"]      # part 1's notes, kept
     assert not (tmp_path / "notes-ep.json").exists() and not (tmp_path / "ep.ass").exists()
     assert not leftovers(tmp_path)
 
@@ -291,4 +291,4 @@ def test_cancel_in_the_wrapper_then_run_it_again(tmp_path, clip, api, api_key_fi
     assert "Lines to annotate (1 to" not in sent[0]                                        # ...so part 1 wasn't resent
     assert not (w / "notes-ep.partial.json").exists()
     assert [e["result"] for e in evs if e["type"] == "video-result"] == ["ready"]
-    assert (tmp_path / "ep.notes.ass").exists() and json.loads((w / "notes-ep.json").read_text())["refined"]
+    assert (tmp_path / "ep.notes.ass").exists() and json.loads((w / "notes-ep.json").read_text(encoding="utf-8"))["refined"]

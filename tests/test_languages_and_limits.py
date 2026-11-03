@@ -179,7 +179,8 @@ def test_shift_by_a_known_amount(tmp_path):
     assert [c["start"] for c in fixed] == [3.0, 9.0, 15.0] and fixed[0]["text"] == "Line 2 of the original test script"
     r = run_cli("analyze.py", srt, "--shift", "+1.5", cwd=tmp_path)
     assert make_ass.parse_srt(tmp_path / "film.fr.aligned.srt")[0]["start"] == 4.5
-    assert srt.read_text() == make_srt(tmp_path / "again.srt", n=4).read_text()          # the original is untouched
+    again = make_srt(tmp_path / "again.srt", n=4).read_text(encoding="utf-8")
+    assert srt.read_text(encoding="utf-8") == again                                           # the original is untouched
 
 
 def test_shift_needs_a_video_to_measure_and_not_with_align(tmp_path, sample_srt):
@@ -253,7 +254,7 @@ def test_shift_leaves_out_adverts(tmp_path):
     assert r.returncode == 0 and "1 subtitle-site advert(s)" in r.stdout
     fixed = make_ass.parse_srt(tmp_path / "film.fr.aligned.srt")
     assert [c["text"] for c in fixed] == ["- Le 3 septembre 1973"] and fixed[0]["start"] == pytest.approx(37.395)
-    assert "00:00:37,395 --> 00:00:41,357" in (tmp_path / "film.fr.aligned.srt").read_text()
+    assert "00:00:37,395 --> 00:00:41,357" in (tmp_path / "film.fr.aligned.srt").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("shift", [0.0, 2.0, -21.3, 47.5])

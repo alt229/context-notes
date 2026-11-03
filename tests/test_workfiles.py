@@ -33,8 +33,8 @@ def test_media_servers_are_told_to_skip_the_folder(tmp_path):
     touch(tmp_path / "context-notes" / ".plexignore", "# mine\n")             # one you made yourself stays
     workfiles.make_dirs(workfiles.folder(v) / "analysis" / "frames")
     c = tmp_path / "context-notes"
-    assert (c / ".ignore").read_text() == "" and "*" in (c / ".embyignore").read_text()
-    assert (c / ".plexignore").read_text() == "# mine\n"
+    assert (c / ".ignore").read_text(encoding="utf-8") == "" and "*" in (c / ".embyignore").read_text(encoding="utf-8")
+    assert (c / ".plexignore").read_text(encoding="utf-8") == "# mine\n"
     project = tmp_path / "context-notes-project" / "context-notes" / "examples"      # not a video's folder: nothing
     workfiles.make_dirs(project)
     assert sorted(p.name for p in project.parent.iterdir()) == ["examples"]
@@ -135,7 +135,7 @@ def test_tidy_lists_asks_and_moves(tmp_path):
         "S01E01 Pilot.aligned.srt", "S01E01 Pilot.notes.ass.bak", "S01E01 Pilot.transcript.txt", "analysis",
         "notes-S01E01 Pilot.json", "notes-S01E01 Pilot.json.bak", "notes-S01E01 Pilot.refine-report.txt"]
     assert (w / "analysis" / "sheets" / "sheet-001.jpg").exists()
-    assert (w / "notes-S01E01 Pilot.json").read_text() == "notes-S01E01 Pilot.json"     # moved as it was
+    assert (w / "notes-S01E01 Pilot.json").read_text(encoding="utf-8") == "notes-S01E01 Pilot.json"     # moved as it was
     r = run_cli("tidy.py", tmp_path, "--recursive", "--yes")
     assert "Nothing to tidy" in r.stdout
 
@@ -151,7 +151,7 @@ def test_tidy_never_overwrites_or_guesses(tmp_path):
     plan, _ = workfiles.old_files(tmp_path)
     moved, problems = tidy.move(plan)
     assert moved == 6 and [p.name for p, _ in problems] == ["notes-Film.json"]
-    assert taken.read_text() == "newer" and (tmp_path / "notes-Film.json").exists()
+    assert taken.read_text(encoding="utf-8") == "newer" and (tmp_path / "notes-Film.json").exists()
 
 
 def test_tidy_gives_a_backup_whose_name_is_taken_the_next_number(tmp_path):
@@ -169,7 +169,7 @@ def test_tidy_gives_a_backup_whose_name_is_taken_the_next_number(tmp_path):
         ("Film.notes.ass.bak", "Film.notes.ass.bak2"), ("Film.notes.ass.bak2", "Film.notes.ass.bak3")]
     assert "    Film.notes.ass.bak  ->  Film.notes.ass.bak2" in tidy.describe(tmp_path, plan, skipped)
     assert tidy.move(plan) == (2, [])
-    assert [(p.name, p.read_text()) for p in sorted(w.iterdir())] == [
+    assert [(p.name, p.read_text(encoding="utf-8")) for p in sorted(w.iterdir())] == [
         ("Film.notes.ass.bak", "frames step"), ("Film.notes.ass.bak2", "rebuild 1"), ("Film.notes.ass.bak3", "rebuild 2")]
     assert sorted(p.name for p in tmp_path.iterdir()) == ["Film.mkv", "Film.notes.ass", "context-notes"]
 

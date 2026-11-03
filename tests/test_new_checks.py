@@ -93,7 +93,7 @@ def test_timing_given_on_the_command_line_is_remembered(tmp_path):
     notes.write_text(json.dumps({"notes": [{"cue": 2, "category": "Idiom", "text": long}]}))
     r = run_cli("make_ass.py", srt, notes, "--note-max", "30", "--timing-report", cwd=tmp_path)
     assert r.returncode == 0, r.stderr
-    assert json.loads(notes.read_text())["timing"] == {"max": 30.0}
+    assert json.loads(notes.read_text(encoding="utf-8"))["timing"] == {"max": 30.0}
     assert "0 note(s) cut short" in r.stdout
     r = run_cli("make_ass.py", srt, notes, "--timing-report", cwd=tmp_path)          # remembered
     assert "kept between 6 and 30 s" in r.stdout
@@ -194,7 +194,7 @@ def test_finds_subtitles_in_a_subs_folder_and_copies_them_beside_the_video(tmp_p
     make_srt(subs / "4_German.srt", n=30, text="Ich weiß nicht, was du willst, und das ist es {i}")
     got = find_subs.find(video, "en", online=False, transcribe=False)
     assert got == tmp_path / "Das Boot (1981).en.srt" and got.exists()
-    assert "captain said" in got.read_text()                        # the full-dialogue one, not the SDH one
+    assert "captain said" in got.read_text(encoding="utf-8")                        # the full-dialogue one, not the SDH one
     assert (subs / "2_English.srt").exists()                        # copied, not moved
     got = find_subs.find(video, "de", online=False, transcribe=False)
     assert got.name == "Das Boot (1981).de.srt"
@@ -271,13 +271,13 @@ class FakeOpenSubtitles:
 
 
 def test_opensubtitles_prefers_the_file_made_for_this_release(tmp_path):
-    srt_text = make_srt(tmp_path / "x.srt", n=5).read_text()
+    srt_text = make_srt(tmp_path / "x.srt", n=5).read_text(encoding="utf-8")
     api = FakeOpenSubtitles(srt_text)
     video = tmp_path / "Film.2001.mkv"
     video.write_bytes(b"\1" * 200000)
     cfg = {"api_key": "K", "username": "u", "password": "p"}
     got = find_subs.search_online(video, "de", cfg, api=api.url)
-    assert got == tmp_path / "Film.2001.de.srt" and "Line 1" in got.read_text()
+    assert got == tmp_path / "Film.2001.de.srt" and "Line 1" in got.read_text(encoding="utf-8")
     search = next(c for c in api.calls if c[0] == "GET" and "/subtitles" in c[1])
     assert "moviehash=" in search[1] and search[2]["Api-Key"] == "K"
     assert ("POST", "/api/v1/download", {"file_id": 2}) in [(m, p, b) for m, p, b in api.calls if m == "POST"]
@@ -285,7 +285,7 @@ def test_opensubtitles_prefers_the_file_made_for_this_release(tmp_path):
 
 
 def test_an_episode_named_by_code_searches_by_the_show_folder(tmp_path):
-    srt_text = make_srt(tmp_path / "x.srt", n=5).read_text()
+    srt_text = make_srt(tmp_path / "x.srt", n=5).read_text(encoding="utf-8")
     api = FakeOpenSubtitles(srt_text, hash_match=False)
     folder = tmp_path / "IT Crowd" / "Season 2"
     folder.mkdir(parents=True)
@@ -313,7 +313,7 @@ def test_a_shared_subs_folder_only_gives_a_film_its_own_subtitles(tmp_path):
     assert find_subs.find(tmp_path / "Das Boot (1981).mkv", "en", online=False, transcribe=False) is None
     make_srt(subs / "Das.Boot.1981.Directors.Cut.English.srt", n=30, text="The captain said that you are {i}")
     got = find_subs.find(tmp_path / "Das Boot (1981).mkv", "en", online=False, transcribe=False)
-    assert got.name == "Das Boot (1981).en.srt" and "you are" in got.read_text()
+    assert got.name == "Das Boot (1981).en.srt" and "you are" in got.read_text(encoding="utf-8")
 
 
 def fake_login_server(status):

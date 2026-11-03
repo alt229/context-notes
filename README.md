@@ -135,7 +135,19 @@ Your video has subtitles inside it? Skip the SRT: `python3 analyze.py episode.mp
 
 ## Windows
 
-Everything runs on Windows itself; WSL isn't needed. In PowerShell:
+Everything runs on Windows itself; WSL isn't needed.
+
+**The easiest way:** paste this into PowerShell (Start menu, type "PowerShell"; no administrator needed):
+
+```powershell
+irm https://raw.githubusercontent.com/alt229/context-notes/master/install.ps1 | iex
+```
+
+It installs what's missing with winget (Git, Python 3.14, ffmpeg, and if you say yes VLC and Claude Code), downloads
+Context Notes to `C:\Users\<you>\context-notes`, puts "Context Notes" and "Update Context Notes" shortcuts on the
+desktop and starts the app. Running it again skips what's already there. VLC may ask Windows' permission to install.
+
+By hand, in PowerShell:
 
 ```powershell
 winget install Python.Python.3.14 Gyan.FFmpeg VideoLAN.VLC Git.Git

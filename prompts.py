@@ -80,7 +80,22 @@ PYTHON = "python" if os.name == "nt" else "python3"
 
 def interactive():
     """Can a question be asked at all? Yes in a terminal, and when a program answers (json mode)."""
-    return machine() or bool(sys.stdin and sys.stdin.isatty())
+    return machine() or _terminal(sys.stdin)
+
+
+def _terminal(stream):
+    """A real terminal. On Windows, isatty() is also true for NUL (stdin from nowhere), so ask for a console too."""
+    if not (stream and stream.isatty()):
+        return False
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        import msvcrt
+        mode = ctypes.c_ulong()
+        return bool(ctypes.windll.kernel32.GetConsoleMode(msvcrt.get_osfhandle(stream.fileno()), ctypes.byref(mode)))
+    except (AttributeError, OSError, ValueError):
+        return True
 
 
 def yes_to_all():

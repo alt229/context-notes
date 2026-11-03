@@ -48,6 +48,10 @@ def build(payload):
 
 
 def main():
+    try:                                           # Claude Code reads UTF-8; Windows would print "·" in its code page
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
     try:
         payload = json.load(sys.stdin)
     except ValueError:

@@ -33,7 +33,7 @@ def stopped_note_writing(tmp_path, api, home):
     srt = make_srt(tmp_path / "ep.srt", n=24, text=LONG)
     r = run_cli("make_ass.py", srt, "--generate", "--yes", "--api-url", api.url, cwd=tmp_path, home_dir=home)
     assert r.returncode == 1 and "the next run offers to pick up from there" in r.stdout, r.stdout + r.stderr
-    kept = json.loads((tmp_path / "notes-ep.partial.json").read_text())
+    kept = json.loads((tmp_path / "notes-ep.partial.json").read_text(encoding="utf-8"))
     assert kept["subtitles"] == "ep.srt" and kept["through_line"] > 1 and kept["notes"]
     api.responder = notes_for_each_part
     api.calls.clear()
@@ -48,7 +48,7 @@ def test_note_writing_picks_up_where_it_stopped(tmp_path, api, api_key_file, hom
     assert asked(evs) == ["generate.resume", "generate.send"]
     assert estimate(evs)["lines"] == 24 - kept["through_line"] and len(api.calls) == estimate(evs)["requests"]
     assert first_line_sent(api.calls[0]) == kept["through_line"] + 1             # nothing is sent twice
-    notes = json.loads((tmp_path / "notes-ep.json").read_text())["notes"]
+    notes = json.loads((tmp_path / "notes-ep.json").read_text(encoding="utf-8"))["notes"]
     assert all(n in notes for n in kept["notes"])                                 # the first part's notes are in
     assert not (tmp_path / "notes-ep.partial.json").exists()                      # and the partial file is gone
 
@@ -116,7 +116,8 @@ REFINE = ["synced.srt", "notes-synced.json", "--refine", "--video", "synced.mp4"
 
 def props(project):
     """Each refine part adds one 'Prop at <time>' note, so this counts the parts the final notes went through."""
-    return sum(n["text"].startswith("Prop at") for n in json.loads((project / "notes-synced.json").read_text())["notes"])
+    notes = json.loads((project / "notes-synced.json").read_text(encoding="utf-8"))["notes"]
+    return sum(n["text"].startswith("Prop at") for n in notes)
 
 
 def stopped_refine(project, api, home):
@@ -124,7 +125,7 @@ def stopped_refine(project, api, home):
     api.responder = lambda n, body, h: refine_responder(n, body, h) if n < 2 else FAIL
     r = run_cli("make_ass.py", *REFINE, "--yes", "--api-url", api.url, cwd=project, home_dir=home)
     assert r.returncode == 1 and "The next refine offers to pick up from here." in r.stdout, r.stdout + r.stderr
-    stopped = json.loads((project / "notes-synced.json").read_text())["refined"]["stopped_after"]
+    stopped = json.loads((project / "notes-synced.json").read_text(encoding="utf-8"))["refined"]["stopped_after"]
     assert (stopped["part"], stopped["parts"], stopped["backup"]) == (1, 2, "notes-synced.json.bak")
     assert props(project) == 1
     api.responder = refine_responder
@@ -146,9 +147,9 @@ def test_refine_picks_up_where_it_stopped(project, api, api_key_file, home):
     assert estimate(evs)["requests"] == 1 and len(api.calls) == 1
     assert stretch_start(api.calls[0]) >= stopped["time"] - 0.01                    # only the second part was sent
     assert props(project) == 2                                                       # each part once
-    spec = json.loads((project / "notes-synced.json").read_text())
+    spec = json.loads((project / "notes-synced.json").read_text(encoding="utf-8"))
     assert "stopped_after" not in spec["refined"]
-    report = (project / "notes-synced.refine-report.txt").read_text()
+    report = (project / "notes-synced.refine-report.txt").read_text(encoding="utf-8")
     assert report.count("Refinement of") == 2 and "STOPPED EARLY after part 1 of 2" in report and "picked up at" in report
 
 
@@ -184,7 +185,7 @@ def test_cancel_during_refine_keeps_the_changes_so_far(project, api, api_key_fil
     finally:
         gate.set()
     assert cancel.sent and code in INTERRUPTED, out
-    assert json.loads((project / "notes-synced.json").read_text())["refined"]["stopped_after"]["part"] == 1
+    assert json.loads((project / "notes-synced.json").read_text(encoding="utf-8"))["refined"]["stopped_after"]["part"] == 1
     assert props(project) == 1
 
 
@@ -212,7 +213,7 @@ def test_note_writing_picks_up_after_a_run_that_ended_without_warning(tmp_path, 
     finally:
         gate.set()
     assert kill.sent and code != 0 and "Stopped after" not in out, out          # it never got to say anything...
-    kept = json.loads((tmp_path / "notes-ep.partial.json").read_text())        # ...but part 1 was kept as it ended
+    kept = json.loads((tmp_path / "notes-ep.partial.json").read_text(encoding="utf-8"))  # ...but part 1 was kept as it ended
     assert kept["through_line"] > 1 and kept["notes"]
     api.calls.clear()
     code, out, evs = drive([srt, "--generate", "--api-url", api.url], {"generate.send": "y"}, tmp_path, home,
@@ -234,7 +235,7 @@ def test_refine_picks_up_after_a_run_that_ended_without_warning(project, api, ap
     finally:
         gate.set()
     assert kill.sent and code != 0, out
-    spec = json.loads((project / "notes-synced.json").read_text())
+    spec = json.loads((project / "notes-synced.json").read_text(encoding="utf-8"))
     assert spec["refined"]["stopped_after"]["part"] == 1 and props(project) == 1    # part 1 is in the notes file
     api.calls.clear()
     code, out, evs = drive([*REFINE, "--api-url", api.url], {"refine.send": "y"}, project, home, script="make_ass.py")
@@ -256,7 +257,7 @@ def notes_for_the_first_minute(tmp_path, api, home):
 
 def test_notes_for_the_first_part_are_added_to_not_written_again(tmp_path, api, api_key_file, home):
     srt, notes_file = notes_for_the_first_minute(tmp_path, api, home)
-    first = json.loads(notes_file.read_text())
+    first = json.loads(notes_file.read_text(encoding="utf-8"))
     assert first["subtitles"] == "ep.srt"
     first["notes"].append({"at_video": "00:00:20,000", "kind": "visual", "category": "Prop", "text": "A frame note"})
     first.update(refined={"model": "m", "date": "2026-10-24", "contact_sheets": 3, "limit": 60.0}, note_opacity=55)
@@ -265,14 +266,14 @@ def test_notes_for_the_first_part_are_added_to_not_written_again(tmp_path, api, 
     assert r.returncode == 0, r.stdout + r.stderr
     assert "only the lines after them are sent" in r.stdout and "Kept a backup: notes-ep.json.bak" in r.stdout
     assert api.calls and first_line_sent(api.calls[0]) == 11 and all(first_line_sent(c) > 10 for c in api.calls)
-    spec = json.loads(notes_file.read_text())
+    spec = json.loads(notes_file.read_text(encoding="utf-8"))
     assert "limit" not in spec and spec["refined"] == first["refined"] and spec["note_opacity"] == 55
     texts = [n["text"] for n in spec["notes"]]
     assert all(n["text"] in texts for n in first["notes"] if n["category"] != "About these notes")
     intros = [n for n in spec["notes"] if n["category"] == "About these notes"]
     assert len(intros) == 1 and "only the first" not in intros[0]["text"] and spec["notes"][0] == intros[0]
     assert len(spec["notes"]) > len(first["notes"])
-    assert json.loads((tmp_path / "notes-ep.json.bak").read_text()) == first
+    assert json.loads((tmp_path / "notes-ep.json.bak").read_text(encoding="utf-8")) == first
 
     api.calls.clear()                                               # now it covers everything: nothing to add
     r = run_cli("make_ass.py", srt, "--generate", "--extend", "--yes", "--api-url", api.url, cwd=tmp_path, home_dir=home)
@@ -291,7 +292,7 @@ def test_adding_needs_notes_it_can_add_to(tmp_path, api, api_key_file, home):
     assert r.returncode == 2 and "use one or the other" in r.stderr
     r = gen()
     assert r.returncode == 1 and "--extend to keep them" in r.stderr
-    spec = json.loads(notes_file.read_text())
+    spec = json.loads(notes_file.read_text(encoding="utf-8"))
     notes_file.write_text(json.dumps({**spec, "subtitles": "other.srt"}))
     r = gen("--extend")
     assert r.returncode == 1 and "it was written from other.srt" in r.stderr
