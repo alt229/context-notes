@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 app.py - Context Notes in your web browser.
-Created 2026-10-24, modified 2026-10-27.
+Created 2026-10-24, modified 2026-11-04.
 
     python3 app.py                   start it and open the page in your browser (this computer only)
     python3 app.py --no-browser      only print the page's address
@@ -19,8 +19,8 @@ Who can reach it:
   (--allow 203.0.113.0/24 adds a range, a WireGuard subnet say). The port is fixed (8229 unless --port) and the key is
   kept (~/.config/context-notes/app-key, readable only by you), so a bookmark on a phone keeps working; --new-key
   makes a new one. It prints the addresses to use. Opening a film in VLC, Show in folder, the file dialogs, installing
-  the VLC extension, deleting kept originals and saving the API key or the OpenSubtitles login only work from a
-  browser on this computer; elsewhere they're hidden, and refused if asked for. The VLC extension can be downloaded
+  the VLC extension, deleting kept originals and saving the API key, the OpenSubtitles login or the TMDB key only work from
+  a browser on this computer; elsewhere they're hidden, and refused if asked for. The VLC extension can be downloaded
   instead.
 - --public (for a server behind your own HTTPS proxy, never a laptop): any address may connect; the key is all that
   guards it.
@@ -66,6 +66,7 @@ import make_ass  # noqa: E402
 import prompts  # noqa: E402
 import pythonpin  # noqa: E402  (the Python version .venv is meant to be made with)
 import settings  # noqa: E402  (this install's defaults, shared with the terminal)
+import tmdb  # noqa: E402  (where the TMDB key lives)
 import usage  # noqa: E402  (what the API calls cost, and the credit left)
 import workfiles  # noqa: E402
 
@@ -316,6 +317,14 @@ def opensubtitles_info():
     return {"saved": bool(cfg), "username": (cfg or {}).get("username")}
 
 
+def tmdb_info():
+    key = tmdb.load(quiet=True)
+    info = {"saved": bool(key), "ends": key[-4:] if key else None}
+    if not key and tmdb.config_path().exists():
+        info["problem"] = "The saved key can't be used. Save it again."
+    return info
+
+
 def vlc_extension_dirs():
     """Where VLC looks for extensions on this computer (more than one on Linux when VLC is also a Flatpak or Snap)."""
     home, where = Path.home(), system()
@@ -542,6 +551,27 @@ def fallback_args(o):
     return ["--api-fallback", f"{usd:g}"]
 
 
+def limits_args(o):
+    """The plan's weekly stop, waiting out a full 5-hour session, and --pace, from the run form (this run only). Each
+    is left out when the page doesn't send it, so Settings decides."""
+    args = []
+    week = str(o.get("week_stop_at") if o.get("week_stop_at") is not None else "").strip()
+    if week:
+        try:
+            args += ["--week-stop-at", f"{cli_common.week_arg(week):g}"]
+        except argparse.ArgumentTypeError:
+            raise BadRequest("Stop at: a percentage of the plan's weekly limit from 1 to 100, like 90.") from None
+    if "wait_for_reset" in o:
+        args.append("--wait-for-reset" if o.get("wait_for_reset") else "--no-wait-for-reset")
+    pace = str(o.get("pace_minutes") if o.get("pace_minutes") is not None else "").strip()
+    if pace:
+        try:
+            args += ["--pace", f"{cli_common.minutes_arg(pace):g}"]
+        except argparse.ArgumentTypeError:
+            raise BadRequest("Wait between videos: minutes from 0 to 1440, like 60.") from None
+    return args
+
+
 STATUS_TIMEOUT = 3600    # a folder on a NAS can take minutes; the page waits for it in the background (App.start_check)
 
 
@@ -694,7 +724,7 @@ class App:
     def info(self, local=True, mode="local"):
         return {"local": local, "mode": mode,         # local: the browser is on this computer (see LOCAL_ONLY)
                 "system": system(), "home": str(Path.home()), "key": key_info(), "opensubtitles": opensubtitles_info(),
-                "vlc": vlc_info(), "dialogs": dialog_command("file") is not None,
+                "tmdb": tmdb_info(), "vlc": vlc_info(), "dialogs": dialog_command("file") is not None,
                 "speech": find_subs.have_whisper(), "python": pythonpin.status(), "usage": usage.summary(5),
                 "languages": [{"code": c, "name": n} for c, (n, _) in languages.LANGUAGES.items()],
                 "claude": claude_code.status(),
@@ -721,6 +751,7 @@ class App:
                 args.append("--embed")
             try:
                 args += fallback_args(o)
+                args += limits_args(o)
             except BadRequest as e:
                 return 400, {"error": str(e)}
             if self.api_url:
@@ -871,6 +902,13 @@ class App:
         secret = (fields[0], fields[2])
         return {"ok": code == 0, "lines": [ln for ln in lines if not any(s in ln for s in secret)],
                 "opensubtitles": opensubtitles_info()}
+
+    def set_tmdb(self, o):
+        key = "".join(str(o.get("api_key") or "").split())
+        if not key:
+            return {"ok": False, "lines": ["Paste the TMDB key first."]}
+        code, lines, _ = run_quietly(script("tmdb.py", "--set-key"), answers=key + "\n", timeout=60)
+        return {"ok": code == 0, "lines": [ln for ln in lines if key not in ln], "tmdb": tmdb_info()}
 
 
 # ---------------------------------------------------------------- the web server
@@ -1032,6 +1070,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, app.set_credit(o))
         if path == "/api/opensubtitles":
             return self._send(200, app.set_opensubtitles(o))
+        if path == "/api/tmdb":
+            return self._send(200, app.set_tmdb(o))
         if path == "/api/vlc/install":
             return self._send(200, {**install_vlc_extension(), "vlc": vlc_info()})
         if path in ("/api/vlc/open", "/api/reveal"):
@@ -1054,6 +1094,7 @@ class Handler(BaseHTTPRequestHandler):
 LOCAL_ONLY = {"/api/pick": "Choosing with the file dialog", "/api/vlc/open": "Opening a film in VLC",
               "/api/reveal": "Show in folder", "/api/vlc/install": "Installing the VLC extension",
               "/api/key": "Saving the API key", "/api/opensubtitles": "Saving the OpenSubtitles login",
+              "/api/tmdb": "Saving the TMDB key",
               "/api/claude/login": "Signing Claude Code in", "/api/claude/login/code": "Signing Claude Code in",
               "/api/claude/login/cancel": "Signing Claude Code in", "/api/claude/logout": "Signing Claude Code out"}
 PRIVATE = ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16",
@@ -1217,7 +1258,8 @@ def hosted_message(server, url, mode):
     lines += ["", "Anyone with this address can use it" + (" from your network" if mode == "hosted" else "")
               + ", so keep it to yourself. --new-key makes a new key (bookmarks then need the new address).",
               "Opening films in VLC, Show in folder, the file dialogs, installing the VLC extension, deleting kept "
-              "originals and saving the API key or the OpenSubtitles login only work in a browser on this computer.",
+              "originals and saving the API key, the OpenSubtitles login or the TMDB key only work in a browser on this "
+              "computer.",
               "Keep this window open while you use it. Press Ctrl-C here to stop."]
     if mode == "public":
         lines.insert(0, "! --public answers every address: use it only on a server behind your own HTTPS proxy.")

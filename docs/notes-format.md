@@ -23,9 +23,32 @@ A notes file is plain JSON. `make_ass.py` merges it with an SRT to produce the `
 | `display_subtitles`, `display_offset` | Subtitles shown at the bottom instead of the ones the notes are placed on (`--display-subs`). |
 | `notes` | The list of notes. |
 | `track`, `facts` | The Behind the Scenes notes (`behind-the-scenes-<video>.json`): `"behind-the-scenes"`, and the file name of the fact sheet they were written from (`facts-<video>.json`). |
+| `ids` | Which film or episode the notes are for (written by `film_ids.py`; see "Film ids" below). |
 | `spoilers` | Behind the Scenes only: `include` or `leave-out`, the film's own choice for the notes marked `spoiler` (written when `--spoilers` is given, or the `ask` question is answered). Without it, Settings decides. |
 
 Any other top-level keys are kept and ignored.
+
+## Film ids
+
+```json
+"ids": {"type": "movie", "imdb": "tt0079470", "tmdb": 583, "title": "Life of Brian", "year": 1979,
+        "source": "OpenSubtitles: subtitles made for this exact file", "found": "2026-11-03"}
+```
+
+| Key | Meaning |
+|---|---|
+| `type` | `movie` or `episode`. |
+| `imdb` | IMDb's id, always `tt` and at least 7 digits. |
+| `tmdb` | TMDB's id: the film's, or for an episode TMDB's id for the episode itself. |
+| `title`, `year` | As the source names them (an episode's title is the episode's). |
+| `season`, `episode` | Episodes only. |
+| `series` | Episodes only: the show's `imdb`, `tmdb` and `title`. TMDB's episode page is `tv/<series tmdb>/season/<season>/episode/<episode>`. |
+| `source` | Where the ids came from: the file or folder name, an `.nfo`, the file's tags, OpenSubtitles (by fingerprint, IMDb id or title), the command line. |
+| `found` | When, as YYYY-MM-DD. |
+
+The build writes them into the `.ass` header as one line, `; Film: imdb tt0079470, tmdb movie/583` (an episode:
+`; Film: imdb tt1054724, tmdb tv/1396/season/1/episode/2, series imdb tt0903747`), and nothing when there are none.
+`embed.py` leaves that line out of the hash it keeps on an embedded track.
 
 ## A note
 

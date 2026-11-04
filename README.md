@@ -51,6 +51,9 @@ Notes appear as small boxed overlays while you watch, in VLC (or any player that
 | `tidy.py` | Moves the working files earlier versions left beside your videos into their `context-notes` folders (see [Where the files go](#where-the-files-go)). |
 | `subcheck.py` | Looks for damaged subtitles: mangled characters ("Î½" for "v", "Ã©" for "é") and text-recognition mistakes ("l told you", "g reat"). Reports only; every run and `tidy.py` use it too (see [Damaged subtitles](#damaged-subtitles)). |
 | `embed.py` | Puts a film's notes inside the `.mkv` as a subtitle track, for films that already have a `.notes.ass` (see [Putting the notes inside the film](#putting-the-notes-inside-the-film)). |
+| `film_ids.py` | Finds which film or episode each set of notes is for (its IMDb and TMDB ids) and writes them into the notes file and the `.ass` header (see [Which film: IMDb and TMDB ids](#which-film-imdb-and-tmdb-ids)). |
+| `cleanup.py` | Gives a film or TV library standard names, the way Plex and Jellyfin name them (`Title (Year) {tmdb-N}/...`, `Show (Year)/Season 01/Show (Year) - s01e01 - Title`): lists what it would rename, what moves along (subtitles, notes, the context-notes folder), what to decide by hand and the clutter, asks, then renames. Nothing is deleted; clutter goes to `context-notes/removed/`; every change goes in an undo log (`--undo LOG` puts it all back). `--dry-run`, `--only TEXT`, `--skip TEXT`, `--set-title TMDB_ID TITLE`, `--language de-DE`, `--offline`. Episode numbers are checked against TMDB by title; anything unsure, locked or still copying is left for you to decide. |
+| `tmdb.py` | Saves and tests your TMDB (themoviedb.org) key: `python3 tmdb.py --set-key` (asked for, hidden), `--test`. The app's Settings has the same. TMDB will give the library cleanup titles in your language and episode titles. |
 | `research.py` | Looks a film up for its Behind the Scenes track: its commentary tracks, if any, and the web, with a source for every fact (see [Behind the Scenes](#behind-the-scenes-how-a-film-was-made)). |
 | `workfiles.py` | Where each script puts a video's working files, and finds them again. |
 | `prompts.py` | How the scripts ask questions: in Terminal as usual, or answered by another program such as a GUI ([docs/gui-protocol.md](docs/gui-protocol.md)). |
@@ -77,7 +80,7 @@ The shared code the scripts above are built from (none of these are run on their
   build), so `make_venv.py` makes `.venv` with 3.14 and the app says so when a newer one starts it. Intel Macs: there's
   no 3.14 build of it either, so speech recognition is left out there (everything else works); Python 3.13 has one.
 - `ffmpeg` and `ffprobe` for anything that touches a video (`brew install ffmpeg`, `apt install ffmpeg`, or [ffmpeg.org](https://ffmpeg.org/download.html))
-- `python3 make_venv.py` (one step: makes `.venv` with Python 3.14 and installs `requirements.txt`: numpy and Pillow for the video checks, faster-whisper for speech recognition, and pytest and ruff for development. faster-whisper is a large download; in an environment of your own, skip it with `pip install numpy Pillow` if you won't use speech recognition)
+- `python3 make_venv.py` (one step: makes `.venv` with Python 3.14 and installs `requirements.txt`: numpy and Pillow for the video checks, faster-whisper for speech recognition, guessit for reading film and episode names (the library cleanup, coming), and pytest and ruff for development. faster-whisper is a large download; in an environment of your own, skip it with `pip install numpy Pillow` if you won't use speech recognition)
 - Only if you want Claude to write or refine notes: [Claude Code](https://claude.com/claude-code) signed in with a
   Claude Pro or Max plan (the default; no API credits), or an Anthropic API key
 
@@ -224,7 +227,7 @@ python3 app.py
   isn't, "Where Claude Code is" for an install the app can't find by itself, and "Use API credits when the plan runs
   out, up to $___ a run" (see [Your Claude plan or API credits](#your-claude-plan-or-api-credits)). The same choice sits beside
   the run options for one run. Then your Anthropic API key (saved in the usual place), the credit you have left, the
-  OpenSubtitles login, and a button that installs the VLC extension.
+  OpenSubtitles login, the TMDB key, and a button that installs the VLC extension.
 - **Defaults for every run** (in Settings): the model, thinking effort, who the notes are for, the language to write
   them in, seconds a word, the box and how solid it is, frames, the timing check, online subtitle search (and whether
   to download what it finds without asking), subfolders, Yes to all questions, and the starting folder. They're saved
@@ -249,8 +252,8 @@ network (private addresses only: home Wi-Fi, Tailscale and the like; `--allow 10
 WireGuard subnet), on a fixed port (8229) with a key that's kept between starts, so a bookmark keeps working
 (`--new-key` makes a new one). It prints the address to use from another device. From there you can choose films
 (with "Browse here"), write notes, rebuild, embed and tidy, and change Settings. Opening a film in VLC, Show in
-folder, the file dialogs, installing the VLC extension, deleting kept originals and saving the API key or the
-OpenSubtitles login only work in a browser on the computer running the app (they would act on that computer's
+folder, the file dialogs, installing the VLC extension, deleting kept originals and saving the API key, the
+OpenSubtitles login or the TMDB key only work in a browser on the computer running the app (they would act on that computer's
 desktop, can't be undone, or would send a key across your network unencrypted). Settings offers the VLC extension as
 a download for the computer you watch on. `--public` is only for a server behind your own HTTPS proxy: it answers
 any address, and the key is all that guards it.
@@ -356,6 +359,33 @@ python3 embed.py "/Volumes/Movies" --delete-backups  # free the space the kept o
 
 Files are moved as they are, never changed or overwritten. A file whose name is already taken in the folder, or that
 could belong to two videos (`film.mkv` and `film.mp4`), stays where it is and is listed.
+
+### Which film: IMDb and TMDB ids
+
+`film_ids.py` finds which film or episode each set of notes is for, and records its IMDb and TMDB ids. It's the first
+step towards sharing notes (see the [roadmap](ROADMAP.md)): an id says which film a notes file belongs to, whatever
+its file is called.
+
+```bash
+python3 film_ids.py "/Volumes/Movies" --dry-run     # list what it finds for every film with notes; change nothing
+python3 film_ids.py "/Volumes/Movies"               # then write them (it asks first; --yes doesn't)
+python3 film_ids.py film.mkv --imdb tt0079470       # you know the film: say so (TMDB's id is looked up)
+python3 film_ids.py "/Volumes/Movies" --offline     # only what's on this computer
+```
+
+It looks in the file and folder names first (`{imdb-tt0079470}`, `[tmdbid-583]`, as Plex, Jellyfin, Radarr and
+Sonarr name them), then an `.nfo` file beside the video, then the video's own tags, then OpenSubtitles.com if you've
+saved a login (`find_subs.py --set-opensubtitles`; searching uses none of its daily downloads). On OpenSubtitles it
+tries the file's fingerprint first: subtitles made for this exact file, so it's the right film. A search by title is
+used by itself only when exactly one film fits the title and year (or the show, season and episode); otherwise it
+asks which, and `--yes` skips that film.
+
+It writes `ids` into the notes file (see [docs/notes-format.md](docs/notes-format.md)) and a line in the header of
+the `.notes.ass`, the Behind the Scenes `.ass` and the Plex copy, such as `; Film: imdb tt0079470, tmdb movie/583`.
+Each file is kept as a `.bak` in the film's `context-notes` folder first. The notes don't change, so nothing needs a
+rebuild; later rebuilds keep the line, and a film with its notes inside it (`embed.py`) stays current. It never
+changes a video or a subtitle file. What it sends to OpenSubtitles: the fingerprint (a number made from the file's
+size and its first and last 64 KB), and the title, year, season and episode from the names.
 
 ### Behind the Scenes: how a film was made
 
@@ -646,6 +676,17 @@ below), the plan's limit is reached, or Claude Code isn't installed or signed in
   cost and how much credit is left. With `--yes`, or when nobody can be asked, it stops instead. Either way what was
   written is kept, and running the same command again picks up where it stopped.
 
+**Keeping to the plan's limits** (from the command line, Settings, Claude, or the run options for one run):
+
+- `--week-stop-at 90` (the default): stop starting requests once the plan's weekly limit is 90% used, so Claude is
+  still there for other things until the week resets. What's written is kept; a folder run ends there rather than
+  doing each remaining video's local work only to stop. `100` leaves it to the plan's own limit.
+- `--wait-for-reset`: when the 5-hour session reaches 90% (or the plan says its session limit came first), wait
+  until the session resets (a minute after its reset time) and carry on, instead of stopping. For long runs nobody
+  is watching. Ctrl-C or Cancel stops the wait, keeping what's written. The week is never waited out.
+- `--pace 60` (`context_notes.py`, several videos): start each video that needs Claude at least 60 minutes after the
+  last one started. Finished videos and rebuilds aren't waited for. Spreads a series over the plan's sessions.
+
 **API credits from the start**: `--route api`, or "API credits" in Settings. API usage is billed to your Anthropic
 account, separately from a Claude plan.
 
@@ -722,7 +763,7 @@ after Claude's first reply.
 
 ## Privacy
 
-`--generate` sends the subtitle text to Claude (through Claude Code on your plan, or the Anthropic API). `--refine` also sends frames from your video as small JPEG contact sheets. The Behind the Scenes look-up (`research.py`) sends the film's title, running time and file name, and the transcript of any commentary track it uses, and Claude searches the web for the film. Nothing is sent without the confirmation prompt (unless you pass `--yes`), and nothing else leaves your machine. The scripts use only the Python standard library for networking.
+`--generate` sends the subtitle text to Claude (through Claude Code on your plan, or the Anthropic API). `--refine` also sends frames from your video as small JPEG contact sheets. The Behind the Scenes look-up (`research.py`) sends the film's title, running time and file name, and the transcript of any commentary track it uses, and Claude searches the web for the film. `tmdb.py` sends TMDB only your key, to test it. `film_ids.py` sends OpenSubtitles.com each video's fingerprint (a number made from its size and its first and last 64 KB) and the title, year, season and episode from its name, unless you pass `--offline`. Nothing is sent to Claude without the confirmation prompt (unless you pass `--yes`), and nothing else leaves your machine. The scripts use only the Python standard library for networking.
 
 ## Limitations
 
@@ -734,6 +775,9 @@ after Claude's first reply.
 ## Please don't commit media
 
 Do not add video files, full subtitle files, or generated `.ass`/transcripts of commercial shows and films to a public repository. They are copyrighted. The `.gitignore` here excludes the usual suspects, and the bundled example uses an invented scene written for this project. Sharing *notes* files (which contain your own commentary plus short quoted match phrases) is a grey area; when in doubt, share the commentary and leave the dialogue out.
+
+Sharing notes more widely (a catalog or site of notes, and getting them into Plex, Jellyfin, Emby, Kodi or a NAS) is
+planned, not built: see the [roadmap](ROADMAP.md).
 
 ## Development
 

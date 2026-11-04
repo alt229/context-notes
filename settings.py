@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 settings.py - this install's defaults, read by the app and by every script, so both start from the same choices.
+Created 2026-10-27, modified 2026-11-04.
 
 They're kept in settings.json in ~/.config/context-notes/ (the folder the API key is in; $XDG_CONFIG_HOME moves it).
 A missing or damaged file gives the built-in defaults, which are what the tools did before this file existed.
@@ -27,6 +28,9 @@ BUILT_IN = {
     "route": "plan",                      # where the notes are written: the plan, unless it can't (see api_fallback)
     "api_fallback": False,                # when the plan runs out (or Claude Code can't be used): carry on with API
     "api_fallback_usd": 5.0,              # credits, up to this much a run. Off: ask (or stop, with nobody to ask)
+    "week_stop_at": 90,                   # on the plan: stop starting requests at this much of its weekly limit (100: off)
+    "wait_for_reset": False,              # on the plan: wait for a full 5-hour session to reset instead of stopping
+    "pace_minutes": 0,                    # several videos: start each one at least this long after the last (0: off)
     "claude_path": "",                    # where Claude Code is, when it isn't on the PATH or in the usual places
     "quality": "best",                    # "best" (Opus) or "cheaper" (Sonnet)
     "effort": "",                         # "" = high
@@ -53,6 +57,9 @@ KEYS = {
     "route": ("choice", ROUTES),
     "api_fallback": ("bool", None),
     "api_fallback_usd": ("number", (0.01, 1000)),
+    "week_stop_at": ("number", (1, 100)),
+    "wait_for_reset": ("bool", None),
+    "pace_minutes": ("number", (0, 1440)),
     "claude_path": ("text", 1024),
     "quality": ("choice", ("best", "cheaper")),
     "effort": ("choice", EFFORTS),
@@ -168,15 +175,17 @@ def cli_defaults():
             "notes_language": s["notes_language"] or None, "frames": s["frames"],
             "check_alignment": s["check_alignment"], "recursive": s["recursive"], "offline": s["offline"],
             "download_subs": s["download_subs"], "yes_to_all": s["yes_to_all"], "subs_check": s["check_subs"],
-            "replace_bad_subs": s["replace_bad_subs"]}
+            "replace_bad_subs": s["replace_bad_subs"], "pace": s["pace_minutes"]}
 
 
 def route_defaults():
     """Where the notes are written when --route and --api-fallback are left out: the route ("plan" or "api"), and the
     dollars of API credit a run may use when the plan runs out (0: ask, or stop when nobody can be asked). Kept out
-    of cli_defaults() because an --api-url given by hand (the tests' fake API) means the API: cli_common decides."""
+    of cli_defaults() because an --api-url given by hand (the tests' fake API) means the API: cli_common decides.
+    Also the plan's limits a run keeps to: the weekly stop (percent) and whether a full 5-hour session is waited out."""
     s = effective()
-    return {"route": s["route"], "api_fallback": float(s["api_fallback_usd"]) if s["api_fallback"] else 0.0}
+    return {"route": s["route"], "api_fallback": float(s["api_fallback_usd"]) if s["api_fallback"] else 0.0,
+            "week_stop_at": float(s["week_stop_at"]), "wait_for_reset": s["wait_for_reset"]}
 
 
 def look_defaults():

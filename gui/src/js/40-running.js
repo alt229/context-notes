@@ -119,6 +119,9 @@ function handle(item) {
   else if (ev.type === "progress") progress(ev);
   else if (ev.type === "estimate") lastEstimate = ev;
   else if (ev.type === "usage") loadUsage();
+  else if (ev.type === "waiting") {                        // --pace, or a full 5-hour session waited out
+    if (ev.until) note("right", "Waiting", ev.reason); else hideNote("right");
+  }
   else if (ev.type === "question") ask(ev);
   else if (ev.type === "input") askText(ev);
   else if (ev.type === "video-result") {

@@ -37,6 +37,10 @@
             out<small>This run only; the usual choice is in Settings.</small></span></label>
           <div class="inline"><span>up to $</span><input id="api_fallback_usd" type="text" inputmode="decimal"
             placeholder="5.00" aria-label="The most API credit this run may use, in dollars"></div>
+          <div class="inline"><span>Stop at</span><input id="week_stop_at" type="text" inputmode="decimal" placeholder="90"
+            aria-label="Stop at this percentage of the plan's weekly limit"><span>% of the plan's week</span></div>
+          <label class="check"><input type="checkbox" id="wait_for_reset"><span>Wait for the 5-hour session to
+            reset<small>Instead of stopping at 90%. For long runs nobody is watching.</small></span></label>
         </div>
         <label class="field"><span>The film's language</span>
           <select id="film_language"><option value="">Work it out from the video</option></select></label>
@@ -47,6 +51,12 @@
           <div class="inline"><label for="limit">Only the first</label><input id="limit" type="text" inputmode="decimal"
             placeholder="all"><span>minutes</span></div>
           <small>Leave it empty for the whole thing. Try 5 to test cheaply.</small>
+        </div>
+        <div class="field">
+          <span>Several videos</span>
+          <div class="inline"><label for="pace_minutes">Start one every</label><input id="pace_minutes" type="text"
+            inputmode="decimal" placeholder="0"><span>minutes at most</span></div>
+          <small>Spreads a series over the plan's sessions. 0 or empty: one after another.</small>
         </div>
         <fieldset>
           <legend>On screen</legend>

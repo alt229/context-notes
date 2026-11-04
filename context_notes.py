@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 context_notes.py - the whole workflow, for one video or a folder of them.
+Created 2026-10-17, modified 2026-11-04.
 
     python3 context_notes.py "S01E03 Fifty Fifty.mp4"
     python3 context_notes.py "/Volumes/Media/TV Shows/IT Crowd/Season 1"
@@ -39,6 +40,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -442,6 +444,31 @@ def run(cmd, cwd):
             except subprocess.TimeoutExpired:
                 p.kill()
             raise
+
+
+def pace(v, opts, last_start):
+    """--pace: before video `v`, wait until the minutes have passed since the last video that needed Claude started.
+    Returns when this one started, if it needs Claude (a finished video, or one that only needs rebuilding, isn't
+    waited for and doesn't count); else `last_start` as it was."""
+    if not opts.pace:
+        return last_start
+    st = inspect(v, opts)
+    if st["done"] or st["rebuild"]:
+        return last_start
+    if last_start is not None:
+        import usage
+        usage.wait_until(last_start + opts.pace * 60,
+                         f"Next: {v.name}, {opts.pace:g} min after the last video started (--pace, or Settings).")
+    return time.time()
+
+
+def plan_stopped(opts):
+    """After a video stopped: the plan's weekly stop or a full 5-hour session (not waited out), with no API credits
+    allowed. Then every video after it would stop the same way after its local work, so the run ends here."""
+    if opts.route != "plan" or opts.api_fallback > 0:
+        return None
+    import usage
+    return usage.week_full() or (None if opts.wait_for_reset else usage.session_full())
 
 
 def check_route(opts):
@@ -1111,6 +1138,10 @@ def main(argv=None):
     ap.add_argument("--no-refine", action="store_true", help="skip the (pricier) video-frames step")
     ap.add_argument("--redo", action="store_true", help="write the notes again even if they exist (old ones kept as .bak)")
     ap.add_argument("--recursive", action="store_true", help="with a folder: include subfolders")
+    ap.add_argument("--pace", type=cli_common.minutes_arg, metavar="MINUTES",
+                    help="with several videos: start each one that needs Claude at least this many minutes after the "
+                         "last one started, to spread a series over the plan's sessions (default: from Settings, 0 "
+                         "unless changed: no wait)")
     ap.add_argument("--frames", choices=("keyframes", "dense"), default="keyframes", help="for the refine step")
     cli_common.add_claude_args(ap, model_default="from Settings, Opus unless changed",
                                effort_default="from Settings, high unless changed")
@@ -1205,8 +1236,10 @@ def main(argv=None):
 
     say(f'\n$ CN={shlex.quote(str(HERE))}')
     results = {}
+    last_start = None
     try:
         for k, v in enumerate(videos, 1):
+            last_start = pace(v, opts, last_start)
             say(f"\n=== {v.name}" + (f"  ({k} of {len(videos)})" if len(videos) > 1 else "") + " ===")
             prompts.event("video", path=str(v), index=k, total=len(videos))
             try:
@@ -1215,6 +1248,10 @@ def main(argv=None):
                 say(f"! {e}")
                 results[v] = "stopped"
                 prompts.event("video-result", path=str(v), result="stopped", reason=str(e))
+                full = plan_stopped(opts) if k < len(videos) else None
+                if full:
+                    say(f"! {full} The other videos wait for it: run the same command again then.")
+                    break
                 if k < len(videos) and ask(f"{v.name} stopped: {e} Go on to the next video?",
                                            {"y": "yes", "n": "no, stop here"}, "y", opts.yes, id="folder.next") == "n":
                     break

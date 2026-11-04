@@ -15,7 +15,9 @@ function options() {
     redo: $("redo").checked, audience: $("audience").value.trim(), offline: $("offline").checked,
     effort: $("effort").value, seconds_per_word: $("spw").value.trim(), note_background: $("note_background").value,
     box_opacity: $("note_background").value === "see-through" ? $("opacity").value.trim() : "",
-    ...(onPlan() ? { api_fallback: $("api_fallback").checked, api_fallback_usd: $("api_fallback_usd").value.trim() } : {}),
+    ...(onPlan() ? { api_fallback: $("api_fallback").checked, api_fallback_usd: $("api_fallback_usd").value.trim(),
+                     week_stop_at: $("week_stop_at").value.trim(), wait_for_reset: $("wait_for_reset").checked } : {}),
+    pace_minutes: $("pace_minutes").value.trim(),
   };
 }
 function onPlan() { return !!info && info.settings.route === "plan"; }
@@ -37,6 +39,9 @@ function applySettings() {
   const s = info.settings;
   $("api_fallback").checked = s.api_fallback;
   $("api_fallback_usd").value = Number(s.api_fallback_usd).toFixed(2);
+  $("week_stop_at").value = String(s.week_stop_at);
+  $("wait_for_reset").checked = s.wait_for_reset;
+  $("pace_minutes").value = s.pace_minutes ? String(s.pace_minutes) : "";
   showFallback();
   const q = document.querySelector(`input[name=quality][value="${s.quality}"]`);
   if (q) q.checked = true;
@@ -67,6 +72,9 @@ function renderDefaults() {
   $("d_api_fallback").checked = s.api_fallback;
   $("d_api_fallback_usd").value = Number(s.api_fallback_usd).toFixed(2);
   $("d_api_fallback_usd").disabled = !s.api_fallback;
+  $("d_week_stop_at").value = String(s.week_stop_at);
+  $("d_wait_for_reset").checked = s.wait_for_reset;
+  $("d_pace_minutes").value = String(s.pace_minutes);
   msg("c_msg", "");
   $("d_claude_path").value = s.claude_path || "";
   $("d_quality").value = s.quality;
@@ -119,8 +127,13 @@ async function saveDefaults() {
 async function saveClaude() {
   const usd = Number($("d_api_fallback_usd").value.trim().replace(/^\$/, "").replace(",", ""));
   if (!(usd >= 0.01 && usd <= 1000)) return msg("c_msg", "Up to: an amount in dollars from 0.01 to 1,000, like 5.", false);
+  const week = Number($("d_week_stop_at").value.trim().replace(/%$/, "") || "90");
+  if (!(week >= 1 && week <= 100)) return msg("c_msg", "Stop at: a percentage of the weekly limit from 1 to 100, like 90.", false);
+  const pace = Number($("d_pace_minutes").value.trim() || "0");
+  if (!(pace >= 0 && pace <= 1440)) return msg("c_msg", "Start one every: minutes from 0 to 1440, like 60.", false);
   const body = { route: document.querySelector("input[name=d_route]:checked").value,
                  api_fallback: $("d_api_fallback").checked, api_fallback_usd: usd,
+                 week_stop_at: week, wait_for_reset: $("d_wait_for_reset").checked, pace_minutes: pace,
                  claude_path: $("d_claude_path").value.trim() };
   const r = await api("/api/settings", body);
   if (r.error) return msg("c_msg", r.error, false);

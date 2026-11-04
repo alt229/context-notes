@@ -111,6 +111,20 @@ code to paste); `POST /api/claude/login/cancel` gives up (`{"claude"}`); `POST /
 `claude auth logout` (`{"ok", "message", "claude"}`). `POST /api/claude/check` looks again (`{"claude"}`), and
 `POST /api/settings` answers with `claude` too when `claude_path` changed.
 
+`POST /api/tmdb` with `{"api_key"}` runs `tmdb.py --set-key` and answers `{"ok", "lines", "tmdb"}` (the key
+never comes back; `tmdb` is `{"saved", "ends", "problem"?}`, also in `/api/info`). Only from this computer.
+
+### `waiting`
+
+A run waiting before it carries on: `--pace` between videos, or a full 5-hour session waited out
+(`--wait-for-reset`): `{"type": "waiting", "step": "generate", "until": 1793900000, "reason": "Your plan's 5-hour
+session is 91% used, and resets 3:50 PM. Waiting until 3:51 PM (in 42 min)."}`. `step` is `null` for `--pace`.
+When the wait is over, the same event with `until` and `reason` `null`. Cancel works while it waits.
+
+The run form's `/api/run` takes `week_stop_at` (percent; `--week-stop-at`), `wait_for_reset` (true/false) and
+`pace_minutes` (`--pace`); each left out (or empty) means Settings decides. Settings keeps `week_stop_at` (1 to 100,
+default 90), `wait_for_reset` (default false) and `pace_minutes` (0 to 1440, default 0).
+
 ### `progress`
 
 This reports how far a long task has got, for a progress bar.
@@ -183,6 +197,17 @@ moving, `tidy-done` says how it went (the app's Tidy button runs it with `--dry-
 @context-notes {"v": 1, "type": "tidy-done", "moved": 2, "problems": []}
 ```
 
+### `film-ids`
+
+`film_ids.py` sends one per film with notes: `status` is `found` (it has `ids` to write, and `source`, where they
+came from), `done` (the notes and `.ass` already have them) or `not-found` (with `choices`: the films a title search
+couldn't decide between, each `{ids, name}`, maybe none):
+
+```
+@context-notes {"v": 1, "type": "film-ids", "video": "/Movies/Life.of.Brian.1979.mkv", "ids": {"type": "movie", "imdb": "tt0079470", "tmdb": 583, "title": "Life of Brian", "year": 1979, "source": "OpenSubtitles: subtitles made for this exact file", "found": "2026-11-03"}, "source": "OpenSubtitles: subtitles made for this exact file", "status": "found"}
+@context-notes {"v": 1, "type": "film-ids", "video": "/Movies/Home Video.mkv", "status": "not-found", "choices": []}
+```
+
 `tidy.py` (unless `--no-check-subs` or Settings' `check_subs` is off), `subcheck.py` and a run of `context_notes.py`
 (on the subtitles it's about to use) send one `subs-check` per damaged subtitle file or track; tidy sends them before
 the `tidy` events, and `/api/tidy` returns them as `subs` (the dialog lists them; moving runs with `--no-check-subs`).
@@ -192,6 +217,20 @@ language isn't the text's). With `--inside` there's `progress` too (task `subs-c
 
 ```
 @context-notes {"v": 1, "type": "subs-check", "video": "/TV/Show - s05e08.mkv", "where": "inside, track 1 (English)", "problems": {"mangled": {"count": 167, "examples": ["Î½ (should be ν)"]}}}
+```
+
+### `cleanup-film` and `cleanup-summary`
+
+`cleanup.py` sends one `cleanup-film` (before it asks `cleanup.go`) per video that would change: `status` `rename` (with
+`target`, `sidecars`: the files named after it that go with it, and `note`, e.g. TMDB has no such episode) or
+`by-hand` (with `reason`). For a disc folder `video` is the folder. One `cleanup-fix` per name to put right beside
+a film (`src`, `dst`, `change`: `rename` for a file, `work` for a notes folder). Then one `cleanup-summary`
+(`rename`, `tidy`, `by_hand`, `fixes`, `clutter`):
+
+```
+@context-notes {"v": 1, "type": "cleanup-film", "video": "/Movies/Akira/Akira.1988.1080p.mkv", "target": "/Movies/Akira (1988) {tmdb-149}/Akira (1988) {tmdb-149}.mkv", "status": "rename", "sidecars": ["/Movies/Akira/Akira.1988.1080p.en.srt"], "note": null}
+@context-notes {"v": 1, "type": "cleanup-film", "video": "/Movies/Total Recall KLAXXON.avi", "status": "by-hand", "reason": "TMDB has no film called “Total Recall KLAXXON”"}
+@context-notes {"v": 1, "type": "cleanup-summary", "rename": 34, "tidy": 0, "by_hand": 16, "fixes": 0, "clutter": 19}
 ```
 
 ### `embed-plan`, `embed-video`, `embed-result` and `embed-backup`
@@ -242,7 +281,7 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 | `research.resume` | `research.py` | p / s (p) | The last look-up stopped part-way: pick up (keeps the facts found; sends only the rest), or start again |
 | `research.commentary` | `research.py` | y / n (y) | The film has commentary tracks: transcribe them on this computer (free, slow) and use them, or use the web only |
 | `bts.spoilers` | `make_ass.py --behind-the-scenes` | y / n (y) | Spoilers set to "ask" (Settings, or `--spoilers ask`): show the Behind the Scenes notes that give away something later in the film? Asked once per film, when it has some; the answer is kept in its notes file and used from then on (`--spoilers include` or `leave-out` changes it) |
-| `plan.fallback` | `generate_notes.py`, `refine_notes.py`, `context_notes.py` | y / n (**n**) | The Claude plan can't go on (its usage limit, the 5-hour session at 90%, or Claude Code missing or signed out) and no API credits are allowed for the run (`--api-fallback`): carry on with API credits? The text says what the rest would cost. A yes holds for the rest of the run (the later steps don't ask). With `--yes` the answer is no, and the run stops with what was written kept |
+| `plan.fallback` | `generate_notes.py`, `refine_notes.py`, `context_notes.py` | y / n (**n**) | The Claude plan can't go on (its usage limit, the 5-hour session at 90% when it isn't waited out, the weekly stop, or Claude Code missing or signed out) and no API credits are allowed for the run (`--api-fallback`): carry on with API credits? The text says what the rest would cost. A yes holds for the rest of the run (the later steps don't ask). With `--yes` the answer is no, and the run stops with what was written kept |
 | `plan.allowance` | `generate_notes.py`, `refine_notes.py` | y / n (**n**) | The next API request would go past the run's `--api-fallback` allowance: carry on anyway? |
 | `credit.continue` | `generate_notes.py`, `refine_notes.py` | y / n (**n**) | A balance is set (`usage.py`) and the next request is expected to cost more than what's left: carry on anyway? Asked once per run, between requests. With `--yes` the answer is no, and the run stops with what was written kept |
 | `generate.resume` | `generate_notes.py` | p / s (p) | The last run stopped part-way: pick up where it left off, or start again |
@@ -256,6 +295,8 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 | `notes.unreadable` | `context_notes.py` | y / n (y) | Claude's reply for some parts couldn't be read last time: send just those lines again (no frames step) |
 | `folder.next` | `context_notes.py` | y / n (y) | One video stopped: go on to the next? |
 | `tidy.move` | `tidy.py` | y / n (y) | Move the working files listed above into their `context-notes` folders |
+| `ids.which` | `film_ids.py` | 1 / 2 / 3 / 4 / n (n) | A search by title found more than one film that might be this video, or one that doesn't fit its year: which is it? (n: leave it without ids) |
+| `ids.write` | `film_ids.py` | y / n (y) | Write the ids listed above into these films' notes files and `.ass` headers (each file kept as a `.bak`) |
 | `venv.replace` | `make_venv.py` | y / n (**n**) | `.venv` was made with another Python than `.python-version` says: rename it to `.venv-<version>` (kept) and make a new one? Not run by the app |
 | `embed.go` | `embed.py` | y / n (y) | Put the notes inside the films listed above (rewrites each; the original is kept) |
 | `embed.delete` | `embed.py --delete-backups` | y / n (n) | Delete the kept originals listed (can't be undone) |
@@ -265,6 +306,8 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 | `opensubtitles.api-key` | `find_subs.py --set-opensubtitles` | input, hidden | |
 | `opensubtitles.username` | `find_subs.py --set-opensubtitles` | input | |
 | `opensubtitles.password` | `find_subs.py --set-opensubtitles` | input, hidden | |
+| `tmdb.api-key` | `tmdb.py --set-key` | input, hidden | |
+| `cleanup.go` | `cleanup.py` | y / n (n) | Rename the listed videos, with their files, and move the clutter (not in Yes to all) |
 
 `alignment.check` only comes up in a GUI run. With no terminal and no GUI, the scripts skip that question, as they
 always have, and print a hint about `--check-alignment` instead (unless Yes to all questions is on: then it's yes).

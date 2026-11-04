@@ -40,6 +40,21 @@
           aria-label="The most API credit a run may use, in dollars"><span>a run</span></div>
         <small>A run is one press of Write the notes: every film and step in it.</small>
       </div>
+      <div class="field">
+        <span>Stop at</span>
+        <div class="inline"><input id="d_week_stop_at" type="text" inputmode="decimal" placeholder="90"
+          aria-label="Stop at this percentage of the plan's weekly limit"><span>% of the plan's weekly limit</span></div>
+        <small>So Claude is still there for other things this week. What's written is kept; the next run picks up.
+          100: only the plan's own limit.</small>
+      </div>
+      <label class="check"><input type="checkbox" id="d_wait_for_reset"><span>Wait for the 5-hour session to reset<small>When
+        it's 90% used, wait until it resets and carry on, instead of stopping. Never waits out the week.</small></span></label>
+      <div class="field">
+        <span>Several videos</span>
+        <div class="inline"><span>Start one every</span><input id="d_pace_minutes" type="text" inputmode="decimal"
+          placeholder="0" aria-label="Minutes between the starts of videos"><span>minutes at most</span></div>
+        <small>Spreads a series over the plan's sessions. 0: one after another.</small>
+      </div>
       <div class="row">
         <button type="button" class="btn primary" id="c_save">Save</button>
         <button type="button" class="btn" id="claudeCheckBtn">Check Claude Code again</button>
@@ -141,6 +156,21 @@
       <p class="hint remote-only">To save the login, use a browser on the computer running the app: from here the
         password would cross your network unencrypted.</p>
       <p class="msg" id="osMsg" role="status"></p>
+    </section>
+    <section>
+      <h2>TMDB (themoviedb.org)</h2>
+      <p>Optional. Used to tidy your library's names: film and show titles in your language, episode titles. You need a
+        free account, then its key from
+        <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer noopener">themoviedb.org/settings/api</a>
+        (the "API Key" or the longer "API Read Access Token": either works).</p>
+      <p id="tmdbStatus"></p>
+      <div class="local-only">
+        <label class="field"><span>TMDB key</span><input id="tmdbKey" type="password" autocomplete="off"></label>
+        <button type="button" class="btn" id="saveTmdbBtn">Save and test the key</button>
+      </div>
+      <p class="hint remote-only">To save the key, use a browser on the computer running the app: from here it would
+        cross your network unencrypted.</p>
+      <p class="msg" id="tmdbMsg" role="status"></p>
     </section>
     <section>
       <h2>VLC extension</h2>

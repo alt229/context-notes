@@ -12,6 +12,7 @@ $("saveKeyBtn").addEventListener("click", saveKey);
 $("keyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") saveKey(); });
 $("testKeyBtn").addEventListener("click", testKey);
 $("saveOsBtn").addEventListener("click", saveOs);
+$("saveTmdbBtn").addEventListener("click", saveTmdb);
 $("saveCreditBtn").addEventListener("click", saveCredit);
 $("creditInput").addEventListener("keydown", (e) => { if (e.key === "Enter") saveCredit(); });
 $("apiMeter").addEventListener("click", async () => { await reloadInfo(); $("settings").showModal(); $("creditInput").focus(); });

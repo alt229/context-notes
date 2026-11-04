@@ -2,16 +2,18 @@
 """
 cli_common.py - the command-line options that mean the same in context_notes.py and make_ass.py, defined once, and
 the code that passes them on from one script to the next.
+Created 2026-10-27, modified 2026-11-04.
 
-- add_claude_args(group, ...): how to talk to Claude: --model, --effort, --route, --api-fallback, --api-key-file and
-  --api-url (hidden). settle_route(opts) fills in the route and the API-credit allowance after parsing.
+- add_claude_args(group, ...): how to talk to Claude: --model, --effort, --route, --api-fallback, --week-stop-at,
+  --wait-for-reset, --api-key-file and --api-url (hidden). settle_route(opts) fills in the route, the API-credit
+  allowance and the plan's limits after parsing (and gives the limits to usage.py, which Sender checks).
 - add_look_args(group): how the notes look: --reading-speed, --note-background, --note-opacity.
   check_look_args(ap, opts) rejects a reading speed of 0 or less after parsing.
 - add_limit_arg(group, help): --limit, a time like 5:00, 300 or 5m.
 - add_spoiler_arg(group): --spoilers, for the Behind the Scenes track (include, leave-out, ask).
 - claude_args(opts), look_args(opts), limit_args(opts), spoiler_args(opts): the same options, as they'd be typed,
   for the next script.
-- percent_arg: the type of --note-opacity.
+- percent_arg, week_arg, minutes_arg: the types of --note-opacity, --week-stop-at and context_notes.py's --pace.
 
 Options whose meaning differs between the scripts (--title, --yes, --audience, --film-language, ...) stay with each
 script, and so does the speech model's --model in analyze.py, align_check.py and find_subs.py.
@@ -49,6 +51,28 @@ def dollars_arg(text):
     return value
 
 
+def week_arg(text):
+    """--week-stop-at: a percentage from 1 to 100, with or without a % sign."""
+    try:
+        value = float(str(text).strip().rstrip("%"))
+    except ValueError:
+        value = -1.0
+    if not 1 <= value <= 100:
+        raise argparse.ArgumentTypeError(f"{text!r} isn't a percentage from 1 to 100 (100: only the plan's own limit)")
+    return value
+
+
+def minutes_arg(text):
+    """--pace: minutes, from 0 to 1440 (a day)."""
+    try:
+        value = float(str(text).strip().rstrip("m"))
+    except ValueError:
+        value = -1.0
+    if not 0 <= value <= 1440:
+        raise argparse.ArgumentTypeError(f"{text!r} isn't a number of minutes from 0 to 1440, like 60")
+    return value
+
+
 def add_claude_args(group, model_default, effort_default, show_key_file=False):
     """--model, --effort, --route, --api-fallback, --api-key-file and the hidden --api-url. The model and effort
     defaults differ between the scripts, so each says what its own are."""
@@ -59,6 +83,13 @@ def add_claude_args(group, model_default, effort_default, show_key_file=False):
                        help="when the plan runs out or Claude Code can't be used, carry on with API credits, up to "
                             "this many dollars for this run. 0: ask first, or stop when nobody can be asked "
                             "(default: from Settings, 0 unless changed)")
+    group.add_argument("--week-stop-at", type=week_arg, default=None, metavar="PERCENT",
+                       help="on the plan: stop starting requests once its weekly limit is this full, so Claude is "
+                            "still there for other things (what's written is kept). 100: only the plan's own limit "
+                            "(default: from Settings, 90 unless changed)")
+    group.add_argument("--wait-for-reset", action=argparse.BooleanOptionalAction, default=None,
+                       help="on the plan: when the 5-hour session is 90%% used, wait for it to reset and carry on, "
+                            "instead of stopping (default: from Settings, off unless changed)")
     group.add_argument("--model", default=None, help=f"Claude model (default: {model_default})")
     group.add_argument("--effort", choices=EFFORTS, default=None,
                        help=f"the model's effort setting (default: {effort_default}; left out for Haiku 4.5, which "
@@ -77,6 +108,12 @@ def settle_route(opts):
         opts.route = "api" if getattr(opts, "api_url", None) else defaults["route"]
     if getattr(opts, "api_fallback", None) is None:
         opts.api_fallback = defaults["api_fallback"]
+    if getattr(opts, "week_stop_at", None) is None:
+        opts.week_stop_at = defaults["week_stop_at"]
+    if getattr(opts, "wait_for_reset", None) is None:
+        opts.wait_for_reset = defaults["wait_for_reset"]
+    import usage
+    usage.set_plan_limits(opts.week_stop_at, opts.wait_for_reset)
     return opts
 
 
@@ -90,6 +127,10 @@ def claude_args(opts):
             out += [flag, value]
     if getattr(opts, "api_fallback", None) is not None:
         out += ["--api-fallback", f"{opts.api_fallback:g}"]
+    if getattr(opts, "week_stop_at", None) is not None:
+        out += ["--week-stop-at", f"{opts.week_stop_at:g}"]
+    if getattr(opts, "wait_for_reset", None) is not None:
+        out.append("--wait-for-reset" if opts.wait_for_reset else "--no-wait-for-reset")
     return out
 
 

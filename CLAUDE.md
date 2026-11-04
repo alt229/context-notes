@@ -18,281 +18,82 @@ Read `README.md` for the full command reference. This file holds what we've lear
 
 ## Where things left off
 
-Last updated 2026-11-02. Replace this section when a session changes the project (see rule 10).
-It's the first thing to read when picking the work up on another computer or after losing the connection.
+Last updated 2026-11-04. Only what's open. Rewrite it in place when a session changes the project (rule 10); finished
+items leave it (code: `CHANGELOG.md`; anything else: the top of `docs/work-log.md`). Older detail is in those two
+files (rule 11).
 
-- **Uncommitted, 2026-11-02: GitHub's tests green again, and a Windows installer.** The `tests` workflow had
-  failed on every push since late October (Linux passed; `newer-python` fails by design and doesn't count). Windows
-  (21): tests read UTF-8 files in cp1252 (now `read_text(encoding="utf-8")` everywhere in `tests/`); the VLC install
-  test wrote to the runner's real `%APPDATA%` (conftest now sets `APPDATA`); a Windows-only folder message; real
-  bugs: `.claude/statusline.py` now prints UTF-8, `prompts.interactive` no longer counts NUL as a terminal
-  (`_terminal`, GetConsoleMode), and `app.py`/`analyze.py`/`claude_api.py`/`find_subs.py` read their files as UTF-8.
-  macOS (1): `app.own_names` called `getfqdn` per request, >30 s on GitHub's Macs: now `lru_cache`d, and the hosted
-  test stubs it. New `install.ps1` (Erin: "easy install script"): `irm .../install.ps1 | iex` installs Git, Python
-  (from `.python-version`), ffmpeg, VLC and Claude Code (both after a yes) with winget, clones to
-  `%USERPROFILE%\context-notes`, runs `make-shortcut.bat --no-pause`, starts `context-notes.bat`. README Windows
-  section, CHANGELOG, `test_the_windows_installer_hangs_together`. Tested on the Mac: full suite, ruff, and
-  `install.ps1` parses in pwsh. **Not run on Windows yet:** Erin is setting up a Windows machine to run
-  `python -m pytest -q` and the installer; GitHub's run after she publishes is the other check.
-- **The repo:** this folder is part of Erin's larger repo in `~/.alt229/`; its `.git` isn't visible from the connected
-  folder. Leave changes in place and Erin commits them herself (2026-10-30); friends get them with `git pull`.
-  Erin publishes with her shell alias `context-notes_publish`, which updates both repos (the `~/.alt229` one and
-  github.com/alt229/context-notes); no session needs to touch remotes.
-- **Windows (2026-10-30, not committed):** a friend on Windows hit trouble; the fixes are in place, see
-  CHANGELOG "Fixed": `prompts.py` makes stdout/stderr never raise on a pipe (`errors="replace"`) and defines
-  `PYTHON` ("python" on Windows) for printed hints; `tests/conftest.py` and `tests/test_prompts.py` redirect
-  `USERPROFILE` as well as `HOME`; `.claude/settings.json` has a `python` twin for every `python3` allow entry and
-  the commands/agents say to use `python` on Windows; `bench.py` falls back from symlink to hard link/copy; the
-  transcript cache is explicit UTF-8; README's Windows list gained key-file permissions and long paths. Ruff clean;
-  the suite passed in Claude's Linux VM (one cancel-timing test flaked once under load, passed on rerun). `~/.config`
-  on Windows is **not** a problem: `Path.home()` is `%USERPROFILE%` there. The stale early-October copy in
-  `~/Documents/Claude/Projects/` is now `...-ARCHIVE`; ClaudErius's "two remotes" plan was based on it and is withdrawn.
-- **Committed:** Erin committed step 1 (the modules) on 2026-10-27. Steps 2 to 5 below are not committed yet. Ask Erin
-  before committing, and never push (`.claude/settings.json` denies it).
-- **In progress: the ideas from PR #1, done our way** (the plan is the project doc `claude/pr1-plan.md`; none of the
-  PR's code is used). All 5 steps are done:
-  1. The modules (see "Where the code lives"); `make_ass.py` by hand takes the model and effort from Settings too.
-  2. The plan by default (`--route plan`, Settings "Claude"): both steps through Claude Code in the background, with
-     `--api-fallback USD` ("Use API credits when the plan runs out, up to $___ a run") or the `plan.fallback` question,
-     and the 90% stop. Tried against the real Claude Code 2.1.311 in the cloud workspace (two tiny requests: text,
-     and a contact sheet opened with Read). Not yet run on Erin's Mac: her first real run on the plan is the check.
-     A separate review of the money paths found and fixed: an allowance with a model of unknown price (now asks or
-     stops), a Claude Code that can't say how it's signed in (now not used: it might be an API key), a yes that only
-     lasted one step (now the whole run, `usage.approve_api_for_run`), Claude Code left running after a stop (own
-     process group, `claude_code._stop`), the limit words read from the model's reply (now only Claude Code's own),
-     and a dollar figure printed for plan requests.
-     Also (Erin, 2026-10-27): every plan request saves the plan's windows it reports (`--output-format stream-json`,
-  `rate_limit_event.rate_limit_info.unifiedWindows`, utilization 0 to 1, read as a fraction: check it against the
-  status line's figures) via `usage.save_plan_reading`; the app's Plan meter is a button that gets a fresh reading
-  (`POST /api/plan/refresh`, `claude_code.ping`: one Haiku request, not in the ledger).
-  3. `/refine` (2026-10-27): the frames step in a Claude Code conversation (see the pipeline, step 4). Not tried with
-     a real agent yet: Erin's first `/refine` is the check (Claude Code will ask to let the agent open the contact
-     sheets, which are in the film's folder).
-  4. The page from parts (2026-10-27): `gui/src`, joined by `app.page()`; byte for byte the page it was before (checked,
-     and in a headless browser). `gui/index.html` was moved to `gui/src/page.html` and cut down to the frame.
-  5. `--hosted` (2026-10-27): see "The app" below. Tried in the cloud workspace from a second address: the Mac-only
-     actions hidden and refused, the rest working.
-  All five steps are built; steps 2 to 5 aren't committed yet. Still tabled: friend log-ins, and waiting for the
-  5-hour reset by itself (now possible: background requests report the reset time).
-- **Dr Who library tidy (2026-10-30, not project code; the scripts were in a session scratchpad):** all 187 videos
-  in `/Volumes/Media/TV Shows/Dr Who` renamed `Doctor Who (AIR YEAR) - sNNeMM.mkv`. 185 episodes carry a segment title
-  and Matroska tags (title, date, season, episode, show). S11E01's audio was retagged German to English. Erin's
-  rule for specials: each goes at the end of its series, in air order; specials from years with no series (2009,
-  2022, 2023) join the series before. So Series 4 runs to E18 (End of Time Part Two), Series 7 to E16 (Time of the
-  Doctor) and Series 13 to E12 (Church on Ruby Road), and Season 00 is empty. Plex's guide (TMDB) lists these as
-  specials, so they may show without artwork. Undo logs are in `~/.config/drwho-rename/` (the Last Christmas WEB-DL
-  copy was deleted and can't be restored). Season 3 E13 is truncated and held until a full copy arrives. Next: a
-  Plex rescan.
-- **Uncommitted, 2026-10-30 (evening): Tidy's "already there", a damaged numpy, Python 3.15.**
-  - Tidy on Father Ted S01E04 left `4. Competition Time.notes.ass.bak` beside the video ("is already there" in its
-    context-notes folder). Cause: `context_notes.keep_old_ass` (every rebuild) kept the `.ass` backup beside the video,
-    while the frames step keeps its own in the working folder; so the app's Tidy note never went away. Now rebuilds
-    use `context_notes.ass_backup` (`workfiles.place(video)`, like refine/chat_notes), and `workfiles.old_files` gives
-    a backup whose name is taken the next free number (`_free_name`: `.bak2`, `.bak3`; other files still stay put).
-    tidy's list and the page show "(becomes X: that name is taken)". Page grammar: "1 film here still has its",
-    "1 item ... moves". Erin's existing stray file moves as `.bak2` on her next Tidy (nothing to restart: tidy runs as
-    a script and the page is read per request).
-  - Breaking Bad S01E01's sync check crashed: `module 'numpy' has no attribute 'frombuffer'` (Python 3.14 on her
-    Mac). No project code touches `sys.modules`; it's a numpy folder with no `__init__.py` (an interrupted install or
-    upgrade). `analyze.need()` now says the package is damaged and prints `"<python>" -m pip install
-    --force-reinstall numpy`. Not confirmed on her Mac: her next run shows either the new message or nothing wrong.
-  - Python pinned to 3.14 (Erin: lock the venv to one version until she updates the repo; no uv, fewer things to
-    depend on). Why: `pip download` checks found `requirements.txt` installs on 3.14 on Windows, Linux (x86_64,
-    aarch64) and Apple Silicon, but on 3.15 (python.org's default now) nowhere: onnxruntime, faster-whisper's, has no
-    3.15 build, and pip then installs nothing, numpy and Pillow included. Intel Macs: onnxruntime stopped at 1.23.2,
-    which has no 3.14 build, so speech recognition there needs 3.13 (README says so). Built: `.python-version`
-    (`3.14`, the one pin); `pythonpin.py` (`pinned`, `newer_than_pin`, `status`); `make_venv.py` (finds 3.14: `py
-    -3.14` on Windows, `python3.14` on the PATH, Homebrew's or python.org's folders; never downloads Python; a `.venv`
-    on another version becomes `.venv-<version>` after a yes (question `venv.replace`; `--yes`), then installs
-    requirements and faster-whisper as a separate step, saying so when it can't); `requirements.txt`'s faster-whisper
-    has `python_version < "3.15"` (a test keeps it one above the pin); the app's window, `context_notes.py` (not in
-    json mode) and Settings' About line say when a newer Python started them; CI tests on `.python-version` and a
-    `newer-python` job (3.15, allowed to fail) shows when to lift the pin. README (Requirements, Quick start, Windows,
-    Development), `.gitignore` (`.venv-*/`). Tried for real in the cloud workspace (Python 3.13, pin set to 3.13 in a
-    copy): a stale `.venv` kept as `.venv-3.1`, the new one imports numpy, Pillow and faster_whisper; with the marker
-    tightened it installed the rest and printed the speech message. Not run on Windows or a Mac.
-    Her Mac has both 3.14 and 3.15 (`__pycache__` has both).
-  - Checked on the real files at 9 pm (after the other session's subtitle-check work had landed, and with all these
-    changes still in place): `tidy.py --dry-run` on Father Ted S1 lists `4. Competition Time.notes.ass.bak ->
-    ...bak2` (the folder's `.bak` is the frames step's, Oct 28 01:27 UTC; the stray one a rebuild's, 17:36; they
-    differ). Breaking Bad S01E01 and E02 in the Linux VM (numpy 2.2.6, so not her Mac's numpy): subtitles clean
-    (`subcheck`), E02's pulled out, and the sync check in sync on both with `--limit 10:00` (a full pass reads the
-    whole 3.5 to 4.3 GB file over the share at about 36 MB/s and doesn't fit the VM's 3-minute limit; E01's full
-    attempt was still reading, no error, when it was stopped). Left in their analysis folders: `analysis.json`,
-    `report.txt` and `soundtrack-first600s.*` (the full run rewrites the first two and makes its own cache).
-    `py_compile` left some `*.cpython-310.pyc` in `__pycache__` (git-ignored; deleting isn't allowed from the VM).
-  - Friend's mp4 to mkv trouble: Erin troubleshoots the file locally (the friend only has the app's screen) and pushes
-    any fix to him.
-  - Another session was editing `tidy.py`, `context_notes.py`, `app.py` and `gui/src/js/60-tidy.js` at the same time
-    (03:52 UTC); one test run caught `tidy.py` half-saved. All of these changes were still in place afterwards.
-  - Tested: 549 tests (all pass but the Windows-only registry test) in the Linux VM, `ruff check .` clean. New tests: `test_tidy_gives_a_backup_whose_name_is_taken_the_next_number`,
-    `test_a_rebuild_of_a_film_an_earlier_version_started_keeps_its_backup_beside_it`, the rebuild-backup test
-    rewritten (it had asserted the old place), `test_a_damaged_package_says_so_instead_of_a_traceback`.
-    The page's wording isn't checked in a browser. Docs: CHANGELOG "Fixed", README (rebuild backups).
-- **Uncommitted, 2026-10-30 (late): Windows one-click launchers** (Erin: "ultra easy" for the friend, who likely
-  installed Python 3.15). `context-notes.bat` runs `make_venv.py --ready` (new: the pinned Python + numpy + Pillow)
-  before every start; when not ready it runs `make_venv.py --yes` with python.org's 3.14 (installer or install manager
-  path) or `py -3.14`, offering `winget install Python.Python.3.14 --scope user` (Y/N) or opening python.org.
-  New `update.bat` (runs from a %TEMP% copy, since `git pull` may replace it): `git pull --ff-only`, tops up `.venv`,
-  then calls `context-notes.bat`. `make-shortcut.bat` makes both desktop shortcuts. `make_venv.py` force-reinstalls
-  when numpy/Pillow are damaged on the right Python. Tested: `tests/test_pythonpin.py` (`--ready`; a static check of
-  the three .bat files: CRLF, ASCII, labels, named files), full suite, ruff. **Not run on Windows**: the friend's first
-  double-click is the test. His first update: Erin sends him `dookie-update.bat` (temporary; see Reminders), which
-  he drops in the folder and double-clicks: it removes its own untracked copy (else `git pull` would refuse), pulls,
-  makes the shortcuts (`make-shortcut.bat --no-pause`) and starts the app. Also 2026-10-30: alpha -> Beta (see
-  Decisions). Both tested only by the suite (all pass) and the static .bat check.
-- **Uncommitted, 2026-10-30: damaged-subtitle check, on by default** (S05E08's built-in English track shows "Î½"
-  for every "v": OCR read v as Greek ν, then UTF-8 was read as Latin-1, plus OCR's stray spaces; the rename only
-  changed titles, so it came that way). `subcheck.py` finds `mangled`, `lookalike`, `broken` and `l-for-I` (English
-  only, at least 5 lines and 1%), `unreadable`, and `mislabeled` (Erin's wording: "mislabeled or corrupted"; the
-  label's language vs `languages.guess`). Runs: `context_notes.get_subtitles` -> `checked_subtitles` (a clean file of
-  that language beside it, else one OpenSubtitles download via `find_subs.search_online`, checked; never for a film
-  with notes; never deletes). Settings `check_subs`, `replace_bad_subs` (both on; `--no-subs-check`,
-  `--no-replace-bad-subs`). Tidy checks beside files by default (`--no-check-subs`, `--inside` slow); the app's
-  Tidy dialog lists them (`subs` in `/api/tidy`), Settings has both boxes. Tested: `tests/test_subcheck.py` (13),
-  the full suite, ruff; the real S05E08 (found); all 156 `.srt` on the share: 3 flagged, all real ("l" for "I" in
-  Everything Is Illuminated and Predator; Das Boot's `.es.srt` is Portuguese). Not tried: a real OpenSubtitles
-  download through it, the page in a browser. `--inside` on all of Dr Who Series 5: E07, E08 and E09 damaged (same
-  "Î½" release), the other 11 clean; Breaking Bad S01E01 (both tracks) clean. Fixed: a clean OpenSubtitles
-  `.en.srt` beside each of the three (checked: the right episode, 85-97% words in common; were 0.7-1.0 s early, shifted
-  to 0.0 against the built-in track). The videos are unchanged; pick the external track in VLC/Plex.
-- **Uncommitted, 2026-10-30: Behind the Scenes** (Erin's idea: a director's-cut-DVD style trivia track "for nerds",
-  e.g. Viggo breaking two toes kicking the Uruk-hai helmet in The Two Towers, the take kept). Her choices: facts from
-  web research with a source each (not Claude's memory); commentary tracks used when a film has one; its own track;
-  spoilers included by default, marked "(spoiler)", with leave-out and ask. Built: `research.py` (fact sheet
-  `facts-<video>.json`; commentary transcribed with faster-whisper via `analyze.transcribe(stream=)`; plan: Claude
-  Code with only `--tools/--allowed-tools WebSearch,WebFetch`, `dontAsk`; API: `web_search_20250305`, `SEARCH_USD`
-  per search in the ledger, `pause_turn` sent back), `--behind-the-scenes` in `make_ass.py`/`context_notes.py`
-  (notes `behind-the-scenes-<video>.json`, only facts from the sheet, each note carries `fact` and `spoiler`;
-  `<video>.behind-the-scenes.notes.ass`, no Plex copy; `--spoilers`, Settings `bts_spoilers`, the film's own `spoilers`,
-  question `bts.spoilers`; the look line records it), `--research-again`, `--commentary`, `embed.py` two tracks
-  (`TRACKS`, "Behind the Scenes" with `CONTEXT_NOTES_BTS_SHA1`), the app's "Which notes" choice and Settings.
-  A separate review found 8 defects, all fixed with a test each: the API allowance and credit check now use the web
-  search's own estimate (`Researching.cost_of`, `Sender.next_usd/left_usd`, `usage.guard(next_usd=)`) and are checked
-  before every `pause_turn` part (`Sender.before_continuing`); the estimate is an upper bound (input grows with the
-  square of the searches, `WEB_SEARCHES` 20, shrinking per part); cache tokens are priced in the ledger
-  (`claude_api.billed_input`); a timed-out web request isn't resent; a sheet is complete only when every request was
-  read and it has facts (`parse_facts` returns `(facts, readable)`); a stopped `--research-again` is picked up, and
-  notes from an older sheet are written again (`made` in the sheet, `facts_made` in the notes); "ask" asks once per
-  film and Yes to all takes its default; a note that doesn't say takes its fact's spoiler mark; the page's "Inside the
-  film" line for skipped films. Also fixed on the way (old race): a part is counted before its "N notes" line prints.
-  Tested: 527 tests (22 in `tests/test_behind_the_scenes.py`, 6 in `tests/test_vlc_extension.py`), ruff clean; the app
-  end to end in a headless browser against the fake Claude Code; a frame rendered with libass; the real Claude Code 2.1.314 in the cloud
-  workspace took the web flags and searched without asking (one Haiku request); the commentary track picked by
-  stream index checked on a synthetic two-track mkv (faster-whisper itself not run). First real run (2026-10-30,
-  Erin's yes, her plan via the cloud workspace's Claude Code; the VM's `claude` is a `-p`-only stub that can't be
-  used): Holy Grail, first 15 min (clip cut into `Movies/.context-notes-test`, deleted after). Look-up: 52 facts for the
-  whole film (26 from Wikipedia, 8 Mental Floss, 6 montypython.com; 0 spoilers; 21 medium), one Claude Code request of
-  2.4M tokens in (pages re-read as it works) and 40k out; the 5-hour session read 51% after it, 52% at the end. Notes:
-  13 placed in 15 min (spot-checked, accurate), the frames step 0 added and 1 retimed. Results are beside the film
-  (`...anoXmous_.behind-the-scenes.notes.ass`, working files in its `context-notes/`). Found: the film's subtitles
-  are `...anoXmous.en.srt` but the video is `...anoXmous_.mp4`, so `context_notes.py` doesn't find them (the notes
-  file names the real `.en.srt`, re-timed +0.30 s); continuing that film needs a fix or a rename.
-  None of the 44 films in `/Volumes/Media/Movies` has a commentary track (Holy Grail's and The Untouchables' second
-  English tracks are stereo copies of the soundtrack, 0.92 to 0.99 correlation), and there's no LOTR there.
-  File name (Erin, 2026-10-30): `<video>.behind-the-scenes.notes.ass` (`workfiles.BTS_ASS`), so the VLC extension
-  (0.3.0) finds it beside the context notes and loads both: context shown, Behind the Scenes as a second track (Sub
-  Track), each filtered by the same topic boxes (new: "How it was made", "Casting, cameos & easter eggs", "Goofs &
-  myths"); its fallback guess ignores Behind the Scenes files, and `scan_ass.py` skips them. Tested in Lua 5.1 to 5.4
-  with a VLC stand-in (`tests/test_vlc_extension.py`, needs `pip install lupa`, skipped without), not in VLC itself.
-  Tabled by Erin: `/notes` (chat route) for this track.
-- **Uncommitted, 2026-10-30: Windows shortcut and PATH** (the friend's run said "Claude Code isn't installed, or
-  isn't where this can find it" after Erin signed him in; he starts the app from a desktop shortcut Erin made, which
-  she thinks runs `python app.py`). A program started from a shortcut keeps Explorer's PATH from when it started.
-  Now `claude_code.windows_path_now()` reads the PATH from the registry (HKLM then HKCU, `%VARS%` expanded),
-  `fresh_path()` adds what's missing at the end (nothing moves, the venv stays first), `app.main()` does that on
-  Windows at start (so ffmpeg and VLC too), and `command()` also tries `in_fresh_path()` before `PLACES`. WinGet's
-  Links and Packages folders are in `PLACES`. New `make-shortcut.bat` makes "Context Notes.lnk" on the desktop
-  (PowerShell + WScript.Shell, target `context-notes.bat`, start in this folder). Tested: 499 tests (498 pass, the
-  registry test is Windows-only and skipped), the new PATH test fails without the fix, `ruff check .` clean. Not run
-  on Windows: `make-shortcut.bat` and the registry read are untested until the friend runs them (CI covers the
-  registry test). The cause on his computer isn't confirmed: a stale PATH is the likeliest; it could also be Claude
-  Code not installed (only the Claude app), or "Run as administrator" as another user. Docs: README (Windows),
-  CHANGELOG.
-- **Uncommitted, 2026-10-30: signing Claude Code in from Settings** (Erin's ask: a friend she's testing the app with
-  has no Claude account of his own, so she signs him in as herself, and the only way had been the link-and-code dance
-  in Terminal). `claude auth login --claudeai` with no terminal prints the link and waits for the code on stdin
-  (checked on the real 2.1.309), so `claude_code.login_start/login_state/login_finish/login_cancel/logout` drive it
-  and `app.py` has `/api/claude/login`, `.../state`, `.../code`, `.../cancel` and `/api/claude/logout` (all but
-  `state` in `LOCAL_ONLY`). Settings, Claude: "Sign in to Claude Code…" (or "Sign in as someone else…") shows the
-  link (Copy the link: the account's owner can open it on her own computer and send the code back; the code is tied to
-  that one attempt), a box for the code, Finish, Cancel; "Sign out" beside it. Also "Where Claude Code is"
-  (`claude_path` in `settings.py`; `command()` takes it after `CONTEXT_NOTES_CLAUDE`; saving it makes the app look
-  again) and more `PLACES` (npm global, nvm, Volta, Windows). `tests/fake_claude.py` learnt `auth login`/`logout`
-  (`FAKE_CLAUDE_SIGNIN`, `FAKE_CLAUDE_LOGIN`). Tested: 495 tests pass (in three batches, in the Linux VM the desktop
-  app gives this session), `ruff check .` clean, and the whole flow in a headless browser against the fake Claude
-  Code (sign in, a refused code, sign out, a wrong path). Not tried with the real Claude Code's sign-in page, and not
-  on Windows. Docs: README, CHANGELOG, docs/gui-protocol.md. Note: his runs count against Erin's plan windows.
-- **Uncommitted, 2026-10-29: the timecode fix.** A phone's or camera's MP4 has a timecode track (a data stream), and
-  `--convert` copied it into the MKV, which refused it ("Only audio, video, and subtitles are supported for Matroska").
-  Now `embed.py` leaves data tracks out (`-map -0:d` in `build_command`, `data_tracks`, and `verify()` ignores them).
-  The list, the prompt, the page (`dropped` in `embed-plan`, `gui/src/js/62-danger.js`) and the README say how many
-  were left out. Tested: `test_convert_leaves_out_a_camera_timecode_track_and_says_so` fails on the old code and passes
-  now; all 490 tests pass; `ruff check` is clean on the two Python files; a synthetic timecode MP4 converts and decodes.
-  Not run on the friend's file, and the page change is checked only by the tests, not in a browser. The friend got past
-  the error; the cause of the fix is not known. Still open: a plain `.srt` beside a film isn't embedded (`embed.py`
-  only takes `.notes.ass`), and Erin hasn't said whether she wants that.
-- **Fixed on the way (2026-10-27):** the page's script stopped on load (`remember` was removed but its listener
-  stayed), so the app showed nothing. A test now checks every handler and `$("id")` the script uses.
-- **Also added (2026-10-27, Erin's asks; not committed):** "Always download subtitles" (`download_subs`,
-  `--download-subs`) and "Yes to all questions" (`yes_to_all`, `--yes-to-all`) in Settings, Defaults for every run.
-  Yes to all sets `CONTEXT_NOTES_YES_TO_ALL=1` for the run and its steps; `prompts.ask`/`confirm` then answer the
-  questions in `prompts.YES_TO_ALL` (the work: subtitles, sync, alignment, pick up, next video, embed) and never
-  sending, API credits or deleting. A new question isn't on that list unless it's added (and to docs/gui-protocol.md).
-- **Done earlier on 2026-10-27:** the install's defaults. `settings.py` keeps them in `~/.config/context-notes/settings.json`
-  (built-in defaults when the file is missing or damaged). The Settings page has a "Defaults for every run" section, and
-  the page no longer remembers choices in the browser (the port changes each start). The Terminal scripts read the same
-  defaults (`cli_defaults`, through argparse's `set_defaults`); the look is read by `make_ass.py` from `look_defaults`,
-  so a film's saved look is never overwritten. Auto-send moved into Settings and is on by default (untick to be asked
-  each time). "Remember starting folder" saves the folder you choose.
-- **Done before that:** `embed.py --convert` (an `.mp4` becomes an `.mkv`, and the `.mp4` goes to
-  `context-notes/originals/`), the "already inside" check, the time and space warnings, the "Change or delete…" panel
-  (delete kept originals, write the notes again), the run options for audience, effort and offline subtitles, the
-  rebuild preview with a `.bak` kept on every rebuild and an optional re-embed, the new default audience ("Fluent in
-  American English"), a probe cache, the background status check, and the docs and changelog to match.
-- **Tested:** the full suite passes (549 on 2026-10-30, `python3 -m pytest -q`), `ruff check .` is clean. The module split was
-  compared with the code before it, and the API route still is after step 2 (same output, requests and files; only
-  the forwarded `--route api --api-fallback 0` and `--help` differ). The Settings "Claude" section and the run option
-  were checked in a headless browser. The other dialogs added before step 1 haven't been looked at in a browser.
-- **Waiting on Erin:**
-  0. Confirmed by Erin (2026-10-27): with no `--model`, scripts use Opus (the app's "best") and with no `--effort` they
-     use high, where the Terminal used Sonnet before. Auto-send is on by default, with no warning gate; Erin chose this
-     (2026-10-27), and the warning is in the Settings text. Untick it to be asked each time.
-  1. The Plex copy `<film>.en.ass`: keep writing it, skip it on GUI rebuilds, or keep it and ask what Plex shows for
-     IT Crowd (see Known pitfalls). There are 22 copies on the share, 19 of them for IT Crowd.
-  2. The Akira rebuild, which waits on 1. Akira's `.ass` has no look line. A rebuild keeps the old file as a `.bak`,
-     writes the Plex copy, and makes the Context Notes track inside `Akira.mkv` out of date. Re-embedding would
-     rewrite the 2.8 GB film.
-- **Ideas, not built:** store the look as a Matroska track tag (`CONTEXT_NOTES_LOOK`, which ffmpeg writes and ffprobe reads back,
-  checked on a test file); add the min, max and settle timing to the `Look:` line; show the old box for files made
-  before 0.2.0 (Akira's "now" column says "not recorded"); and a check in `tidy.py` for episode accuracy: each video's season and episode numbers against the episode list (TMDB order), flagging duplicate numbers, files in the wrong season folder and files whose picture stops early (the Dr Who check found all three). Frames can confirm the season (the Doctor and companions); the episode number needs the dialogue.
-- **Not in the GUI yet:** `--window`, `--align-model`, and `find_subs.py --transcribe`.
-- **Test media:** the temporary test folders on the NAS (`Movies/.embed-rewrite-test` and `TV Shows/.convert-test`)
-  were deleted. Nothing in the library was changed.
-- **New computer:** Python 3.14 (`.python-version`) and `python3 make_venv.py`, which makes `.venv` with `pytest`,
-  `ruff`, `numpy`, `pillow` and faster-whisper. `ffmpeg` and
-  `ffprobe` are needed. MKVToolNix (`mkvpropedit`, `mkvmerge`) is installed here for checks; the code doesn't use it yet.
-  The Media share is mounted
-  at `/Volumes/Media`. The probe cache lives in `~/.config/context-notes/probe-cache/` and isn't in the repo.
-- **Breaking Bad S1 E02-E07 notes (2026-10-30, late, `/notes` on the plan; media only, no code changed):** all six
-  written (44, 49, 57, 58, 64, 65 notes), built and alignment-checked, `--year 2008` (Erin). Run with
-  `~/.alt229/bin/alt229-dev/bin/python3` (bare `python3` is 3.15). Sync: no drift; E03-E06 built from the
-  `--shift auto` `.aligned.srt` (+0.26 to +0.40 s), E02/E07 unshifted. E02 had 0:31:38-0:32:27 2.7 s late:
-  `align_check --fix`, rebuilt from its `.aligned.srt` (Erin's yes). E04/E07 rebuilt with `--keep-duplicates`
-  (Erin): `dedupe.py` treated the opening "Dramatic irony:" as the topic and dropped 3 notes about different scenes.
-  Fixed (uncommitted): storytelling labels added to `dedupe.GENERIC_LEADS`, test
-  `test_a_storytelling_label_is_not_a_subject` (fails without it), full suite and ruff pass, CHANGELOG "Fixed".
-  Frame pass done on all six (2026-10-31, `--route plan --api-fallback 0 --yes`: `--yes-to-all` alone stops at
-  "confirm sending" when not in a terminal; with fallback 0, `--yes` stops rather than use API credits,
-  `sending.Sender.leave_plan`). $0 API. Now 97, 108, 96, 105, 119, 112 notes; every alignment check after it in
-  step. The whole season (notes + frames) took the 5-hour session from about 7% to 61%. Season 1 is finished. To look into later: `--shift auto` overshoot (below). Plex copy: Erin will say what Plex shows. After the shift, E03-E05 read 0.28-0.34 s late (in
-  tolerance), so `--shift auto` may overshoot a little. The session meter stayed at 7% all run (stale reading), so
-  no parts were measured. Frame pass not run on any of the six.
-- **Next step:** Erin watches Breaking Bad S1 E02-E07 and says what she thinks of the notes. Tonight's leftovers first: Erin presses Tidy again on Father Ted S1 (the stray `.bak` moves as `.bak2`); Breaking Bad S01E01 is done on her Mac (2026-10-30, in the `alt229-dev` venv, Python 3.14.8, numpy 2.5.3: full sync check in sync, 771 lines); Homebrew's bare `python3` is 3.15 with a damaged numpy, so run with the venv loaded (or reinstall numpy for 3.15); her friend, once he `git pull`s, installs Python 3.14 and runs `python make_venv.py`. Then: Erin watches Holy Grail's first 15 minutes in VLC (update the extension from the app's Settings) and
-  says what she thinks of the Behind the Scenes notes; then the subtitle-name question (above). Erin commits the uncommitted work and the friend runs `git pull`, double-clicks `make-shortcut.bat`,
-  starts the app from the new shortcut and looks at Settings, Claude. If it still can't find Claude Code: his
-  `claude --version` and `where.exe claude` in PowerShell, and "Where Claude Code is" in Settings. Then Erin's short
-  run on her plan (`context_notes.py film.mkv --limit 5:00`), then step 3. Still waiting: her answer on the Plex copy.
+**Uncommitted** (last commit `a60d10c8`, 2026-11-02): `cleanup.py`, `tmdb.py`, `film_ids.py` (roadmap step 1),
+`ROADMAP.md`, `docs/work-log.md`, their tests, and edits to `app.py`, `embed.py`, `find_subs.py`, `make_ass.py`,
+`requirements.txt` (`guessit>=4.4`), the Settings page, README, CHANGELOG, `docs/`. Erin commits; never push.
+
+- **`cleanup.py`: renaming the library to the Plex/Jellyfin standard. Movies and TV Shows done 2026-11-04, but for
+  the questions below.**
+  - Decided (Erin): its own script (`tidy.py` stays as is); guessit (only cleanup.py imports it); Plex `{tmdb-N}`
+    tags; a library-wide title language (default: the computer's, English fallback; TMDB for translations), with
+    per-film overrides (`--set-title`, `~/.config/context-notes/cleanup-titles.json`; "Waking Ned Devine" kept);
+    subtitle files renamed to the right language codes (`subcheck`/`languages.guess`); audio languages only
+    reported; duplicates left alone; Dr Who takes the show's year (2005), and Erin's specials rule holds (not
+    Season 00). The app and notes stay English-only (a separate project).
+  - Decided order per film: make `Title (Year) {tmdb-N}/`, move the video and everything beside it, its working
+    folder (to `<film>/context-notes/<new>/`, files inside renamed, the notes JSON's paths following), then its
+    clutter into `<film>/context-notes/removed/`; clutter of no film into the library's `context-notes/removed/`.
+  - Built: `tmdb.py`, Settings' TMDB section, the listing and the moves (question `cleanup.go`, `--yes`, `--only`,
+    `--undo`; undo logs in `~/.config/context-notes/cleanup/`; a taken name stops the run; videos changed in the
+    last 2 minutes are left), and (2026-11-04, after Erin's hand tidy) the repairs: a film named only by its
+    folder, a finished `.mkv.part` (Matroska size check), stray subtitle/notes files and a notes folder under an
+    older name in one-film folders (every old name its notes files mention follows), clutter in subfolders.
+    For TV: titles in names checked against TMDB's (renumbered by title when TMDB has it once, else by hand),
+    locked files by hand, `--skip`. 22 tests in `tests/test_cleanup.py`; suite and ruff pass.
+  - Movies and TV Shows done (runs in `docs/work-log.md`). Waiting on Erin (asked 2026-11-04):
+    1. Dr Who (skipped whole: S03E13 is held; rename the show folder around it, or wait for the full copy?).
+    2. Beavis & Butthead (56) and MythBusters (53): renumber to TMDB's order by title, or keep her numbering?
+    3. Only Murders S01E02-E10 are locked in Finder: unlock and rename, or leave?
+    4. Specials TMDB doesn't number as she does: IT Crowd "The Internet Is Coming", Blackadder's Christmas Carol,
+       Father Ted "A Christmassy Ted", Twilight Zone "s01e00"/"X01 Lost Classics"; Mr Robot's two "Series Finale".
+    5. Duplicates and odd ones (by hand, untouched): The Thing (2011) x2, Napoleon discs, Forensic Files
+       .mkv/.m4v, Twilight Zone S3 twice, the 2nd Blackadder copy, The Stand, Anthony Bourdain, Mythbusters S04 E01.
+  - Not built: Settings' title language and the app, subtitle language codes beyond stray files, `Subs/` folders
+    (Waking Ned's `Eng. Subs/` VobSub and Everything Is Illuminated's `Subs/` are left as they are).
+  - **Next:** Erin rescans Plex (Movies and TV Shows) and answers the questions above.
+- **Band of Brothers** (`--year 2001`): E01-E08 written, built and alignment-checked. E01-E06 are in
+  `~/Downloads/Band of Brothers`; E07/E08 are on the share in `/Volumes/Media/TV Shows/Band Of Brothers/` as `.mkv`
+  with the track inside (the `.mp4`s are in `context-notes/originals/`, `--delete-backups` when Erin's happy).
+  E09 (65 notes) and E10 (87) are written and their `.srt` fixed (OCR fixer:
+  `~/.config/context-notes/scratch/bob_fix_srt.py`); **waiting on their videos** (Erin copies them). Per video: sync
+  check (`analyze.py --frames none --shift auto`), `make_ass.py SRT NOTES --video V --timing-report`, alignment
+  check; ask before any `--fix`. Then offer the frame pass, and embedding for the Downloads copies.
+- **IT Crowd Behind the Scenes, running (started 2026-11-04 10:51, plan route, `--api-fallback 0`).** S01E01 to
+  S02E04 were done back to back, about 13 min and 1.5-2% of the weekly plan each. Then (Erin) one episode an hour
+  for the rest, then S02E03 again for its unread frames part 6. The pacer is
+  `<scratchpad>/pace-itcrowd.sh`, and its log is `bts-itcrowd.log` beside it. Red Dwarf is cancelled for now
+  because of the weekly plan. Found: `research.py` is given the title "The IT Crowd (2006) {tmdb-2490} - The IT
+  Crowd (2006) - s02e04 - ..." (the folder and the new file name together); it needs tidying for the renamed
+  library.
+- **Plan limits, built 2026-11-04 (uncommitted; Erin chose all three):** `--week-stop-at` (default 90),
+  `--wait-for-reset`, `context_notes.py --pace MINUTES`, in Settings and the run options too. 18 tests in
+  `tests/test_plan_limits.py`. Not yet tried on a real run (the IT Crowd pacer is a shell loop started before them).
+- **Erin to watch and say what she thinks:** Life of Brian and Holy Grail Behind the Scenes; Breaking Bad S1 E02-E07
+  (notes and the frames step).
+- **Open questions for Erin:**
+  1. The Plex copy `<film>.en.ass`: keep it, skip it on GUI rebuilds, or first find out what Plex shows for IT Crowd
+     S2-3 (Known pitfalls). The Akira rebuild waits on this (Waking Ned Devine needs one too).
+  2. Should `embed.py` also embed a plain `.srt` beside a film? (It takes only `.notes.ass` now.)
+- **Windows, not yet run on a real Windows machine:** `install.ps1` (Erin is setting one up), the `.bat`
+  launchers, `make-shortcut.bat`, the registry PATH read. Dookie's first update is `dookie-update.bat` (Reminders).
+  If his app still can't find Claude Code: `claude --version`, `where.exe claude`, and "Where Claude Code is" in
+  Settings.
+- **Never tried for real:** `/refine` with the real frame-reviewer agent; signing in through the real Claude Code
+  sign-in page; an OpenSubtitles download through the bad-subtitle check.
+- **Small leftovers:** Father Ted S1 needs one more Tidy (the stray `.bak` moves as `.bak2`). Dr Who S3E13 is
+  truncated and held until a full copy arrives. `--shift auto` may overshoot by about 0.3 s (Breaking Bad E03-E05).
+- **Ideas, not built:** the look as a Matroska track tag (`CONTEXT_NOTES_LOOK`); min/max/settle in the `Look:` line;
+  the old box for files made before 0.2.0; a `tidy.py` episode-accuracy check (numbers against TMDB, duplicates,
+  wrong season folder, videos that stop early). Not in the GUI yet: `--window`, `--align-model`,
+  `find_subs.py --transcribe`.
+- **Working here:** on Erin's Mac run scripts with `~/.alt229/bin/alt229-dev/bin/python3` (bare `python3` is
+  Homebrew's 3.15 with a damaged numpy). This folder is part of the `~/.alt229` repo; Erin publishes with
+  `context-notes_publish`. New computer: Python 3.14 (`.python-version`), `python3 make_venv.py`, ffmpeg; the Media
+  share mounts at `/Volumes/Media`. The session meter has been stale since 2026-10-31.
 
 ## The pipeline (one command per step; `context_notes.py` runs them all)
 
@@ -397,6 +198,11 @@ It's the first thing to read when picking the work up on another computer or aft
   - **`/notes` pause and learning** (Erin: "do it at 90%", "do it now"). `usage.py --session --stop-at 90` exits 3
     when the 5-hour window is that full; `--note-parts start|end` brackets a part and records the percentage it moved
     in `parts.jsonl` only when the window is the same and the figure moved; `--parts-estimate N` uses the median.
+  - **The plan's limits a run keeps to** (Erin, 2026-11-04, after Behind the Scenes on IT Crowd took 1.5-2% of the
+    week per episode): `--week-stop-at` (default 90; `usage.week_full`), `--wait-for-reset` (a full 5-hour session is
+    waited out, `Sender.wait_for_session`; never the week), and `--pace` between videos (`context_notes.pace`).
+    `cli_common.settle_route` reads them from Settings and hands the first two to `usage.set_plan_limits`;
+    `claude_args` passes them to each step. A folder run ends when the plan stops a video (`plan_stopped`).
   - **Order matters:** `usage.report()` (the cost line and the `usage` event) goes after a part is counted and saved,
     never before. A Ctrl-C that lands as the part's line is printed must find the part in `notes`
     (`test_ctrl_c_in_a_terminal_keeps_the_notes_too` sends it at exactly that moment).
@@ -521,7 +327,7 @@ It's the first thing to read when picking the work up on another computer or aft
    - For anything that measures audio or timing, also try it on real media and report the numbers.
    - Separate what you ran from what you inferred.
 6. **Keep scripts runnable on their own.** Use the Python 3.9+ stdlib, plus numpy, Pillow and faster-whisper only
-   where already used. Every step prints the command it runs.
+   where already used, and guessit only in the library cleanup (Erin, 2026-11-04). Every step prints the command it runs.
 7. **Ask through `prompts.py`.** New questions use `prompts.confirm`, `secret` or `text_input`, or
    `context_notes.ask(..., id=...)`. Never call `input()` or `getpass` directly, so a GUI can answer them. Give each
    question a stable id and add it to the table in `docs/gui-protocol.md`. Events go through `prompts.py` too, and
@@ -533,7 +339,13 @@ It's the first thing to read when picking the work up on another computer or aft
 10. **Update "Where things left off" before a session ends.** Any chat that changes this project rewrites that section
     in place: what changed, what's uncommitted, what was tested, what's waiting on Erin, and what's next. Replace
     stale lines rather than adding a log, and keep it short enough to read in a minute. Do this even when the session
-    ends with a question instead of a change.
+    ends with a question instead of a change. Finished items leave the section: code changes are already in
+    `CHANGELOG.md`; anything else (media runs, what was tried and found) goes as a dated entry at the top of
+    `docs/work-log.md`.
+11. **Look up history only when it's needed.** `CHANGELOG.md` and `docs/work-log.md` aren't read at the start of a
+    session. Search them (`grep -n -i '<topic>' CHANGELOG.md docs/work-log.md`) and read only the matching entries
+    when you're about to make a design decision, when something behaves unexpectedly, when a name or file here is
+    unfamiliar, or before telling Erin something was or wasn't done. Never read either file whole.
 
 ## Where the code lives (split into modules on 2026-10-27)
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 embed.py - put a film's notes inside the film, as a subtitle track (.mkv only, for now).
-Created 2026-10-24, modified 2026-10-29.
+Created 2026-10-24, modified 2026-11-03.
 
     python3 embed.py film.mkv                       one film: says what it would do, asks, then does it
     python3 embed.py "/Volumes/Movies"              every .mkv in the folder that has a .notes.ass beside it
@@ -33,6 +33,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -91,12 +92,20 @@ def has_notes(video):
     return any(ass_path(video, t).exists() for t in TRACKS)
 
 
+FILM_LINE = re.compile(make_ass.FILM_LINE.pattern.encode(), re.M)
+
+
 def sha1(path):
-    h = hashlib.sha1()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    """The .ass's SHA-1, kept on the track it becomes (HASH_TAG), leaving out the header's "; Film:" line
+    (make_ass.FILM_LINE): film_ids.py adds that line to films whose notes may already be inside them, and the notes
+    themselves haven't changed. A file without the line hashes exactly as it always did."""
+    return sha1_of(Path(path).read_bytes())
+
+
+def sha1_of(data):
+    """sha1() of an .ass file's bytes."""
+    head, sep, rest = data.partition(b"\n[V4+ Styles]")
+    return hashlib.sha1(FILM_LINE.sub(b"", head, count=1) + sep + rest).hexdigest()
 
 
 def backup_path(video):

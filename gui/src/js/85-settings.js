@@ -25,6 +25,8 @@ function renderSettings() {
   $("bannerKeyBtn").textContent = plan ? "Open Settings" : "Add your key";
   const os = info.opensubtitles;
   $("osStatus").textContent = os.saved ? `Saved, for the account ${os.username}.` : "No login saved.";
+  const tm = info.tmdb || {};
+  $("tmdbStatus").textContent = tm.saved ? `Saved. It ends in …${tm.ends}.` : (tm.problem || "No key saved.");
   const vlc = info.vlc;
   if (!vlc.length) $("vlcStatus").textContent = "Couldn't work out where VLC keeps extensions on this computer.";
   else if (vlc.every((x) => x.current)) $("vlcStatus").textContent = "Installed and up to date.";
@@ -71,6 +73,13 @@ async function saveOs() {
   const r = await api("/api/opensubtitles", { api_key: $("osKey").value, username: $("osUser").value, password: $("osPass").value });
   $("osKey").value = $("osPass").value = "";
   msg("osMsg", (r.lines || [r.error]).join("\n"), !!r.ok);
+  await reloadInfo();
+}
+async function saveTmdb() {
+  msg("tmdbMsg", "Saving and checking with TMDB…");
+  const r = await api("/api/tmdb", { api_key: $("tmdbKey").value });
+  $("tmdbKey").value = "";
+  msg("tmdbMsg", (r.lines || [r.error]).join("\n"), !!r.ok);
   await reloadInfo();
 }
 async function installVlc() {

@@ -79,7 +79,7 @@ def test_the_route_comes_from_settings_and_an_api_url_means_the_api(usage_dir):
     opts = cli_common.settle_route(ap.parse_args([]))
     assert (opts.route, opts.api_fallback) == ("api", 7.5)
     opts = cli_common.settle_route(ap.parse_args(["--route", "plan", "--api-fallback", "$2.50"]))
-    assert cli_common.claude_args(opts)[-4:] == ["--route", "plan", "--api-fallback", "2.5"]
+    assert cli_common.claude_args(opts)[-7:-3] == ["--route", "plan", "--api-fallback", "2.5"]
     for bad in ("lots", "-1", "5000"):
         with pytest.raises(SystemExit):
             ap.parse_args(["--api-fallback", bad])
@@ -409,7 +409,8 @@ def test_saving_a_new_path_in_the_app_looks_again(server):  # noqa: F811
 def test_the_app_saves_the_claude_settings(server):  # noqa: F811
     status, r = call(server, "/api/settings", {"route": "api", "api_fallback": True, "api_fallback_usd": 3})
     assert status == 200 and (r["settings"]["route"], r["settings"]["api_fallback_usd"]) == ("api", 3)
-    assert settings.route_defaults() == {"route": "api", "api_fallback": 3.0}
+    assert settings.route_defaults() == {"route": "api", "api_fallback": 3.0, "week_stop_at": 90.0,
+                                         "wait_for_reset": False}
     for bad in ({"route": "free"}, {"api_fallback_usd": 0}, {"api_fallback_usd": "lots"}):
         assert call(server, "/api/settings", bad)[0] == 400
 

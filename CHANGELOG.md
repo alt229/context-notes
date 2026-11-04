@@ -7,6 +7,48 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- **Keeping to the plan's limits** (Erin, 2026-11-04). `--week-stop-at PERCENT` (default 90) stops starting
+  requests once the plan's weekly limit is that full, so a long run can't leave Claude unusable until the week
+  resets; a folder run then ends instead of doing each remaining video's local work. `--wait-for-reset` waits out a
+  full 5-hour session (90%, or the plan's own session limit) and carries on, instead of stopping; never the week.
+  `context_notes.py --pace MINUTES` starts each video that needs Claude at least that long after the last one
+  started. All three are in Settings (Claude) and the run options, passed to every step (`cli_common`), and the
+  waits send a `waiting` event the page shows. Tests: `tests/test_plan_limits.py`.
+- **Library cleanup, the listing: `cleanup.py`.** For a films or TV folder it lists the standard name for every
+  video (`Life of Brian (1979) {tmdb-583}/Life of Brian (1979) {tmdb-583}.mkv`, `Doctor Who (2005) {tmdb-57243}/
+  Season 05/Doctor Who (2005) - s05e03 - Victory of the Daleks.mkv`), the files that go with it (subtitles, notes,
+  its context-notes folder), what to decide by hand (no film or several on TMDB, duplicates, episodes in a films
+  folder, disc folders, a name that's taken) and the clutter. Names are read with guessit and checked with TMDB,
+  titles in this computer's language (`--language`). After a yes (`cleanup.go`, or `--yes`) it renames: a folder
+  holding one film or show is renamed whole, then each video and its files, its context-notes folder (the notes
+  file's subtitle names follow, its date kept so nothing needs a rebuild), then the clutter into
+  `context-notes/removed/`, and folders left empty go. Every change is logged as it happens
+  (`~/.config/context-notes/cleanup/`); `--undo LOG` puts it all back. `--only TEXT` for a few films,
+  `--set-title TMDB_ID TITLE` for your own title, `--dry-run` to only list. Videos changed in the last 2 minutes
+  (still copying?) are left for later.
+  It also puts right what a hand tidy leaves: a film named only by its folder (`Total Recall (1990)/Total Recall
+  KLAXXON.avi`), a finished download that kept its `.part` name (an `.mkv` whose size matches its own header; an
+  unfinished one goes on the decide-by-hand list), subtitle and notes files in a one-film folder named for no
+  video (`Predator[Eng][Subs].srt` -> `.en.srt`, from its text), a notes folder under an older name of the video
+  (every old name its notes files mention is renamed), and clutter in its subfolders (`Other/`, `Logs/`).
+  For episodes, a title in the name is checked against TMDB's title for that number: a series numbered straight
+  through (`Father Ted/Season 2/11. A Song for Europe.mp4`) gets TMDB's number for that title (s02e05); a title
+  that doesn't match, or an episode TMDB doesn't have, goes on the decide-by-hand list rather than being renamed.
+  Locked files (Finder's Locked box) go on that list too, and `--skip TEXT` leaves out whatever has TEXT in its
+  path (a show waiting for a decision).
+- **TMDB key: `tmdb.py`.** `python3 tmdb.py --set-key` asks for your TMDB (themoviedb.org) key, hidden, saves it in
+  `~/.config/context-notes/tmdb.json` (readable only by you) and tests it; `--test` checks it again. Either TMDB's
+  "API Key" or its "API Read Access Token" works. The app's Settings has a TMDB section to do the same (from the
+  computer running the app only). For the library cleanup that's coming: titles in your language, episode titles.
+- **guessit** in `requirements.txt` (with rebulk, babelfish, python-dateutil and tzdata; all pure Python), for reading
+  film and episode names in the library cleanup. Run `python3 make_venv.py` (or `pip install -r requirements.txt`).
+- **Which film the notes are for: `film_ids.py`.** It finds each film's or episode's IMDb and TMDB ids, from the file
+  and folder names (`{imdb-tt0079470}`, `[tmdbid-583]`), an `.nfo` beside it, the video's tags, or OpenSubtitles.com
+  (by the file's fingerprint first, then an IMDb id, then the title; searching uses no downloads), and writes them
+  into the notes file (`ids`) and the `.ass` header (`; Film: imdb tt0079470, tmdb movie/583`), keeping a `.bak` of
+  each. `--dry-run`, `--offline`, `--again`, `--imdb`/`--tmdb` for one film. When a title search isn't sure it asks
+  which film (`ids.which`); `--yes` skips those. Builds keep the line, and `embed.py`'s check leaves it out, so films
+  with their notes inside them stay current. The first step of the [roadmap](ROADMAP.md).
 - **Windows: install from nothing with one line.** `install.ps1` (`irm .../install.ps1 | iex` in PowerShell) installs
   what's missing with winget (Git, the pinned Python, ffmpeg; VLC and Claude Code after a yes), downloads Context Notes
   to `%USERPROFILE%\context-notes` (or updates it), makes the desktop shortcuts and starts the app.

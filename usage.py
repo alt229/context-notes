@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 usage.py - what the API calls cost, how much credit is probably left, and how much of your Claude plan's session is used.
+Created 2026-10-25, modified 2026-11-04.
 
     python3 usage.py                          # the summary: credit left, spending, the latest films, the session
     python3 usage.py --films 20               # more films
@@ -443,6 +444,65 @@ def session_full(stop_at=PAUSE_DEFAULT):
         return None
     when = f", and resets {clock(w['resets_at'])}" if w["resets_at"] else ""
     return f"Your plan's 5-hour session is {w['percent']:.0f}% used{when}."
+
+
+# ---------------------------------------------------------------- the plan's limits a run keeps to (Erin, 2026-11-04)
+WEEK_STOP_DEFAULT = 90.0       # stop starting requests at this much of the plan's weekly limit (100: only the plan's own)
+_limits = {"week_stop_at": WEEK_STOP_DEFAULT, "wait_for_reset": False}
+
+
+def set_plan_limits(week_stop_at=None, wait_for_reset=None):
+    """This run's limits (cli_common.settle_route sets them from the flags, else Settings): the weekly stop, in percent,
+    and whether a full 5-hour session is waited out instead of stopping the run."""
+    if week_stop_at is not None:
+        _limits["week_stop_at"] = float(week_stop_at)
+    if wait_for_reset is not None:
+        _limits["wait_for_reset"] = bool(wait_for_reset)
+
+
+def waiting_for_reset():
+    return _limits["wait_for_reset"]
+
+
+def week_full(stop_at=None):
+    """A reason to stop starting requests on the plan, or None: the plan's weekly limit at `stop_at`% or more (this
+    run's weekly stop when not given). 100 leaves it to the plan's own limit. Without a reading it can't tell."""
+    stop_at = _limits["week_stop_at"] if stop_at is None else stop_at
+    if stop_at >= 100:
+        return None
+    s = session()
+    w = s.get("seven_day") if s else None
+    if w is None or w["percent"] is None or w["percent"] < stop_at:
+        return None
+    when = f", and resets {clock(w['resets_at'], True)}" if w["resets_at"] else ""
+    return (f"Your plan's weekly limit is {w['percent']:.0f}% used{when}; this run stops at {stop_at:g}% "
+            f"(--week-stop-at, or Settings, Claude).")
+
+
+def session_resets_at():
+    """When the 5-hour session resets (epoch seconds), if a reading says and it hasn't already; else None."""
+    s = session()
+    w = s.get("five_hour") if s else None
+    return w["resets_at"] if w and not w["reset_since"] and w["resets_at"] else None
+
+
+def wait_until(until, why, step=None):
+    """Wait until `until` (epoch seconds), saying why and when it carries on. In 1-second sleeps, so Ctrl-C and the
+    app's Cancel stop it at once (what's written is kept). The `waiting` event tells the app, and a second one with
+    `until` null says the wait is over. A computer that sleeps meanwhile just carries on when it wakes, if it's time."""
+    import prompts
+    left = until - time.time()
+    if left <= 0:
+        return
+    text = f"{why} Waiting until {clock(until, left > 20 * 3600)} (in {_span(left)})."
+    print(f"  {text} Ctrl-C or Cancel stops here; what's written is kept.", flush=True)
+    prompts.event("waiting", step=step, until=int(until), reason=text)
+    while True:
+        left = until - time.time()
+        if left <= 0:
+            break
+        time.sleep(min(left, 1.0))
+    prompts.event("waiting", step=step, until=None, reason=None)
 
 
 def note_parts_start(say=print):

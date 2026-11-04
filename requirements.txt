@@ -4,5 +4,7 @@ numpy>=1.21                # the video checks (analyze.py --video, make_ass.py -
 Pillow>=9.0                # the video checks
 faster-whisper>=1.0; python_version < "3.15"   # speech recognition (analyze.py --align, find_subs.py); a large download.
                            # No Python 3.15 build of onnxruntime yet: lift this with .python-version (pythonpin.py)
-pytest>=7.0                # the tests (for working on the project)
+guessit>=4.4              # reads film and episode names (the library cleanup); brings rebulk, babelfish,
+                           # python-dateutil and tzdata with it. All pure Python.
+pytest>=7.0               # the tests (for working on the project)
 ruff>=0.4                  # linting (for working on the project)

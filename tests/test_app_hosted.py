@@ -86,7 +86,7 @@ def test_from_another_device_the_mac_only_actions_are_refused(hosted, monkeypatc
     monkeypatch.setattr(app.Access, "loopback", staticmethod(lambda client: False))    # as if from a phone
     info = json.loads(ask(hosted, "/api/info")[1])
     assert info["local"] is False
-    for path, body in (("/api/key", {"key": "sk-ant-x"}), ("/api/opensubtitles", {}), ("/api/pick", {}),
+    for path, body in (("/api/key", {"key": "sk-ant-x"}), ("/api/opensubtitles", {}), ("/api/tmdb", {}), ("/api/pick", {}),
                        ("/api/vlc/install", {}), ("/api/vlc/open", {"path": str(tmp_path)}),
                        ("/api/reveal", {"path": str(tmp_path)}),
                        ("/api/claude/login", {}), ("/api/claude/login/code", {"code": "x"}),

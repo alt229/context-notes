@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
 sending.py - what the generate and refine steps share about sending their parts to Claude:
+Created 2026-10-27, modified 2026-11-04.
 
 - Sender: where the requests go. On the "plan" route (the default) each one goes through Claude Code on your Claude
   plan (claude_code.py), with no API credits; on the "api" route, to the API (claude_api.py). When the plan can't go
-  on (Claude Code missing or signed out, the plan's usage limit, or the 5-hour session at 90%), the run moves to API
+  on (Claude Code missing or signed out, the plan's usage limit, the 5-hour session at 90%, or the weekly limit at
+  --week-stop-at), the run moves to API
   credits only if that's allowed: up to --api-fallback dollars for the run (Settings: "Use API credits when the plan
   runs out"), or after a yes to the question that shows what the rest would cost. With nobody to ask (--yes, no
-  terminal) and no allowance, it stops, keeping what was written.
+  terminal) and no allowance, it stops, keeping what was written. With --wait-for-reset, a full 5-hour session is
+  waited out instead (never the week).
 - estimate(): after a step's "Plan:" line, the credit note and the estimate the app is told.
 - confirm(): ask before anything is sent (or stop, when nobody can be asked and --yes wasn't given).
 - send_parts(): send the parts one at a time. Before each, check the credit (usage.guard); after each, the step
@@ -18,6 +21,7 @@ Each step plans its own parts and reads its own replies (generate_notes.py, refi
 between.
 """
 import sys
+import time
 
 import claude_api
 import claude_code
@@ -193,22 +197,52 @@ class Sender:
             print()
             sys.exit(halt)
 
+    def wait_for_session(self, reason):
+        """With --wait-for-reset: wait out a full 5-hour session (not the week), when a reading says when it resets.
+        True once waited (the part's line is open again after it); False to stop as before."""
+        if not usage.waiting_for_reset() or "week" in reason.lower():
+            return False
+        at = usage.session_resets_at()
+        if not at or at <= time.time():
+            return False
+        print()                                  # the part's line is still open
+        usage.wait_until(at + 60, reason, step=self.step)   # a minute's grace: the reset isn't always on the dot
+        print("  carrying on ...", end=" ", flush=True)
+        return True
+
+    def plan_stop(self):
+        """Before a request on the plan: why it mustn't go (the weekly stop, or the 5-hour session at 90% when it
+        isn't waited out), or None."""
+        week = usage.week_full()
+        if week:
+            return week + " Stopping before the plan's weekly limit."
+        full = usage.session_full()
+        if full and not self.wait_for_session(full):
+            return full + " Stopping before the plan's limit."
+        return None
+
     def __call__(self, message, left=1):
-        if self.route == "plan":
-            full = usage.session_full()
-            if full:
-                self.leave_plan(full + " Stopping before the plan's limit.", left)
-            else:
-                try:
-                    more = {"web": True} if self.web else {}
-                    reply = claude_code.call(self.model, self.system, message, effort=self.effort,
-                                             workdir=self.workdir, folders=self.folders,
-                                             timeout=claude_code.WEB_TIMEOUT if self.web else
-                                             claude_code.TIMEOUT if self.folders else 600, **more)
-                    self.plan_requests += 1
-                    return reply
-                except claude_code.CantGoOn as e:
-                    self.leave_plan(str(e), left)
+        waited = False
+        while self.route == "plan":
+            why = self.plan_stop()
+            if why:
+                self.leave_plan(why, left)           # API credits within the allowance, or it stops (sys.exit)
+                break
+            try:
+                more = {"web": True} if self.web else {}
+                reply = claude_code.call(self.model, self.system, message, effort=self.effort,
+                                         workdir=self.workdir, folders=self.folders,
+                                         timeout=claude_code.WEB_TIMEOUT if self.web else
+                                         claude_code.TIMEOUT if self.folders else 600, **more)
+                self.plan_requests += 1
+                return reply
+            except claude_code.CantGoOn as e:
+                said = str(e)                        # only the plan's usage limit is waited out, not a sign-in problem
+                limit = claude_code.LIMIT_RE.search(said) and not claude_code.NOT_LIMIT_RE.search(said)
+                if limit and not waited and self.wait_for_session(said):
+                    waited = True                    # the session's limit came before 90% was seen: try once more
+                    continue
+                self.leave_plan(str(e), left)
         self.within_allowance()
         more = {"web": True, "before_more": self.before_continuing} if self.web else {}
         return claude_api.call_api(self.key, self.model, self.system, message, self.api_url, timeout=self.timeout,

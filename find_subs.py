@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 find_subs.py - find subtitles for a video that has none beside it.
+Created 2026-10-17, modified 2026-11-03.
 
     python3 find_subs.py film.mkv                      English subtitles (or --lang de, fr, ...)
     python3 find_subs.py film.mkv --lang de --online   also search OpenSubtitles.com
@@ -332,8 +333,15 @@ class OpenSubtitles:
         if base and base not in self.api:
             self.api = f"https://{base}/api/v1" if not base.startswith("http") else base.rstrip("/") + "/api/v1"
 
-    def search(self, lang, moviehash=None, query=None, year=None, season=None, episode=None):
-        params = {"languages": lang}
+    def search(self, lang, moviehash=None, query=None, year=None, season=None, episode=None, imdb_id=None,
+               tmdb_id=None):
+        """Subtitles matching these (no login needed; uses no downloads). lang None: any language (film_ids.py
+        only wants each result's "feature_details", the film's ids). imdb_id: the number, without "tt"."""
+        params = {"languages": lang} if lang else {}
+        if imdb_id:
+            params["imdb_id"] = imdb_id
+        if tmdb_id:
+            params["tmdb_id"] = tmdb_id
         if moviehash:
             params["moviehash"] = moviehash
         if query:
