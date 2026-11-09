@@ -322,6 +322,16 @@ All notable changes to this project are recorded here. The format follows
   short). Same 180 words a minute and 5 s floor.
 
 ### Fixed
+- **The frames step could stop with "Error submitting video frame to the encoder"** (Jurassic Park on Windows,
+  ffmpeg 8, 2026-11-09). The JPEG encoder refuses a frame whose time isn't later than the one before (`Invalid pts
+  (9) <= last (9)`), and a video's keyframes can repeat a time. With several encoder threads a repeat was only caught
+  when both frames went to the same thread, so a film failed or not depending on the computer. `showinfo` still logs
+  each frame's real time, then the frames are numbered 0, 1, 2... for the encoder alone (`settb=1,setpts=N`), with
+  one encoder thread. `-reinit_filter 0` keeps that count going through a change of size or colour part-way, and the
+  frames are scaled to a fixed height (`analyze.frame_height`), so they stay one size (with ffmpeg 6.1 a frame that
+  shrank part-way was read past its end). The times are read from showinfo's lines only, and a failure now prints
+  ffmpeg's own messages instead of the last 800 characters, which were all showinfo. Tests:
+  `test_frames_survive_a_repeated_keyframe_time`, `test_frames_stay_one_size_when_the_video_changes_size`.
 - **Windows and the GitHub tests** (they had failed on every push since late October). Windows: the status bar
   (`.claude/statusline.py`) printed its "·" in the local code page instead of UTF-8; a script started with no input
   (NUL) took Windows' word that it was a terminal, so `tidy.py` moved files without `--yes` (`prompts.interactive`

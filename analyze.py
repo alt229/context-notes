@@ -509,17 +509,42 @@ def loud_moments(db, cues, offset):
     return out
 
 
+# showinfo's own lines only: ffmpeg's warning about a frame that changed size says "pts_time: 5.917" too.
+SHOWINFO_TIME = re.compile(r"\[Parsed_showinfo[^\]]*\][^\n]*?\bpts_time:(-?[0-9.]+)")
+FFMPEG_CHATTER = ("frame=", "size=", "Input #", "Output #", "Stream mapping:", "Press [q]")
+
+
+def frame_height(video, width=480):
+    """Height of the small frames: `width` wide in the video's shape, rounded to even (what scale=480:-2 makes of
+    its first frame). A fixed number, so a video that changes size part-way still gives frames of one size."""
+    try:
+        s = ffprobe_json(video, "-select_streams", "v:0", "-show_entries", "stream=width,height")["streams"][0]
+        w, h = int(s["width"]), int(s["height"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return -2
+    return max(2, round(width * h / w / 2) * 2) if w > 0 and h > 0 else -2
+
+
 def run_ffmpeg_frames(video, outdir, dense, limit=None):
     """Extract small frames; returns list of (time, path)."""
     outdir.mkdir(parents=True, exist_ok=True)
     for old in outdir.glob("*.jpg"):
         old.unlink()
-    pre = ([] if dense else ["-skip_frame", "nokey"]) + limit_args(limit)
-    vf = ("fps=4," if dense else "") + "scale=480:-2,showinfo"
+    # The JPEG encoder refuses a frame whose time isn't later than the one before ("Invalid pts (9) <= last (9)",
+    # then "Error submitting video frame to the encoder"), and a video's keyframes can repeat a time (Matroska keeps
+    # whole milliseconds; the Das Boot drops below were repeats too). That stopped the frames step on a film on Windows
+    # (ffmpeg 8, 2026-11-09). So showinfo logs each frame's real time, and then setpts=N numbers the frames 0, 1, 2...
+    # for the encoder alone. -reinit_filter 0 keeps that count going: ffmpeg otherwise rebuilds the filters (and
+    # restarts N) when the video changes size or colour part-way; scale copes with the change itself, at a fixed
+    # height (frame_height) so every frame stays one size. -threads 1 (the encoder only): with several threads the
+    # encoder caught a repeat only when both frames went to the same thread, so a film failed or not depending on the
+    # computer. At 480 pixels one thread is as fast.
+    pre = ([] if dense else ["-skip_frame", "nokey"]) + limit_args(limit) + ["-reinit_filter", "0"]
+    vf = ("fps=4," if dense else "") + f"scale=480:{frame_height(video)},showinfo,settb=1,setpts=N"
 
     def attempt(sync_flag):
         cmd = ["ffmpeg", "-hide_banner", *pre, "-i", str(video), "-an", "-vf", vf,
-               *sync_flag, "-q:v", "4", str(outdir / "%06d.jpg")]
+               *sync_flag, "-threads", "1", "-q:v", "4", str(outdir / "%06d.jpg")]
         return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     # passthrough, not vfr: vfr DROPS frames whose timestamp repeats an earlier one, after showinfo has already
@@ -530,8 +555,12 @@ def run_ffmpeg_frames(video, outdir, dense, limit=None):
     if r.returncode and "fps_mode" in r.stderr:        # older ffmpeg
         r = attempt(["-vsync", "passthrough"])
     if r.returncode:
-        sys.exit("ffmpeg failed extracting frames:\n" + r.stderr[-800:])
-    times = [float(t) for t in re.findall(r"pts_time:(-?[0-9.]+)", r.stderr)]
+        # ffmpeg's messages, without showinfo's two lines per frame, the progress line or the stream listing (the
+        # last 800 characters used to be all showinfo, which hid the reason)
+        said = [ln for ln in r.stderr.splitlines() if ln.strip() and not ln[0].isspace()
+                and "Parsed_showinfo" not in ln and not ln.startswith(FFMPEG_CHATTER)]
+        sys.exit("ffmpeg failed extracting frames:\n" + "\n".join(said[-10:]))
+    times = [float(t) for t in SHOWINFO_TIME.findall(r.stderr)]
     files = sorted(outdir.glob("*.jpg"))
     if len(times) != len(files):
         # Seen on Das Boot (HEVC in MP4, Homebrew ffmpeg): 842 frames written against a longer list of times, so

@@ -4,6 +4,18 @@ Older hand-off notes, newest first. Moved here from `CLAUDE.md` ("Where things l
 Not read at the start of a session: search it when a topic comes up (rule 11 in `CLAUDE.md`). Code changes are in
 `CHANGELOG.md`; this log holds the rest: media runs, what was tried and what was found.
 
+## 2026-11-05: IT Crowd Behind the Scenes (plan route, `--api-fallback 0`, $0)
+
+- 2026-11-04 10:51: S01E01 to S02E04 back to back, about 13 min each, 1.5-2% of the weekly plan each (the week went
+  from 36% to 46% over S02E05 to S03E03). Red Dwarf (70 episodes) was cancelled: it would have used up the week.
+- From 13:35, one an hour (Erin), from a shell loop: S02E05 to S03E03 done. S02E04's run was stopped as S02E05's
+  research began, so S02E05 has an empty fact sheet from then; the paced run redid it.
+- S03E04 (18:55): its notes were written and built, then the frames step's ffmpeg crawled at 0.017x for 40 min and
+  failed: the Media share was going. From 20:45 every episode was "Can't find" (`/Volumes/Media` gone; on 11-05
+  only the `TV Shows` and `TV Shows Volume 2` shares were mounted, over the Tailscale address, and `TV Shows` didn't
+  answer).
+- S02E03's frames part 6 reply couldn't be read (`.refine6.failed.txt`); its rerun waits with the rest.
+
 ## 2026-11-04: TV Shows renamed with `cleanup.py` (Erin away; questions held)
 
 - Left out with `--skip` for Erin's answer: `Dr Who/` (S03E13 is the truncated episode held in place; renaming the

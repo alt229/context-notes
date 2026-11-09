@@ -62,16 +62,18 @@ files (rule 11).
   `~/.config/context-notes/scratch/bob_fix_srt.py`); **waiting on their videos** (Erin copies them). Per video: sync
   check (`analyze.py --frames none --shift auto`), `make_ass.py SRT NOTES --video V --timing-report`, alignment
   check; ask before any `--fix`. Then offer the frame pass, and embedding for the Downloads copies.
-- **IT Crowd Behind the Scenes, running (started 2026-11-04 10:51, plan route, `--api-fallback 0`).** S01E01 to
-  S02E04 were done back to back, about 13 min and 1.5-2% of the weekly plan each. Then (Erin) one episode an hour
-  for the rest, then S02E03 again for its unread frames part 6. The pacer is
-  `<scratchpad>/pace-itcrowd.sh`, and its log is `bts-itcrowd.log` beside it. Red Dwarf is cancelled for now
-  because of the weekly plan. Found: `research.py` is given the title "The IT Crowd (2006) {tmdb-2490} - The IT
-  Crowd (2006) - s02e04 - ..." (the folder and the new file name together); it needs tidying for the renamed
-  library.
+- **IT Crowd Behind the Scenes: 15 of 25 done; the rest wait for the Media share** (plan route, $0; log in
+  `docs/work-log.md`, 2026-11-05). S03E04 has its dialogue notes but no frames step; S03E05 to S04E06, the special
+  (`Season 5/S05E01 The Internet Is Coming.mp4`) and S02E03's unread frames part 6 are left. `/Volumes/Media`
+  dropped out on the evening of 2026-11-04. **Next:** once Erin has it mounted again,
+  `context_notes.py "/Volumes/Media/TV Shows/The IT Crowd (2006) {tmdb-2490}" --recursive --behind-the-scenes
+  --route plan --api-fallback 0 --yes --pace 60` (finished episodes are skipped without a wait; this is the first
+  real run of the new limits). Red Dwarf is cancelled for now (the weekly plan). `research.py` is given the title
+  "The IT Crowd (2006) {tmdb-2490} - The IT Crowd (2006) - s02e04 - ..." (folder plus new file name); it needs
+  tidying for the renamed library.
 - **Plan limits, built 2026-11-04 (uncommitted; Erin chose all three):** `--week-stop-at` (default 90),
   `--wait-for-reset`, `context_notes.py --pace MINUTES`, in Settings and the run options too. 18 tests in
-  `tests/test_plan_limits.py`. Not yet tried on a real run (the IT Crowd pacer is a shell loop started before them).
+  `tests/test_plan_limits.py`; suite and ruff pass. Not yet tried on a real run (IT Crowd's rest is the first).
 - **Erin to watch and say what she thinks:** Life of Brian and Holy Grail Behind the Scenes; Breaking Bad S1 E02-E07
   (notes and the frames step).
 - **Open questions for Erin:**

@@ -84,6 +84,54 @@ def test_video_without_subtitles_says_so(tmp_path):
     assert r.returncode == 1 and "no embedded subtitles" in r.stderr
 
 
+# ---------------------------------------------------------------- frames for the frames step
+@needs_ffmpeg
+def test_frames_survive_a_repeated_keyframe_time(tmp_path):
+    """Two keyframes 0.4 ms apart share a time once Matroska rounds them to the millisecond. The JPEG encoder refuses
+    a frame that isn't later than the one before ("Invalid pts (9) <= last (9)"), which stopped the frames step on
+    a film; with one encoder thread the old command failed here every time. Both frames are kept, with their times."""
+    pytest.importorskip("PIL")
+    video = tmp_path / "repeat.mkv"
+
+    def make(sync):
+        return subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                               "testsrc=duration=4:size=160x120:rate=5", "-vf",
+                               "setpts='if(eq(N,10),PREV_INPTS+0.0004/TB,PTS)'", *sync, "-enc_time_base", "1/10000",
+                               "-c:v", "libx264", "-g", "1", "-pix_fmt", "yuv420p", str(video)],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
+    r = make(["-fps_mode", "passthrough"])
+    if r.returncode and "fps_mode" in r.stderr:        # older ffmpeg
+        r = make(["-vsync", "passthrough"])
+    assert r.returncode == 0, r.stderr
+    frames = analyze.run_ffmpeg_frames(video, tmp_path / "frames", dense=False)
+    times = [round(t, 3) for t, _ in frames]
+    assert len(times) == 20 and times.count(1.8) == 2 and times == sorted(times)
+
+
+@needs_ffmpeg
+def test_frames_stay_one_size_when_the_video_changes_size(tmp_path):
+    """A video that changes size part-way (red 160x120, then blue 160x80): every frame comes out 480x360, and the
+    later ones are blue to the bottom edge (stretched), not the old size read past the end of a smaller frame."""
+    Image = pytest.importorskip("PIL.Image")
+    parts = []
+    for colour, size, start in (("red", "160x120", 0), ("blue", "160x80", 4)):
+        part = tmp_path / f"{colour}.ts"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={colour}:s={size}:d=4:r=5",
+                        "-c:v", "libx264", "-g", "5", "-pix_fmt", "yuv420p", "-output_ts_offset", str(start),
+                        "-f", "mpegts", str(part)], check=True)
+        parts.append(part.read_bytes())
+    joined = tmp_path / "joined.ts"
+    joined.write_bytes(b"".join(parts))
+    video = tmp_path / "resize.mkv"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(joined), "-c", "copy", str(video)], check=True)
+    frames = analyze.run_ffmpeg_frames(video, tmp_path / "frames", dense=False)
+    assert len(frames) == 8 and [t for t, _ in frames] == sorted(t for t, _ in frames)
+    images = [Image.open(f).convert("RGB") for _, f in frames]
+    assert {im.size for im in images} == {(480, 360)}
+    r, g, b = images[-1].getpixel((240, 357))
+    assert b > 180 and r < 70 and g < 70
+
+
 # ---------------------------------------------------------------- sync check and loud moments
 np = pytest.importorskip("numpy")
 
