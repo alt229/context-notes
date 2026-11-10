@@ -4,6 +4,41 @@ Older hand-off notes, newest first. Moved here from `CLAUDE.md` ("Where things l
 Not read at the start of a session: search it when a topic comes up (rule 11 in `CLAUDE.md`). Code changes are in
 `CHANGELOG.md`; this log holds the rest: media runs, what was tried and what was found.
 
+## 2026-11-09: Father Ted's 1080p copies renamed, notes carried over and resynced (first real `--resync`)
+
+- Erin put a 1080p WEB-DL of all 25 episodes in `TV Shows/` and the old 720x400 DVD rips in `/Volumes/Media/Old/`.
+  `cleanup.py "/Volumes/Media/TV Shows" --only "Father Ted 1995" --yes`: 24 episodes into
+  `Father Ted (1995) {tmdb-1813}/Season 0N/` (log `~/.config/context-notes/cleanup/2026-11-09 151130 TV Shows.jsonl`).
+  The Christmas special ("S02E11 Christmas Special", which TMDB doesn't number) was put by hand at
+  `Season 02/Father Ted (1995) - s02e11 - A Christmassy Ted.mkv` (Proposed: her old copy was "17.", the 17th episode
+  straight through, which is after S02E10; the real title kept). The six episodes with notes (S01E01-E05 and the
+  special) had their `.en.srt`, `.notes.ass`, `.en.ass` and `context-notes/<name>.mp4/` folders moved beside the new
+  files with cleanup.py's own helpers (`move_work_folder`, so the special's files and notes JSON took the new name);
+  log `.../cleanup/2026-11-09 151211 TV Shows.jsonl`, `cleanup.py --undo` works on both. The old copies, `cover.png`
+  and the `sample/` folder are still in `Old/` for Erin to delete.
+- `--resync` as first built (sound-only sync check) was wrong for this: S01E01 measured as "drift" (right, by luck),
+  and the special as a constant +1.58 s (wrong: four cuts adding up to 22 s; the alignment check then found lines
+  up to 22.8 s early and `--yes` let it "fix" 7 stretches). Rebuilt to re-time with speech recognition when
+  faster-whisper is there (see CHANGELOG). Also found: a stopped `--resync` left the old copy's transcript cache, and
+  `--align` then "aligned" to it in 0.7 s; transcripts are now dropped before anything measures.
+- Results (speech re-timing, all lines placed; alignment check after): S01E01 +0.62 s to 14:37, +8.33 s from 15:15
+  (33 on-screen notes moved; check: 0.10 s, clean). S01E02 -0.10 / +9.89 from 13:19 (19; 0.04 s, clean). S01E03
+  +0.21 / +9.36 from 13:46 (19; 0.02 s, clean). S01E04 six stretches, -2.24 to +7.08 (20; 0.05 s, clean). S01E05
+  -1.40 / +6.87 from 12:59 (17; 0.03 s, clean). Special, redone from its `.bak`s: -0.13, +5.64 from 13:47, +9.00
+  from 17:08, +13.22 from 25:58, +24.28 from 41:06 (47; 0.04 s; one last-note stretch 2.3 s late, fixed by the
+  check). About 1-2 min an episode on the Mac. Not yet checked by eye in VLC.
+- **Season 2's notes, the same evening (Erin: "start with episode 3, finish the season, then 1 and 2").** Ten
+  episodes on the plan, one after another: `context_notes.py "<video>" --show "Father Ted" --yes --api-fallback 0
+  --wait-for-reset`, 17:06 to 21:01. All done, 51 to 69 notes each (E10: one repeat dropped by the build), every
+  alignment check clean. Three of ten had embedded subtitles that didn't match the picture, so `--align` re-timed
+  them first. Most took 5 min; E08 26 min (re-timing), E09 45 min, E10 1.5 h and E01 44 min: one Claude Code
+  request on E09 sat for about 15 min before answering (the 15-min `claude_code.TIMEOUT` wasn't reached), the
+  others look slow in the same way (no per-request timings in the log; the ledger has them). The 5-hour session
+  reset once mid-run (5:40 PM) and ended at 32%; the week went 29% to 32%. `--wait-for-reset` and `--week-stop-at`
+  were on but never needed, so the plan limits still haven't been exercised for real.
+- The 1080p release isn't all 1080p: S01E01 is 1394x1076, but S01E02 1186x910, S01E03 1184x914, the special
+  1190x912 (upscaled or cropped), so the below-1080p note still fires on those. `below_full_hd` now allows a tenth.
+
 ## 2026-11-05: IT Crowd Behind the Scenes (plan route, `--api-fallback 0`, $0)
 
 - 2026-11-04 10:51: S01E01 to S02E04 back to back, about 13 min each, 1.5-2% of the weekly plan each (the week went

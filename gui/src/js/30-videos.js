@@ -16,6 +16,7 @@ function describe(v) {
   if (v.track === BTS) notes = (v.facts != null ? `Looked up: ${plural(v.facts, "fact")}. ` : "Not looked up yet. ") + notes;
   if (v.unreadable) notes += `. Claude's reply for ${plural(v.unreadable, "part")} couldn't be read, so those lines have no notes yet; the next run sends just those again`;
   if (v.rebuild) notes += ". The subtitle file needs a rebuild for these settings (free)";
+  if (v.low_res) notes += `. Picture ${v.size}, below 1080p: on Plex, a TV app burns the notes in at that size, so they look soft (VLC is fine)`;
   const subs = v.subtitles ? `Subtitles: ${v.subtitles}` : "No subtitles beside it yet; it will look inside the video, then online";
   return `${notes}. ${subs}.`;
 }

@@ -18,13 +18,14 @@ Read `README.md` for the full command reference. This file holds what we've lear
 
 ## Where things left off
 
-Last updated 2026-11-04. Only what's open. Rewrite it in place when a session changes the project (rule 10); finished
+Last updated 2026-11-09. Only what's open. Rewrite it in place when a session changes the project (rule 10); finished
 items leave it (code: `CHANGELOG.md`; anything else: the top of `docs/work-log.md`). Older detail is in those two
 files (rule 11).
 
-**Uncommitted** (last commit `a60d10c8`, 2026-11-02): `cleanup.py`, `tmdb.py`, `film_ids.py` (roadmap step 1),
-`ROADMAP.md`, `docs/work-log.md`, their tests, and edits to `app.py`, `embed.py`, `find_subs.py`, `make_ass.py`,
-`requirements.txt` (`guessit>=4.4`), the Settings page, README, CHANGELOG, `docs/`. Erin commits; never push.
+**Uncommitted** (last commit `e1bb802`, 2026-11-09, which took in everything before it): the below-1080p warning and
+`--resync` (2026-11-09, rebuilt the same day to re-time with speech recognition after its first real run; see
+CHANGELOG): `analyze.py`, `context_notes.py`, `gui/src/js/30-videos.js`, `tests/test_resync.py` (9 tests), README,
+CHANGELOG, `docs/gui-protocol.md`, `docs/work-log.md`, this file. Suite and ruff pass. Erin commits; never push.
 
 - **`cleanup.py`: renaming the library to the Plex/Jellyfin standard. Movies and TV Shows done 2026-11-04, but for
   the questions below.**
@@ -44,12 +45,15 @@ files (rule 11).
     older name in one-film folders (every old name its notes files mention follows), clutter in subfolders.
     For TV: titles in names checked against TMDB's (renumbered by title when TMDB has it once, else by hand),
     locked files by hand, `--skip`. 22 tests in `tests/test_cleanup.py`; suite and ruff pass.
-  - Movies and TV Shows done (runs in `docs/work-log.md`). Waiting on Erin (asked 2026-11-04):
+  - Movies and TV Shows done (runs in `docs/work-log.md`); Father Ted's 1080p copies on 2026-11-09 (see "Plex on a
+    TV app" below). Waiting on Erin (asked 2026-11-04):
     1. Dr Who (skipped whole: S03E13 is held; rename the show folder around it, or wait for the full copy?).
     2. Beavis & Butthead (56) and MythBusters (53): renumber to TMDB's order by title, or keep her numbering?
     3. Only Murders S01E02-E10 are locked in Finder: unlock and rename, or leave?
     4. Specials TMDB doesn't number as she does: IT Crowd "The Internet Is Coming", Blackadder's Christmas Carol,
-       Father Ted "A Christmassy Ted", Twilight Zone "s01e00"/"X01 Lost Classics"; Mr Robot's two "Series Finale".
+       Twilight Zone "s01e00"/"X01 Lost Classics"; Mr Robot's two "Series Finale". Father Ted's "A Christmassy Ted"
+       is at `Season 02/... - s02e11 - A Christmassy Ted.mkv` since 2026-11-09 (Proposed: the 17th episode straight
+       through, as her "17." had it; one rename if she wants it elsewhere).
     5. Duplicates and odd ones (by hand, untouched): The Thing (2011) x2, Napoleon discs, Forensic Files
        .mkv/.m4v, Twilight Zone S3 twice, the 2nd Blackadder copy, The Stand, Anthony Bourdain, Mythbusters S04 E01.
   - Not built: Settings' title language and the app, subtitle language codes beyond stray files, `Subs/` folders
@@ -73,12 +77,27 @@ files (rule 11).
   tidying for the renamed library.
 - **Plan limits, built 2026-11-04 (uncommitted; Erin chose all three):** `--week-stop-at` (default 90),
   `--wait-for-reset`, `context_notes.py --pace MINUTES`, in Settings and the run options too. 18 tests in
-  `tests/test_plan_limits.py`; suite and ruff pass. Not yet tried on a real run (IT Crowd's rest is the first).
+  `tests/test_plan_limits.py`; suite and ruff pass. Passed on Father Ted S2's run (2026-11-09) but never needed
+  (the session reset on its own; the week stayed at 32%), so still not exercised for real.
+- **Plex on a TV app, and 1080p copies** (2026-11-09; the finding is in Known pitfalls, the how-to in README "Plex
+  and TV apps"). Erin's plan: 1080p copies of her shows and Plex's burn-in on. **Father Ted done 2026-11-09**
+  (`docs/work-log.md`): the 25 new episodes renamed with `cleanup.py`, the six with notes (S01E01-E05, the special)
+  carried over and `--resync`ed; the old copies are still in `/Volumes/Media/Old/` for her to delete. `--resync`
+  was rebuilt that day: the sound-only sync check called the special a constant +1.58 s when it had four cuts
+  (22 s), so with faster-whisper it now re-times with speech recognition and moves each on-screen note as the lines
+  around it moved (`line_shift`); the sound-only path is the fallback. Every episode's alignment check came back
+  clean (lines within 0.1 s of the speech). **Season 2 then got its notes the same evening** (all 11 episodes done,
+  51 to 69 notes each, alignment checks clean; the run is in `docs/work-log.md`: some Claude Code requests took
+  up to 15 min to answer). Without notes now: S01E06 and all of Season 3 (8). **Next:** Erin plays an episode in
+  VLC (the special moved most in the resync) and says whether the notes land right; then Plex rescans `TV Shows`;
+  then Season 3 and S01E06 when she says so (the same command, `--show "Father Ted"`). A copy at another frame rate
+  (23.976 vs 25) is untested for `--resync`: re-timing should follow it line by line, but check.
 - **Erin to watch and say what she thinks:** Life of Brian and Holy Grail Behind the Scenes; Breaking Bad S1 E02-E07
   (notes and the frames step).
 - **Open questions for Erin:**
   1. The Plex copy `<film>.en.ass`: keep it, skip it on GUI rebuilds, or first find out what Plex shows for IT Crowd
-     S2-3 (Known pitfalls). The Akira rebuild waits on this (Waking Ned Devine needs one too).
+     S2-3 (Known pitfalls). The Akira rebuild waits on this (Waking Ned Devine needs one too). 2026-11-09: whatever
+     the label, a TV's Plex app can't show the styling (see "Plex on a TV app" above).
   2. Should `embed.py` also embed a plain `.srt` beside a film? (It takes only `.notes.ass` now.)
 - **Windows, not yet run on a real Windows machine:** `install.ps1` (Erin is setting one up), the `.bat`
   launchers, `make-shortcut.bat`, the registry PATH read. Dookie's first update is `dookie-update.bat` (Reminders).
@@ -86,7 +105,9 @@ files (rule 11).
   Settings.
 - **Never tried for real:** `/refine` with the real frame-reviewer agent; signing in through the real Claude Code
   sign-in page; an OpenSubtitles download through the bad-subtitle check.
-- **Small leftovers:** Father Ted S1 needs one more Tidy (the stray `.bak` moves as `.bak2`). Dr Who S3E13 is
+- **Small leftovers:** Father Ted S01E04 still has a stray `.notes.ass.bak` beside the video (it followed the move;
+  Tidy moves it as `.bak2`). The 1080p "release" isn't all 1080p (S01E02/E03 and the special are about 1186x910),
+  so the below-1080p note still fires on those. Dr Who S3E13 is
   truncated and held until a full copy arrives. `--shift auto` may overshoot by about 0.3 s (Breaking Bad E03-E05).
 - **Ideas, not built:** the look as a Matroska track tag (`CONTEXT_NOTES_LOOK`); min/max/settle in the `Look:` line;
   the old box for files made before 0.2.0; a `tidy.py` episode-accuracy check (numbers against TMDB, duplicates,
@@ -298,13 +319,24 @@ files (rule 11).
   in a 3:28 film). Fixed. Any notes file refined before then may have mistimed visual notes; the dialogue notes are
   fine.
 
-- The sync check is unreliable under laugh tracks and music-heavy soundtracks (about ±1 s on Blackadder and Waking
-  Ned Devine).
+- The sync check (sound only, `analyze.py` without `--align`) is unreliable under laugh tracks and music-heavy
+  soundtracks (about ±1 s on Blackadder and Waking Ned Devine), and it can miss a cut altogether: Father Ted's
+  Christmas special measured as a constant +1.58 s against its 1080p copy, which has four cuts adding up to 22 s
+  (2026-11-09). Speech re-timing (`--align`) found every one. Don't trust the sound-only check to say "constant
+  shift" on a sitcom.
+- A transcript cache (`analysis/transcript-*.jsonl`) is not keyed on the video file (the soundtrack cache is). After
+  a video is swapped, `--align` and the alignment check would use the old copy's transcript; `--resync` removes them
+  first. Doing a swap by hand: delete them yourself.
 - Re-timing (`--align`) needs subtitles in the language being spoken. English subtitles on a German film can only
   be measured through the German ones (`--original-subs`).
 - `bench/` runs store absolute paths in `cell.json`. Rewrite them if a run folder moves.
 - Pre-existing lint warnings in `bench/` and `chat_notes.py` are known. Don't mix fixes for them into unrelated
   changes.
+- **Plex on a TV app can't draw ASS** (Erin's NUC Plex server, Father Ted S01E01, 2026-11-09). With "burn subtitles"
+  on, Plex renders the notes into the picture at the video's own size (720x400 for Father Ted: soft once the TV
+  scales it up); with it off, it turns the ASS into plain bottom-centre text (no boxes, colours or layers; most TV
+  apps show one cue at a time). An `.mkv` with the track inside changes nothing, nor does the `.en.ass` label. What
+  helps: a 1080p copy with burn-in on, or a client that draws ASS (Plex HTPC, the desktop apps, Kodi, Infuse).
 - **Unfinished: the Plex copy.** `make_ass.py` also writes `<video>.en.ass` (`plex_copy`) so Plex would label
   the notes "English (ASS)" instead of "Unknown". It looked right on S02E01–02, but Erin reports it doesn't work
   on IT Crowd Seasons 2–3 (2026-10-17). Not yet looked into: ask her what Plex shows before changing it.

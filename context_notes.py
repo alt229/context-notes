@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 context_notes.py - the whole workflow, for one video or a folder of them.
-Created 2026-10-17, modified 2026-11-04.
+Created 2026-10-17, modified 2026-11-09.
 
     python3 context_notes.py "S01E03 Fifty Fifty.mp4"
     python3 context_notes.py "/Volumes/Media/TV Shows/IT Crowd/Season 1"
@@ -335,6 +335,8 @@ def inspect(video, opts):
     ass = ass_path_for(video, opts)
     st = {"video": video, "subs": subs, "srt": srt, "aligned": aligned, "notes": notes, "spec": spec, "have": have,
           "film_language": film, "film_language_from": how, "ass": ass, "display_lang": display, "bts": bts(opts)}
+    st["size"] = analyze.picture_size(video)                 # (width, height); a 720x400 film is soft on Plex TV apps
+    st["low_res"] = analyze.below_full_hd(st["size"])
     st["facts"] = workfiles.facts_path(video) if bts(opts) else None
     st["facts_state"], st["fact_count"], made = facts_state(st["facts"]) if bts(opts) else ("complete", None, None)
     st["facts_ok"] = st["facts_state"] == "complete"
@@ -393,7 +395,20 @@ def status_fields(st, tidy=0):
             "ass": st["ass"].name if st["ass"].exists() else None, "rebuild": st["rebuild"],
             "unreadable": st["unreadable"], "refine_unreadable": len(refined.get("unreadable") or []), "tidy": tidy,
             "track": workfiles.BTS if st.get("bts") else "context",
-            "facts": st.get("fact_count") if st.get("facts_ok") else None}
+            "facts": st.get("fact_count") if st.get("facts_ok") else None,
+            "size": size_text(st["size"]), "low_res": st["low_res"]}
+
+
+def size_text(size):
+    return f"{size[0]}x{size[1]}" if size else None
+
+
+def low_res_note(size):
+    """Why a film below 1080p looks soft on Plex (Erin, 2026-11-09: her TV's Plex app showed Father Ted's notes blurred).
+    A TV's Plex app can't draw ASS, so Plex burns the notes into the picture at the video's own size, or turns them
+    into plain text. VLC, and any player that draws ASS itself, draws them at the screen's size."""
+    return (f"{size_text(size)}, below 1080p: on Plex, a TV app burns the notes in at this size, so they look soft "
+            f"(VLC and players that draw ASS themselves are fine)")
 
 
 def status_line(st):
@@ -423,7 +438,8 @@ def status_line(st):
         if st["show_change"]:
             notes += f" to show the {languages.name(st['show_change'])} subtitles"
     state = "done" if st["done"] else "to do"
-    return f"  [{state:>5}] {st['video'].name}\n          subtitles: {subs}; {notes}"
+    picture = f"\n          picture: {low_res_note(st['size'])}" if st["low_res"] else ""
+    return f"  [{state:>5}] {st['video'].name}\n          subtitles: {subs}; {notes}{picture}"
 
 
 # ---------------------------------------------------------------- running the scripts
@@ -772,6 +788,8 @@ def sync_decision(sync):
 
 
 def have_whisper():
+    if os.environ.get("CONTEXT_NOTES_WHISPER") == "0":        # tests: take the sound-only paths
+        return False
     try:
         import importlib.util
         return importlib.util.find_spec("faster_whisper") is not None
@@ -914,6 +932,8 @@ def original_for(video, film, display_lang, opts):
 
 def process(video, opts):
     st = inspect(video, opts)
+    if opts.resync:
+        return resync(video, st, opts)
     if st["done"] and not opts.show_subs:
         say(f"Already done: notes written{' and refined' if st['refined_ok'] else ''}, {st['ass'].name} is up to date. "
             + ("(--research-again looks the film up again and starts over)" if bts(opts) else "(--redo starts over)"))
@@ -933,6 +953,8 @@ def process(video, opts):
         say(f"Ready: play {video.name} in VLC; {st['ass'].name} is beside it.")
         return "ready"
     say(f"$ cd {shlex.quote(str(video.absolute().parent))}")
+    if st["low_res"]:
+        say(f"Note: {low_res_note(st['size'])}")
     prompts.event("step", step="subtitles")
 
     film = st["film_language"]
@@ -1114,6 +1136,218 @@ def left_beside(videos):
     return out
 
 
+# ---------------------------------------------------------------- --resync: the video was swapped for another copy
+def other_working_folder(video):
+    """This video's working folder under another file type (context-notes/<stem>.mp4/ for <stem>.mkv): what a swap
+    that changed the type leaves behind, since the folder is named after the whole file name. The folder if there
+    is exactly one, else None."""
+    base = workfiles.folder(video).parent
+    if not base.is_dir():
+        return None
+    stem, name = workfiles.nfc(video.stem), workfiles.nfc(video.name)
+    found = [d for d in base.iterdir() if d.is_dir() and workfiles.nfc(d.name) != name
+             and workfiles.nfc(Path(d.name).stem) == stem and Path(d.name).suffix.lower() in workfiles.VIDEO_EXTS]
+    return found[0] if len(found) == 1 else None
+
+
+def shift_video_times(spec, shift):
+    """Move everything in the notes file that is on the video's clock with `shift(seconds) -> seconds`: the frames
+    step's on-screen notes (`at_video`; the dialogue notes follow their lines, placed `video_offset` later) and the
+    refine record's stretches. Returns how many notes moved."""
+    moved = 0
+    for n in spec.get("notes", []):
+        if "at_video" in n:
+            n["at_video"] = timecode.srt_ts(max(0.0, shift(timecode.parse_ts(n["at_video"]))))
+            moved += 1
+    refined = spec.get("refined") or {}
+    for u in refined.get("unreadable") or []:
+        for key in ("from", "to"):
+            if isinstance(u, dict) and isinstance(u.get(key), (int, float)):
+                u[key] = round(shift(u[key]), 2)
+    stopped = refined.get("stopped_after")
+    if isinstance(stopped, dict) and isinstance(stopped.get("time"), (int, float)):
+        stopped["time"] = round(shift(stopped["time"]), 2)
+    return moved
+
+
+def line_shift(old_cues, new_cues, before=0.0):
+    """How the new copy moved each moment of the old one, read off the subtitles re-timed to it: a time on the old
+    video's clock moves as the nearest line did. Re-timing moves lines in stretches (Father Ted S01E01's 1080p
+    copy: +0.62 s to 14:37, +8.34 s from 15:08), so the nearest line's move is the right one for everything but a
+    moment in the gap between two stretches. `before` is where the old subtitles sat from the old video
+    (`video_offset`): the notes' times are on the video's clock, the lines' on the subtitles'."""
+    import bisect
+    starts = [c["start"] for c in old_cues]
+    deltas = [n["start"] - o["start"] for o, n in zip(old_cues, new_cues)]
+
+    def shift(t):
+        s = t - before
+        i = bisect.bisect_left(starts, s)
+        if i > 0 and (i == len(starts) or s - starts[i - 1] <= starts[i] - s):
+            i -= 1
+        return s + deltas[i]
+    return shift
+
+
+def retime_for_resync(video, srt, st, opts):
+    """Re-time the notes' subtitles to the new copy with speech recognition (analyze.py --align). Returns the
+    re-timed file and the stretches it found; Stop when it can't be done or didn't place every line."""
+    if not have_whisper():
+        raise Stop("Re-timing needs faster-whisper (pip3 install -r requirements.txt). Nothing was changed.")
+    cmd = script("analyze.py", srt, "--video", video, "--align", "--frames", "none")
+    if st["film_language"] and st["film_language"] != "en":
+        cmd += ["--film-language", st["film_language"]]
+    if opts.align_model:
+        cmd += ["--model", opts.align_model]
+    if run(cmd, video.parent):
+        raise Stop("Re-timing failed. Nothing was changed.")
+    aligned = analyze.aligned_path(srt, None, video)
+    if not aligned.exists():
+        raise Stop(f"Re-timing ran but {aligned.name} wasn't written. Nothing was changed.")
+    kept, total = len(subtitles.parse_srt(aligned)), len(subtitles.parse_srt(srt))
+    if kept != total:
+        rejected = aligned.with_name(aligned.name + ".rejected")
+        aligned.replace(rejected)               # out of the way, or a later run would pick it up as the timing
+        raise Stop(f"Re-timing placed {kept} of {total} lines, and the notes need every line (they are anchored to "
+                   f"them). Nothing was changed; the re-timed file is kept as {rejected.name}.")
+    try:
+        stretches = json.loads((workfiles.analysis(video) / "analysis.json").read_text(encoding="utf-8")
+                               )["alignment"]["segments"]
+    except (OSError, ValueError, KeyError):
+        stretches = []
+    return aligned, stretches
+
+
+def drop_old_transcripts(video):
+    """Transcripts cached by --align and the alignment check are of the old copy's soundtrack, and nothing checks
+    which file they came from (the soundtrack cache does). Removed before anything measures the new copy, so --align
+    and the alignment check transcribe it (found on Father Ted S01E01, 2026-11-09: --align after a stopped --resync
+    "aligned" to the old copy's cached transcript in under a second)."""
+    folder = workfiles.analysis(video)
+    old = sorted(folder.glob("transcript-*.jsonl")) if folder.is_dir() else []
+    for p in old:
+        p.unlink()
+    if old:
+        say(f"Removed {len(old)} cached transcript(s) of the old copy ({', '.join(p.name for p in old)}); the "
+            f"alignment check makes a new one.")
+
+
+def resync(video, st, opts):
+    """--resync: the video file was swapped for another copy of the same film (a 1080p one, say; Erin, 2026-11-09).
+    Re-times the subtitles the notes were placed on to the new copy with speech recognition (analyze.py --align),
+    moves each on-screen note as the lines around it moved (`line_shift`; a different cut moves them in stretches:
+    the 1080p Father Ted has 7.7 s more in the middle of S01E01), and rebuilds the .ass. Without faster-whisper, the
+    sound-only sync check measures a constant shift instead, and `video_offset` places the dialogue notes. Nothing
+    is sent to Claude."""
+    if not st["have"]:
+        other = other_working_folder(video)
+        if other is None:
+            raise Stop(f"No notes for {video.name} to resync (none in {workfiles.FOLDER}/{video.name}/).")
+        if ask(f"No notes under {workfiles.FOLDER}/{video.name}/, but {other.name}/ there has some (the file type "
+               f"changed?). Rename that folder to {video.name}/ so this video finds its notes?",
+               {"y": "yes", "n": "no"}, "y", opts.yes, id="resync.folder") == "n":
+            raise Stop("Left as it is.")
+        other.rename(workfiles.folder(video))
+        say(f"Renamed {workfiles.FOLDER}/{other.name}/ to {workfiles.FOLDER}/{video.name}/.")
+        st = inspect(video, opts)
+        if not st["have"]:
+            raise Stop(f"Still no notes for {video.name}.")
+    spec, notes = st["spec"], st["notes"]
+    srt = workfiles.find(video, spec["subtitles"]) if spec.get("subtitles") else None
+    if srt is None or not srt.is_file():
+        srt = rebuild_subtitles(st, opts)
+    if srt is None:
+        raise Stop("Can't find the subtitles the notes were placed on.")
+    say(f"$ cd {shlex.quote(str(video.absolute().parent))}")
+    if st["low_res"]:
+        say(f"Note: {low_res_note(st['size'])}")
+    drop_old_transcripts(video)         # before anything measures: --align would otherwise align to the old copy
+    before = float(spec.get("video_offset", 0) or 0)
+    on_video = sum(1 for n in spec.get("notes", []) if "at_video" in n)
+    dialogue = st["have"] - on_video
+    shift = aligned = None
+    prompts.event("step", step="sync")
+    if have_whisper():
+        # Speech recognition, not the sound-only check: under a laugh track that check is about ±1 s, and it called
+        # Father Ted's Christmas special a constant +1.58 s when the 1080p copy had four cuts adding up to 22 s.
+        if ask(f"Re-time the subtitles to this copy with speech recognition (local, free), move the {on_video} "
+               f"on-screen note(s) with the lines around them, and rebuild {st['ass'].name}? (the notes file and the "
+               f"subtitles are kept as .bak)", {"y": "yes", "n": "no"}, "y", opts.yes, id="resync.align") == "n":
+            raise Stop("Nothing moved.")
+        aligned, stretches = retime_for_resync(video, srt, st, opts)
+        old_cues, new_cues = subtitles.parse_srt(srt), subtitles.parse_srt(aligned)
+        most = max((abs(n["start"] - o["start"]) for o, n in zip(old_cues, new_cues)), default=0.0)
+        if most < 0.25:
+            say(f"The notes already fit this copy (no line moved more than {most:.2f} s): nothing to move.")
+            aligned.unlink()
+            if not st["rebuild"]:
+                say(f"Already done: {st['ass'].name} is up to date.")
+                return "done"
+            aligned = None
+        else:
+            shift, measured = line_shift(old_cues, new_cues, before), 0.0
+            found = ", ".join(f"{x['offset']:+.2f} s from {x['from']}" for x in stretches) or "no stretches reported"
+            how = f"with the lines around them ({len(stretches)} stretch(es): {found})"
+            record = {"method": "align", "stretches": stretches, "subtitles_before": srt.name}
+    else:
+        say(f"Measuring {srt.name} against {video.name} (local, free; sound only: faster-whisper isn't installed)...")
+        if run(script("analyze.py", srt, "--video", video, "--frames", "none", *limit_args(opts)), video.parent):
+            raise Stop("The sync check failed.")
+        try:
+            sync = json.loads((workfiles.analysis(video) / "analysis.json").read_text(encoding="utf-8"))["sync"]
+        except (OSError, ValueError, KeyError):
+            raise Stop("The sync check didn't leave a report to read.")
+        decision = sync_decision(sync)
+        if decision == "unknown":
+            raise Stop("Couldn't measure the sync (not enough clear dialogue), so nothing was changed.")
+        if decision == "align":
+            raise Stop(f"{sync['verdict']} This copy isn't the old one shifted by a constant amount (a different cut, "
+                       f"or the laugh track hides the shift). Re-timing it to the speech needs faster-whisper "
+                       f"(pip3 install -r requirements.txt), then run --resync again. Nothing was changed.")
+        measured = 0.0 if decision == "ok" else float(sync["offset"])
+        delta = round(measured - before, 2)
+        if abs(delta) < 0.25:
+            say(f"The notes already fit this copy (offset {measured:+.2f} s, was {before:+.2f} s): nothing to move.")
+            if not st["rebuild"]:
+                say(f"Already done: {st['ass'].name} is up to date.")
+                return "done"
+        else:
+            if ask(f"Move the {on_video} on-screen note(s) by {delta:+.2f} s, place the {dialogue} dialogue notes "
+                   f"{measured:+.2f} s from their lines (was {before:+.2f} s), and rebuild {st['ass'].name}? "
+                   f"(the notes file is kept as .bak)", {"y": "yes", "n": "no"}, "y", opts.yes, id="resync.move") == "n":
+                raise Stop("Nothing moved.")
+            shift, how, record = (lambda t: t + delta), f"by {delta:+.2f} s", {"moved_by": delta}
+    if shift is not None:
+        backup = fileio.unique_backup(notes)
+        shutil.copy2(notes, backup)
+        moved = shift_video_times(spec, shift)
+        kept = []
+        if aligned is not None:
+            if workfiles.in_folder(srt) and workfiles.DERIVED_SUFFIX.search(srt.stem).group(0):
+                old_srt = fileio.unique_backup(srt)         # a re-timed working copy: the new timing takes its name
+                shutil.copy2(srt, old_srt)
+                aligned.replace(srt)
+                kept.append(f"the old subtitles as {old_srt.name}")
+            else:                                           # the original stays as it is (rule 4): the notes move on
+                spec["subtitles"], srt = aligned.name, aligned
+        spec["video_offset"] = round(measured, 2)
+        spec["resynced"] = {"date": time.strftime("%Y-%m-%d"), "video_offset_before": before, **record}
+        fileio.write_text_safely(notes, json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
+        where = (f"the dialogue notes now sit {measured:+.2f} s from their lines" if aligned is None
+                 else "the dialogue notes follow their re-timed lines")
+        say(f"Moved {moved} on-screen note(s) {how}; {where}. The old notes file is kept as "
+            f"{', '.join([backup.name, *kept])}.")
+    prompts.event("step", step="build")
+    keep_old_ass(video, opts)
+    if run(script("make_ass.py", srt, notes, "--video", video, *look_args(opts), *track_args(opts)), video.parent):
+        raise Stop("Building the .ass failed.")
+    say(f"Ready: play {video.name} in VLC; {st['ass'].name} is beside it.")
+    if opts.check_alignment and not bts(opts):
+        alignment_step(video, srt, notes, st["film_language"], st["display_lang"],
+                       original_for(video, st["film_language"], st["display_lang"], opts), opts)
+    return "ready"
+
+
 # ---------------------------------------------------------------- main
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1137,6 +1371,11 @@ def main(argv=None):
                     help="don't stop to ask: approve the API costs and take the default answer to every question")
     ap.add_argument("--no-refine", action="store_true", help="skip the (pricier) video-frames step")
     ap.add_argument("--redo", action="store_true", help="write the notes again even if they exist (old ones kept as .bak)")
+    ap.add_argument("--resync", action="store_true",
+                    help="the video file was swapped for another copy of the same film (a 1080p one, say): measure "
+                         "the notes' subtitles against it again, move the notes to fit (the on-screen notes from the "
+                         "frames step too) and rebuild the .ass. Free; nothing is sent to Claude. Only for a copy "
+                         "that is the old one shifted by a constant amount; a different cut needs analyze.py --align")
     ap.add_argument("--recursive", action="store_true", help="with a folder: include subfolders")
     ap.add_argument("--pace", type=cli_common.minutes_arg, metavar="MINUTES",
                     help="with several videos: start each one that needs Claude at least this many minutes after the "
@@ -1231,7 +1470,8 @@ def main(argv=None):
             + (" --recursive" if opts.recursive and path.is_dir() else ""))
     if opts.status:
         return 0
-    if not all(st["done"] or st["rebuild"] for st in (inspect(v, opts) for v in videos)):    # a rebuild needs no key
+    if not opts.resync and not all(st["done"] or st["rebuild"]                       # a rebuild or --resync needs no key
+                                   for st in (inspect(v, opts) for v in videos)):
         check_route(opts)                                  # stop now, not after minutes of local work
 
     say(f'\n$ CN={shlex.quote(str(HERE))}')

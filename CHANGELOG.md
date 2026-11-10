@@ -7,6 +7,23 @@ All notable changes to this project are recorded here. The format follows
 ## [0.2.0] - Unreleased
 
 ### Added
+- **`context_notes.py --resync`** (Erin, 2026-11-09): for a video swapped for another copy of the same film (a 1080p
+  one, say). With faster-whisper installed it re-times the subtitles the notes were placed on to the new copy with
+  speech recognition (`analyze.py --align`; `resync.align`, `retime_for_resync`), moves each on-screen note
+  (`at_video`, and the refine record's stretches) as the lines around it moved (`line_shift`), keeps the notes file
+  and the subtitles as `.bak` (the re-timed file takes a working copy's name; an original stays untouched and the
+  notes move to `.aligned.srt`), and rebuilds the `.ass`. A different cut is just more stretches (Father Ted's 1080p
+  S01E01 has 7.7 s more in the middle; the Christmas special four cuts adding up to 22 s), and it refuses when
+  re-timing can't place every line (the notes are anchored to them). Without faster-whisper, the sound-only sync
+  check measures a constant shift instead (`resync.move`, `video_offset`) and a different cut is reported with what
+  to install: under a laugh track that check is about ±1 s, and it called the special a constant +1.58 s. Cached
+  transcripts of the old copy are removed before anything measures (or `--align` would align to them). Nothing is
+  sent to Claude. When only the file type changed, it offers to rename the video's `context-notes` folder
+  (`resync.folder`). Tests: `tests/test_resync.py` (`CONTEXT_NOTES_WHISPER=0` takes the sound-only path).
+- **A warning for videos below 1080p** (Erin, 2026-11-09: her TV's Plex app showed Father Ted's notes soft). Plex
+  burns subtitles in at the video's own size, so `--status`, a run and the app's film list say when a video is
+  smaller than 1920x1080 both ways (`analyze.picture_size`, `below_full_hd`; `status` event fields `size`,
+  `low_res`). Within a tenth of 1080p counts as 1080p (a 1394x1076 crop of a 4:3 WEB-DL). README: "Plex and TV apps".
 - **Keeping to the plan's limits** (Erin, 2026-11-04). `--week-stop-at PERCENT` (default 90) stops starting
   requests once the plan's weekly limit is that full, so a long run can't leave Claude unusable until the week
   resets; a folder run then ends instead of doing each remaining video's local work. `--wait-for-reset` waits out a

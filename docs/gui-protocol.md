@@ -168,7 +168,7 @@ These come from `context_notes.py`, so a GUI can show which video and which step
 `context_notes.py --status` sends one per video, with what `--status` prints:
 
 ```
-@context-notes {"v": 1, "type": "status", "path": "/Movies/Amelie.mkv", "name": "Amelie.mkv", "done": false, "subtitles": "Amelie.srt", "film_language": "fr", "notes": 100, "limit": null, "notes_stopped": false, "refined": "yes", "ass": "Amelie.notes.ass", "rebuild": true, "unreadable": 0, "refine_unreadable": 0, "tidy": 0}
+@context-notes {"v": 1, "type": "status", "path": "/Movies/Amelie.mkv", "name": "Amelie.mkv", "done": false, "subtitles": "Amelie.srt", "film_language": "fr", "notes": 100, "limit": null, "notes_stopped": false, "refined": "yes", "ass": "Amelie.notes.ass", "rebuild": true, "unreadable": 0, "refine_unreadable": 0, "tidy": 0, "size": "720x400", "low_res": true}
 ```
 
 - `refined`: `yes`, `no` or `stopped` (part-way).
@@ -181,6 +181,9 @@ These come from `context_notes.py`, so a GUI can show which video and which step
   refine asks `refine.unreadable` and sends just those.
 - `tidy`: how many working files an earlier version left beside this video. They work where they are; `tidy.py`
   moves them into its `context-notes` folder (README, "Where the files go"). 0 when there are none.
+- `size`: the picture's `WIDTHxHEIGHT` (`null` when it can't be read), and `low_res`: smaller than 1920x1080 both
+  ways. Plex burns subtitles in at the video's own size, so on a TV app such a film's notes look soft; the page
+  says so (README, "Plex and TV apps").
 - `track`: `context`, or `behind-the-scenes` with `--behind-the-scenes`, when everything above is about the Behind
   the Scenes track (its notes, its `.ass`). Then `facts` is how many facts the finished look-up found, or `null`
   when the film hasn't been looked up yet (a video with no notes and no finished look-up isn't `done`). The
@@ -294,6 +297,9 @@ The ids are stable, so a GUI can show its own wording or a special dialog. The `
 | `notes.limited` | `context_notes.py` | a / s / n (a) | Notes cover only part of the video: add the rest (keeps them; sends only the rest), start again (sends everything), or keep them as they are |
 | `notes.unreadable` | `context_notes.py` | y / n (y) | Claude's reply for some parts couldn't be read last time: send just those lines again (no frames step) |
 | `folder.next` | `context_notes.py` | y / n (y) | One video stopped: go on to the next? |
+| `resync.folder` | `context_notes.py --resync` | y / n (y) | The video has no notes under its name, but its working folder exists under another file type (`.mp4` for an `.mkv`): rename the folder so the video finds its notes? |
+| `resync.move` | `context_notes.py --resync` | y / n (y) | Move the on-screen notes by the measured change, place the dialogue notes at the new offset, and rebuild (the notes file is kept as `.bak`)? |
+| `resync.align` | `context_notes.py --resync` | y / n (y) | Re-time the subtitles to the new copy with speech recognition, move each on-screen note as the lines around it moved, and rebuild (the notes file and the subtitles are kept as `.bak`)? Asked when faster-whisper is installed; `resync.move` otherwise |
 | `tidy.move` | `tidy.py` | y / n (y) | Move the working files listed above into their `context-notes` folders |
 | `ids.which` | `film_ids.py` | 1 / 2 / 3 / 4 / n (n) | A search by title found more than one film that might be this video, or one that doesn't fit its year: which is it? (n: leave it without ids) |
 | `ids.write` | `film_ids.py` | y / n (y) | Write the ids listed above into these films' notes files and `.ass` headers (each file kept as a `.bak`) |

@@ -525,6 +525,28 @@ def frame_height(video, width=480):
     return max(2, round(width * h / w / 2) * 2) if w > 0 and h > 0 else -2
 
 
+FULL_HD = (1920, 1080)
+
+
+def picture_size(video):
+    """(width, height) of the video's picture, from ffprobe (cached, see ffprobe_json); None if it can't be read."""
+    try:
+        s = ffprobe_json(video, "-select_streams", "v:0", "-show_entries", "stream=width,height")["streams"][0]
+        w, h = int(s["width"]), int(s["height"])
+    except (KeyError, IndexError, TypeError, ValueError, OSError, SystemExit):
+        return None
+    return (w, h) if w > 0 and h > 0 else None
+
+
+def below_full_hd(size):
+    """Smaller than 1080p both ways: 720x400 or 1280x720, but not a 1920x800 widescreen film or 1440x1080. Plex burns
+    subtitles in at the video's own size, so on a TV app (which can't draw ASS itself) such a film's notes come out
+    soft; VLC and players that draw ASS draw them at the screen's size and are fine (Erin, 2026-11-09).
+    Within a tenth of 1080p counts as 1080p: a 1080p release cropped of its black edges (Father Ted's 1080p WEB-DL
+    is 1394x1076) is as sharp as any."""
+    return bool(size) and size[0] < FULL_HD[0] * 0.9 and size[1] < FULL_HD[1] * 0.9
+
+
 def run_ffmpeg_frames(video, outdir, dense, limit=None):
     """Extract small frames; returns list of (time, path)."""
     outdir.mkdir(parents=True, exist_ok=True)

@@ -360,6 +360,31 @@ python3 embed.py "/Volumes/Movies" --delete-backups  # free the space the kept o
 Files are moved as they are, never changed or overwritten. A file whose name is already taken in the folder, or that
 could belong to two videos (`film.mkv` and `film.mp4`), stays where it is and is listed.
 
+### Plex and TV apps
+
+The notes are an ASS subtitle track, and they look as designed in any player that draws ASS itself: VLC, mpv, Kodi,
+Plex HTPC and the Plex desktop apps, Infuse. A TV's own Plex app can't, so Plex does one of two things, and neither
+is good:
+
+- With "burn subtitles" on, Plex renders the notes into the picture at the **video's own size**, so on a 720x400
+  DVD-era episode the notes come out soft once the TV scales it up. A 1080p copy fixes that (keep burn-in on; the
+  NUC or NAS transcodes each play).
+- With it off, Plex turns the ASS into plain text: no boxes, colours or layers, and most TV apps show one line at a
+  time, so notes fight with the dialogue.
+
+Putting the notes inside an `.mkv` doesn't change this: the track is still ASS. `--status` and the app say when a
+video is below 1080p, so you know before watching it on a TV.
+
+**A new copy of a film you already have notes for** (a 1080p one, say) never has quite the same timing: a DVD rip
+and a WEB-DL start at different moments, and one often has an ad-break bumper or a few seconds of credits the other
+cut out. Put the new copy in place under the same file name and run `context_notes.py "<the video>" --resync`: it
+re-times the notes' subtitles to the new copy with speech recognition (local, free, a minute or two per episode),
+moves each on-screen note as the lines around it moved, keeps the old notes file and subtitles as `.bak`, and
+rebuilds the `.ass`, with nothing sent to Claude. If only the file type changed (`.mp4` to `.mkv`), it offers to
+rename the video's `context-notes` folder to match. Without faster-whisper it can only measure a constant shift from
+the sound, which a laugh track hides (about ±1 s), so install it for sitcoms. Afterwards, check a few notes by eye
+or run `--check-alignment`.
+
 ### Which film: IMDb and TMDB ids
 
 `film_ids.py` finds which film or episode each set of notes is for, and records its IMDb and TMDB ids. It's the first
@@ -439,6 +464,8 @@ context_notes.py PATH --film-language fr       # see "Films not in English" belo
 context_notes.py PATH --show "The IT Crowd"    # name used in the titles Claude sees (default: from the folders)
 context_notes.py PATH --no-refine              # skip the video-frames step
 context_notes.py PATH --redo                   # write the notes again (the old file is kept as .bak)
+context_notes.py PATH --resync                 # the video was swapped for another copy (a 1080p one, say):
+                                               #   move the notes to fit it and rebuild; free (see "Plex and TV apps")
 context_notes.py PATH --yes                    # don't stop to ask anything
 context_notes.py PATH --yes-to-all             # yes to the questions about the work; sending still asks
 context_notes.py PATH --reading-speed 120      # notes stay up longer (0.5 s a word); free for finished videos
